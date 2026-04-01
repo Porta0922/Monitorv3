@@ -10,16 +10,29 @@ pub struct RabbitMQConsumer;
 impl RabbitMQConsumer {
     /// Start RabbitMQ consumer for monitoring events
     pub async fn start_consumer(rabbitmq_url: &str) -> Result<(), Box<dyn std::error::Error>> {
+        info!("🔌 Connecting to RabbitMQ at: {}", rabbitmq_url);
+        
         // Connect to RabbitMQ
         let connection = Connection::connect(
             rabbitmq_url,
             ConnectionProperties::default(),
         )
-        .await?;
+        .await
+        .map_err(|e| {
+            error!("❌ Failed to connect to RabbitMQ: {}", e);
+            Box::new(e) as Box<dyn std::error::Error>
+        })?;
 
-        let channel = connection.create_channel().await?;
+        info!("✅ Connected to RabbitMQ");
+
+        let channel = connection.create_channel().await
+            .map_err(|e| {
+                error!("❌ Failed to create channel: {}", e);
+                Box::new(e) as Box<dyn std::error::Error>
+            })?;
 
         // Declare exchange
+        info!("📢 Declaring 'monitoring' exchange (Topic, Durable)");
         channel.exchange_declare(
             "monitoring",
             lapin::ExchangeKind::Topic,
@@ -29,14 +42,36 @@ impl RabbitMQConsumer {
             },
             Default::default(),
         )
-        .await?;
+        .await
+        .map_err(|e| {
+            error!("❌ Failed to declare exchange: {}", e);
+            Box::new(e) as Box<dyn std::error::Error>
+        })?;
+
+        info!("✅ Exchange 'monitoring' declared successfully");
 
         // Create queues and bind them
-        Self::setup_queue(&channel, "activity_logs", "monitoring.activity").await?;
-        Self::setup_queue(&channel, "inventory_logs", "monitoring.inventory").await?;
-        Self::setup_queue(&channel, "security_alerts", "monitoring.security").await?;
+        info!("🏗️  Creating queues...");
+        Self::setup_queue(&channel, "activity_logs", "monitoring.activity").await
+            .map_err(|e| {
+                error!("❌ Failed to setup activity_logs queue: {}", e);
+                e
+            })?;
+        
+        Self::setup_queue(&channel, "inventory_logs", "monitoring.inventory").await
+            .map_err(|e| {
+                error!("❌ Failed to setup inventory_logs queue: {}", e);
+                e
+            })?;
+        
+        Self::setup_queue(&channel, "security_alerts", "monitoring.security").await
+            .map_err(|e| {
+                error!("❌ Failed to setup security_alerts queue: {}", e);
+                e
+            })?;
 
-        info!("RabbitMQ consumer started, listening to monitoring.* events");
+        info!("✅ RabbitMQ Queues initialized");
+        info!("📡 RabbitMQ consumer started, listening to monitoring.* events");
 
         // Keep connection alive
         tokio::time::sleep(tokio::time::Duration::from_secs(u64::MAX)).await;
@@ -51,17 +86,27 @@ impl RabbitMQConsumer {
         routing_key: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // Declare durable queue
+        info!("  📋 Creating queue '{}' (Durable: true)", queue_name);
         channel.queue_declare(
             queue_name,
             QueueDeclareOptions {
                 durable: true,
+                exclusive: false,
+                auto_delete: false,
                 ..Default::default()
             },
             Default::default(),
         )
-        .await?;
+        .await
+        .map_err(|e| {
+            error!("    ❌ Failed to declare queue '{}': {}", queue_name, e);
+            Box::new(e) as Box<dyn std::error::Error>
+        })?;
+
+        info!("    ✅ Queue '{}' created", queue_name);
 
         // Bind queue to exchange
+        info!("  🔗 Binding '{}' to exchange 'monitoring' with routing key '{}'", queue_name, routing_key);
         channel.queue_bind(
             queue_name,
             "monitoring",
@@ -69,7 +114,13 @@ impl RabbitMQConsumer {
             Default::default(),
             Default::default(),
         )
-        .await?;
+        .await
+        .map_err(|e| {
+            error!("    ❌ Failed to bind queue '{}': {}", queue_name, e);
+            Box::new(e) as Box<dyn std::error::Error>
+        })?;
+
+        info!("    ✅ Queue '{}' bound successfully", queue_name);
 
         // Start consuming
         let consumer = channel.basic_consume(
@@ -78,7 +129,13 @@ impl RabbitMQConsumer {
             BasicConsumeOptions::default(),
             Default::default(),
         )
-        .await?;
+        .await
+        .map_err(|e| {
+            error!("    ❌ Failed to start consuming from queue '{}': {}", queue_name, e);
+            Box::new(e) as Box<dyn std::error::Error>
+        })?;
+
+        info!("    🎧 Consumer started for queue '{}'", queue_name);
 
         // Spawn consumer task
         let channel_clone = channel.clone();

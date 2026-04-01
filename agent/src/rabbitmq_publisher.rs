@@ -14,16 +14,29 @@ pub struct RabbitMQPublisher {
 impl RabbitMQPublisher {
     /// Connect to RabbitMQ and initialize exchanges
     pub async fn connect(rabbitmq_url: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        tracing::info!("🔌 Agent connecting to RabbitMQ at: {}", rabbitmq_url);
+        
         // Connect to RabbitMQ
         let connection = Connection::connect(
             rabbitmq_url,
             ConnectionProperties::default(),
         )
-        .await?;
+        .await
+        .map_err(|e| {
+            tracing::error!("❌ Agent failed to connect to RabbitMQ: {}", e);
+            Box::new(e) as Box<dyn std::error::Error>
+        })?;
 
-        let channel = connection.create_channel().await?;
+        tracing::info!("✅ Agent connected to RabbitMQ");
+
+        let channel = connection.create_channel().await
+            .map_err(|e| {
+                tracing::error!("❌ Agent failed to create channel: {}", e);
+                Box::new(e) as Box<dyn std::error::Error>
+            })?;
 
         // Declare topic exchange for monitoring events
+        tracing::info!("📢 Agent declaring 'monitoring' exchange (Topic, Durable)");
         channel.exchange_declare(
             "monitoring",
             lapin::ExchangeKind::Topic,
@@ -33,7 +46,13 @@ impl RabbitMQPublisher {
             },
             Default::default(),
         )
-        .await?;
+        .await
+        .map_err(|e| {
+            tracing::error!("❌ Agent failed to declare exchange: {}", e);
+            Box::new(e) as Box<dyn std::error::Error>
+        })?;
+
+        tracing::info!("✅ Agent 'monitoring' exchange declared successfully");
 
         Ok(Self { channel })
     }
@@ -127,6 +146,8 @@ impl RabbitMQPublisher {
         let routing_key = format!("monitoring.{}", event_type);
         let body = serde_json::to_vec(&payload)?;
 
+        tracing::info!("📤 Publishing event: {} (routing_key: {})", event_type, routing_key);
+
         self.channel.basic_publish(
             "monitoring",
             &routing_key,
@@ -139,7 +160,7 @@ impl RabbitMQPublisher {
         .await?
         .await?;
 
-        tracing::debug!("Published event: {} ({} bytes)", routing_key, body.len());
+        tracing::info!("✅ Event published successfully: {} ({} bytes)", routing_key, body.len());
         Ok(())
     }
 
