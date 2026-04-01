@@ -6,10 +6,10 @@ services:
     image: timescale/timescaledb:latest-pg15
     container_name: activity-monitor-postgres
     environment:
-      POSTGRES_DB: activity_monitor
-      POSTGRES_USER: monitor_user
-      POSTGRES_PASSWORD: monitor_password
-      POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=timescaledb"
+      - POSTGRES_DB=activity_monitor
+      - POSTGRES_USER=monitor_user
+      - POSTGRES_PASSWORD=monitor_password
+      # ELIMINAMOS POSTGRES_INITDB_ARGS porque causa el error -c
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d
@@ -33,7 +33,7 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     ports:
-      - "5672:5672"      # AMQP
+      - "5672:5672"     # AMQP
       - "15672:15672"    # Management UI
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
@@ -43,7 +43,7 @@ services:
     networks:
       - activity-monitor
 
-  # Redis (optional, for caching)
+  # Redis
   redis:
     image: redis:7-alpine
     container_name: activity-monitor-redis
