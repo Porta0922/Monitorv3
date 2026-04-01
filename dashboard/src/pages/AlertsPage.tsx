@@ -47,13 +47,70 @@ export function AlertsPage() {
     }
   };
 
+  const getAlertIcon = (alertType: string) => {
+    switch (alertType) {
+      case 'PROCESS_TERMINATION_ATTEMPTED':
+        return '⚠️ ';
+      case 'HASH_MISMATCH':
+        return '🔒 ';
+      case 'UNAUTHORIZED_ACCESS':
+        return '🚫 ';
+      default:
+        return '🔔 ';
+    }
+  };
+
+  // Filter for critical process termination alerts
+  const criticalAlerts = alerts.filter(a => a.alert_type === 'PROCESS_TERMINATION_ATTEMPTED');
+
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f5' }}>
       <NavBar currentPage="alerts" />
 
       <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '2rem' }}>
+        {/* Critical Alerts Section - PROCESS TERMINATION */}
+        {criticalAlerts.length > 0 && (
+          <div style={{
+            backgroundColor: '#c33',
+            color: 'white',
+            padding: '1.5rem',
+            borderRadius: '8px',
+            marginBottom: '2rem',
+            boxShadow: '0 4px 12px rgba(204, 51, 51, 0.3)'
+          }}>
+            <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.2rem' }}>
+              ⚠️ CRITICAL: Process Termination Attempts Detected
+            </h3>
+            <p style={{ margin: '0 0 1rem 0', fontSize: '0.95rem', opacity: 0.9 }}>
+              {criticalAlerts.length} agent(s) have reported termination attempts. 
+              The agent(s) have been protected and automatically restarted.
+            </p>
+            <div style={{ display: 'grid', gap: '0.5rem' }}>
+              {criticalAlerts.map((alert) => (
+                <div key={alert.id} style={{
+                  backgroundColor: 'rgba(255,255,255,0.1)',
+                  padding: '1rem',
+                  borderRadius: '4px',
+                  borderLeft: '3px solid white'
+                }}>
+                  <p style={{ margin: '0 0 0.5rem 0', fontWeight: 'bold' }}>
+                    {alert.alert_type}
+                  </p>
+                  <p style={{ margin: 0, fontSize: '0.9rem' }}>
+                    {alert.description}
+                  </p>
+                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85rem', opacity: 0.8 }}>
+                    🕐 {new Date(alert.created_at).toLocaleString()}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-          <h2 style={{ margin: 0 }}>Active Alerts ({alerts.length})</h2>
+          <h2 style={{ margin: 0 }}>Security Alerts ({alerts.length})</h2>
           <button
             onClick={loadAlerts}
             style={{
@@ -93,16 +150,17 @@ export function AlertsPage() {
                   borderRadius: '8px',
                   padding: '1.5rem',
                   borderLeft: `4px solid ${getSeverityColor(alert.severity)}`,
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                  opacity: alert.alert_type === 'PROCESS_TERMINATION_ATTEMPTED' ? 1 : 1
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '1rem' }}>
                   <div>
                     <h3 style={{ margin: '0 0 0.5rem 0', color: '#333' }}>
-                      {alert.alert_type}
+                      {getAlertIcon(alert.alert_type)} {alert.alert_type}
                     </h3>
                     <p style={{ margin: 0, fontSize: '0.85rem', color: '#666' }}>
-                      Application: {alert.app_name}
+                      {alert.app_name ? `Application: ${alert.app_name}` : 'System Alert'}
                     </p>
                   </div>
                   <span style={{
@@ -123,7 +181,9 @@ export function AlertsPage() {
 
                 <div style={{ fontSize: '0.85rem', color: '#666', marginBottom: '1rem' }}>
                   <p style={{ margin: '0.25rem 0' }}>🕐 Created: {new Date(alert.created_at).toLocaleString()}</p>
-                  <p style={{ margin: '0.25rem 0', fontFamily: 'monospace' }}>Hash: {alert.exe_hash.slice(0, 32)}...</p>
+                  {alert.exe_hash && (
+                    <p style={{ margin: '0.25rem 0', fontFamily: 'monospace' }}>Hash: {alert.exe_hash.slice(0, 32)}...</p>
+                  )}
                 </div>
 
                 <button

@@ -4,12 +4,16 @@ mod inventory;
 mod device_id;
 mod rabbitmq_publisher;
 mod usb_detection;
+mod input_tracking;
+mod process_protection;
 
 use std::sync::Arc;
 use tokio::time::{sleep, Duration, interval};
 use device_id::{load_or_create_device_identity, get_device_nickname};
 use monitoring::MonitoringLoop;
 use usb_detection::UsbMonitor;
+use input_tracking::InputTracker;
+use process_protection::ProcessProtection;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -44,6 +48,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     
     tracing::info!("✅ Offline cache initialized");
+    
+    // Initialize Process Protection (Anti-Kill)
+    let protection = ProcessProtection::new(device_identity.device_id.clone(), true);
+    if let Err(e) = protection.init() {
+        tracing::warn!("⚠️  Process protection initialization warning: {}", e);
+    } else {
+        tracing::info!("✅ Process protection enabled");
+    }
+    
+    // Initialize Input Tracking (Keyboard/Mouse Heatmaps)
+    let input_tracker = Arc::new(InputTracker::new(device_identity.device_id.clone(), 19));
+    input_tracker.set_screen_resolution(1920, 1080).await;
+    tracing::info!("✅ Input activity tracking enabled");
     
     // Initialize RabbitMQ publisher
     let rabbitmq_url = std::env::var("RABBITMQ_URL")
@@ -121,11 +138,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     
+    // Spawn input activity heatmap upload task (every hour)
+    let input_tracker_clone = input_tracker.clone();
+    let publisher_clone = publisher.clone();
+    let device_id_clone = device_identity.device_id.clone();
+    
+    tokio::spawn(async move {
+        let mut interval = interval(Duration::from_secs(3600));  // Every hour
+        loop {
+            interval.tick().await;
+            
+            // Check if heatmap should be uploaded
+            if input_tracker_clone.should_upload().await {
+                if let Some(heatmap) = input_tracker_clone.get_heatmap_for_upload().await {
+                    tracing::debug!(
+                        "📊 Heatmap ready for upload: {} mouse moves, {} keyboard events",
+                        heatmap.stats.mouse_moves,
+                        heatmap.stats.keyboard_events
+                    );
+                    
+                    // Publish to RabbitMQ if connected
+                    if let Some(ref pub_) = publisher_clone {
+                        let event = serde_json::json!({
+                            "type": "input_heatmap",
+                            "device_id": device_id_clone,
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                            "heatmap": heatmap,
+                        });
+                        
+                        if let Err(e) = pub_.publish_event("input_heatmaps", &event.to_string()).await {
+                            tracing::warn!("Failed to publish heatmap: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+    });
+    
     tracing::info!("✅ Agent started successfully");
-    tracing::info!("📊 Monitoring: process events (2s) | USB detection (30s) | Software inventory (1h)");
+    tracing::info!("📊 Monitoring: process events (2s) | USB detection (30s) | Software inventory (1h) | Input heatmaps (1h)");
     
     // Keep agent running
     loop {
         sleep(Duration::from_secs(60)).await;
     }
 }
+

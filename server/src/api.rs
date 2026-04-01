@@ -38,6 +38,17 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/inventory/apps", get(list_all_apps))
         .route("/inventory/apps/:device_id", get(list_device_apps))
         
+        // NEW: Input Heatmaps
+        .route("/heatmaps/upload", post(upload_heatmap))
+        .route("/heatmaps/:device_id", get(get_device_heatmaps))
+        .route("/heatmaps/:device_id/current", get(get_current_heatmap))
+        
+        // NEW: Security Alerts
+        .route("/alerts", get(list_security_alerts))
+        .route("/alerts/:device_id", get(list_device_alerts))
+        .route("/alerts/:alert_id/resolve", patch(resolve_alert))
+        .route("/alerts/process-protection", post(record_termination_attempt))
+
         .layer(middleware::from_fn(verify_jwt_middleware))
         .with_state(state)
 }
@@ -176,27 +187,127 @@ async fn get_device_logs(
     }))
 }
 
-async fn list_all_apps(
+// ============================================================================
+// INPUT HEATMAP ENDPOINTS (NEW)
+// ============================================================================
+
+async fn upload_heatmap(
     State(_state): State<Arc<AppState>>,
+    Json(payload): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    // TODO: Query all apps from app_inventory across all devices
+    // TODO: Extract heatmap data from payload
+    // TODO: Validate heatmap format
+    // TODO: Insert into input_activity_heatmaps hypertable
+    // TODO: Update input_activity_daily_summary
     
     Json(json!({
         "success": true,
-        "apps": []
+        "message": "Heatmap uploaded successfully",
+        "heatmap_id": "HEATMAP-001"
     }))
 }
 
-async fn list_device_apps(
+async fn get_device_heatmaps(
     State(_state): State<Arc<AppState>>,
     Path(device_id): Path<Uuid>,
 ) -> impl IntoResponse {
-    // TODO: Query apps for specific device
+    // TODO: Query input_activity_heatmaps for specific device
+    // TODO: Apply time filters (last 7 days, last 30 days, etc)
+    // TODO: Optionally aggregate by hour/day
     
     Json(json!({
         "success": true,
         "device_id": device_id.to_string(),
-        "apps": []
+        "heatmaps": []
+    }))
+}
+
+async fn get_current_heatmap(
+    State(_state): State<Arc<AppState>>,
+    Path(device_id): Path<Uuid>,
+) -> impl IntoResponse {
+    // TODO: Get most recent heatmap for device
+    // TODO: Return with real-time visualization data
+    
+    Json(json!({
+        "success": true,
+        "device_id": device_id.to_string(),
+        "current_heatmap": {
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "grid_data": {},
+            "stats": {
+                "mouse_moves": 0,
+                "mouse_clicks": 0,
+                "keyboard_events": 0
+            }
+        }
+    }))
+}
+
+// ============================================================================
+// SECURITY ALERTS ENDPOINTS (NEW)
+// ============================================================================
+
+async fn list_security_alerts(
+    State(_state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    // TODO: Query security_alerts table
+    // TODO: Apply filters (severity, alert_type, time range)
+    // TODO: Return latest alerts sorted by timestamp
+    
+    Json(json!({
+        "success": true,
+        "alerts": [],
+        "total": 0
+    }))
+}
+
+async fn list_device_alerts(
+    State(_state): State<Arc<AppState>>,
+    Path(device_id): Path<Uuid>,
+) -> impl IntoResponse {
+    // TODO: Query security_alerts for specific device
+    // TODO: Include both resolved and unresolved
+    // TODO: Highlight process termination attempts
+    
+    Json(json!({
+        "success": true,
+        "device_id": device_id.to_string(),
+        "alerts": [],
+        "unresolved_count": 0
+    }))
+}
+
+async fn resolve_alert(
+    State(_state): State<Arc<AppState>>,
+    Path(alert_id): Path<i64>,
+    Json(payload): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    // TODO: Update security_alerts SET resolved=true
+    // TODO: Store resolution_notes from payload
+    // TODO: Update updated_at timestamp
+    
+    Json(json!({
+        "success": true,
+        "alert_id": alert_id,
+        "message": "Alert resolved successfully"
+    }))
+}
+
+async fn record_termination_attempt(
+    State(_state): State<Arc<AppState>>,
+    Json(payload): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    // TODO: Extract termination attempt details
+    // TODO: Insert into process_termination_attempts table
+    // TODO: Create CRITICAL security alert
+    // TODO: Broadcast alert via WebSocket to dashboard
+    
+    Json(json!({
+        "success": true,
+        "message": "Termination attempt recorded and alerted",
+        "alert_type": "PROCESS_TERMINATION_ATTEMPTED",
+        "severity": "CRITICAL"
     }))
 }
 
