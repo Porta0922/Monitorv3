@@ -63,8 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("✅ Input activity tracking enabled");
     
     // Initialize RabbitMQ publisher
-    let rabbitmq_url = std::env::var("RABBITMQ_URL")
-        .unwrap_or_else(|_| "amqp://guest:guest@localhost:5672/".to_string());
+    let rabbitmq_url = "amqp://guest:guest@localhost:5672/%2F".to_string();
     
     let publisher = match rabbitmq_publisher::RabbitMQPublisher::connect(&rabbitmq_url).await {
         Ok(conn) => {
