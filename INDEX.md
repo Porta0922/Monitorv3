@@ -1,500 +1,279 @@
-# ActivityMonitor Enterprise v3 — Documentation Index
+# Documentation Index
 
-**Version**: 3.0.0 MVP | **Status**: Production Ready | **Last Updated**: January 2025
-
----
-
-## 🚀 Quick Navigation
-
-### **👉 START HERE**
-**[START_HERE.md](./START_HERE.md)** — *The main entry point for everyone*
-- 5-minute quick links
-- System overview
-- Platform-specific setup (Windows/Linux/macOS)
-- What to test
-- Troubleshooting
-- Complete in 30 minutes
+**ActivityMonitor Enterprise v3.1.0**  
+Quick Navigation Guide
 
 ---
 
-### Getting Started (Detailed Guides)
-1. **[QUICK_START.md](./QUICK_START.md)** — Step-by-step setup (all platforms)
-   - 12,500 words
-   - Detailed 7-step installation guide
-   - Database setup instructions
-   - Verification checklist
-   - Advanced troubleshooting
+## 📍 Where to Start
 
-2. **[WINDOWS_DEMO_GUIDE.md](./WINDOWS_DEMO_GUIDE.md)** — Windows-specific demo walkthrough ⭐ NEW
-   - 10-part setup guide
-   - Real-world testing scenarios
-   - Common issues & solutions
-   - Demo talking points
-   - Perfect for presentations
+### First Time Users
+1. Read: **START_HERE.md** (15 min) — Overview + 30-minute setup
+2. Do: Follow the Quick Start section
+3. Read: **ARCHITECTURE.md** "System Overview" (10 min) — Understand the design
+4. Deploy: Use deployment scripts in `deploy/` folder
 
-3. **[README.md](./README.md)** — Complete overview
-   - 17,600 words
-   - Architecture diagram
-   - Feature checklist
-   - API endpoints table
-   - Prerequisites for all platforms
+### Operators & DevOps
+1. Read: **ARCHITECTURE.md** "Deployment Architecture" section
+2. Read: **API_REFERENCE.md** "Configuration" section
+3. Monitor: Use health check endpoint `/api/health`
+4. Troubleshoot: See **API_REFERENCE.md** "Troubleshooting" section
 
-4. **[COMPLETION_REPORT.md](./COMPLETION_REPORT.md)** — What was built
-   - Executive summary
-   - Key accomplishments
-   - Performance metrics
-   - Validation checklist
-   - Deployment status
+### Developers
+1. Read: **ARCHITECTURE.md** entire document (30 min)
+2. Review: Code in `agent/src/`, `server/src/`, `dashboard/src/`
+3. Test: Run unit tests (`cargo test`)
+4. Contribute: Follow code style guidelines
 
-### For Developers
-4. **[IMPLEMENTATION_SUMMARY.md](./IMPLEMENTATION_SUMMARY.md)** — Code deep-dive
-   - 18,700 words
-   - Component breakdown (agent, server, dashboard)
-   - Code statistics
-   - Quality metrics
-   - Testing strategy
-   - Technical decisions
-
-5. **[WEBSOCKET_ARCHITECTURE.md](./WEBSOCKET_ARCHITECTURE.md)** — Real-time synchronization ⭐ NEW
-   - WebSocket design
-   - Message types
-   - Implementation steps
-   - Integration guide
-   - Performance considerations
-   - Security analysis
-
-### Additional Resources
-6. **[INDEX.md](./INDEX.md)** — Navigation guide (this file)
-   - Quick links
-   - Architecture overview
-   - Feature breakdown
-   - Key statistics
-
-### Configuration
-7. **[.env.example](./.env.example)** — Environment template
-   - Database connection
-   - RabbitMQ settings
-   - Security keys
-   - Server configuration
-
-### Archived/Summary Files
-- **[DELIVERY_SUMMARY.txt](./DELIVERY_SUMMARY.txt)** — Project completion summary
-- **[PROJECT_COMPLETE.txt](./PROJECT_COMPLETE.txt)** — Final status report (if exists)
+### Demos & Testing
+1. Read: **WINDOWS_DEMO_GUIDE.md** (if on Windows)
+2. Follow step-by-step instructions
+3. Verify features in dashboard
 
 ---
 
-## 📚 Which Document Should I Read?
+## 📚 Documentation Files
 
-| Your Role | Read This | Duration |
-|-----------|-----------|----------|
-| **Evaluating the product** | [START_HERE.md](./START_HERE.md) | 30 min |
-| **Setting up for demo** | [WINDOWS_DEMO_GUIDE.md](./WINDOWS_DEMO_GUIDE.md) | 45 min |
-| **Installing in production** | [QUICK_START.md](./QUICK_START.md) | 1 hour |
-| **Understanding architecture** | [README.md](./README.md) | 20 min |
-| **Reviewing code quality** | [IMPLEMENTATION_SUMMARY.md](./IMPLEMENTATION_SUMMARY.md) | 30 min |
-| **Implementing WebSocket** | [WEBSOCKET_ARCHITECTURE.md](./WEBSOCKET_ARCHITECTURE.md) | 45 min |
-| **Quick reference** | [INDEX.md](./INDEX.md) (this file) | 5 min |
+### Essential (Read First)
+- **START_HERE.md** — Entry point, quick start, features overview
+  - Best for: Everyone getting started
+  - Read time: 15 minutes
+  - Contains: System overview, 30-min setup, navigation guide
 
-```
-┌─────────────────────────────────────────────┐
-│  Agents (Windows/Linux/macOS)               │
-│  - Rust binaries                            │
-│  - Process monitoring (2s)                  │
-│  - USB tracking (30s)                       │
-│  - Offline cache (AES-GCM)                  │
-└──────────────┬──────────────────────────────┘
-               │ (RabbitMQ or HTTP fallback)
-               ▼
-┌──────────────────────────────────────────────┐
-│  Server (Rust + Axum)                       │
-│  - REST API (11 endpoints)                  │
-│  - JWT authentication                       │
-│  - RabbitMQ consumer                        │
-│  - Hash whitelist validation                │
-└──────────────┬───────────────────────────────┘
-               │ (SQL)
-               ▼
-┌──────────────────────────────────────────────┐
-│  PostgreSQL + TimescaleDB                   │
-│  - 7 tables                                 │
-│  - 2 hypertables (1-day & 7-day partitions) │
-│  - 98% compression                          │
-└──────────────┬───────────────────────────────┘
-               │ (REST API)
-               ▼
-┌──────────────────────────────────────────────┐
-│  Dashboard (React 19 + TypeScript)          │
-│  - 6 pages                                  │
-│  - Real-time status                         │
-│  - Security alerts                          │
-└──────────────────────────────────────────────┘
-```
+- **ARCHITECTURE.md** — Complete technical reference
+  - Best for: Understanding the system, deployment planning
+  - Read time: 30 minutes (or reference as needed)
+  - Contains: All components, database schema, API details, security design
+
+- **API_REFERENCE.md** — Operations & configuration guide
+  - Best for: System operators, API developers, troubleshooting
+  - Read time: 20 minutes (or reference as needed)
+  - Contains: All endpoints, configuration, troubleshooting, testing
+
+- **CHANGELOG.md** — Version history & release notes
+  - Best for: Understanding what's new, migration guides
+  - Read time: 5 minutes
+  - Contains: v3.1.0 features, v3.0.0 initial features, roadmap
+
+### Specialized (Reference as Needed)
+- **WINDOWS_DEMO_GUIDE.md** — Step-by-step Windows demo
+  - Best for: Testing on Windows machine
+  - Contains: Pre-setup, installation, testing procedures
+
+- **HEATMAPS_AND_PROTECTION_GUIDE.md** — v3.1.0 feature details
+  - Best for: Understanding heatmaps & process protection
+  - Contains: Feature implementation, API examples, dashboard walkthrough
+
+- **WEBSOCKET_ARCHITECTURE.md** — Real-time sync design
+  - Best for: Advanced users, understanding WebSocket flow
+  - Contains: Message format, connection lifecycle, error handling
 
 ---
 
-## 📊 What Each Component Does
+## 🎯 Find What You Need
 
-### Agent (Rust Client)
-**Location**: `agent/`
-**Size**: 1,400+ LOC, 7 modules
-**Responsible for**:
-- Capturing process list every 2 seconds
-- Recording active window title
-- Scanning for connected USB devices every 30s
-- Scanning installed software hourly
-- Hashing executables with SHA-256
-- Buffering data offline (SQLite + AES-GCM)
-- Publishing events to RabbitMQ (or HTTP fallback)
+### "How do I...?"
 
-**Key Technologies**:
-- sysinfo (process monitoring)
-- window_titles (window capture)
-- rusqlite + aes-gcm (offline cache)
-- lapin (RabbitMQ)
-- sha2 (hashing)
-
-### Server (Rust API)
-**Location**: `server/`
-**Size**: 1,100+ LOC, 6 modules
-**Responsible for**:
-- Listening for device registration
-- Validating JWT tokens
-- Receiving activity/USB/inventory events
-- Validating executable hashes
-- Generating security alerts
-- Providing REST API for dashboard
-- Consuming RabbitMQ events
-
-**Key Technologies**:
-- Axum (web framework)
-- Tokio (async runtime)
-- SQLx (type-safe SQL)
-- jsonwebtoken (JWT)
-- argon2 (password hashing)
-- lapin (RabbitMQ consumer)
-
-### Dashboard (React Frontend)
-**Location**: `dashboard/`
-**Size**: 300+ LOC, 6 pages, 8 files
-**Responsible for**:
-- User authentication (JWT login)
-- Displaying device list and status
-- Showing activity timeline
-- Listing installed software
-- Tracking USB connections
-- Displaying security alerts
-- Managing device nicknames
-
-**Key Technologies**:
-- React 19
-- TypeScript (strict mode)
-- React Router (navigation)
-- Axios (HTTP client)
-- Vite (build tool)
-
-### Database (PostgreSQL + TimescaleDB)
-**Location**: `migrations/001_init_schema.sql`
-**Size**: 400+ LOC
-**Responsible for**:
-- Storing device registry
-- Storing activity logs (hypertable, 1-day partitions)
-- Storing USB history (hypertable, 7-day partitions)
-- Storing software inventory
-- Storing security alerts
-- Storing user accounts
+| Question | File | Section |
+|----------|------|---------|
+| Get started quickly? | START_HERE.md | Quick Start (30 min) |
+| Deploy to production? | ARCHITECTURE.md | Deployment Architecture |
+| Configure the system? | API_REFERENCE.md | Configuration |
+| Understand the API? | API_REFERENCE.md | REST Endpoints |
+| Debug issues? | API_REFERENCE.md | Troubleshooting |
+| Set up on Windows? | WINDOWS_DEMO_GUIDE.md | Full guide |
+| See what's new? | CHANGELOG.md | v3.1.0 section |
+| Understand heatmaps? | HEATMAPS_AND_PROTECTION_GUIDE.md | Full guide |
+| Monitor real-time updates? | WEBSOCKET_ARCHITECTURE.md | Full guide |
+| Understand database schema? | ARCHITECTURE.md | Database Schema |
+| Secure the installation? | ARCHITECTURE.md | Security Design |
+| Load test the system? | API_REFERENCE.md | Testing section |
 
 ---
 
-## 🎯 New in v3.0.1
+## 📖 Reading Paths by Role
 
-✨ **Device Naming During Installation** ⭐
-- Windows: Interactive prompt in `.bat` installer
-- Linux/macOS: Interactive prompt in `.sh` installer
-- Persisted in `.env` for easy updates
+### 👤 System Administrator
+1. START_HERE.md (Quick Start)
+2. ARCHITECTURE.md (Deployment Architecture)
+3. API_REFERENCE.md (Configuration)
+4. CHANGELOG.md (Version info)
 
-✨ **WebSocket Real-Time Synchronization** ⭐
-- Persistent connections instead of polling
-- Sub-100ms latency for updates
-- Works with existing RabbitMQ/database
-- Complete architecture documented
-- Ready for implementation
-
-✨ **Consolidated Documentation** ⭐
-- Single entry point: `START_HERE.md`
-- Eliminated duplicate content
-- Platform-specific setup guides
-- Windows demo guide for presentations
+**Time**: 45 minutes  
+**Outcome**: Can deploy and configure the system
 
 ---
 
-## 🔄 Documentation Updates
+### 👨‍💻 Developer
+1. START_HERE.md (Quick Start)
+2. ARCHITECTURE.md (entire document)
+3. Code review: agent/src/, server/src/, dashboard/src/
+4. API_REFERENCE.md (API details)
+
+**Time**: 90 minutes  
+**Outcome**: Can modify code, add features
+
+---
+
+### 🔧 Operations Team
+1. ARCHITECTURE.md (Deployment Architecture)
+2. API_REFERENCE.md (entire document)
+3. WINDOWS_DEMO_GUIDE.md (if applicable)
+4. CHANGELOG.md (tracking updates)
+
+**Time**: 60 minutes  
+**Outcome**: Can monitor, troubleshoot, maintain
+
+---
+
+### 🎓 Learning the System
+1. START_HERE.md (overview)
+2. ARCHITECTURE.md (full technical reference)
+3. API_REFERENCE.md (all details)
+4. WEBSOCKET_ARCHITECTURE.md (advanced)
+5. HEATMAPS_AND_PROTECTION_GUIDE.md (v3.1.0 features)
+
+**Time**: 150 minutes  
+**Outcome**: Deep understanding of entire system
+
+---
+
+### 🧪 Testing / QA
+1. START_HERE.md (setup)
+2. WINDOWS_DEMO_GUIDE.md (demo walkthrough)
+3. API_REFERENCE.md (Testing section)
+4. HEATMAPS_AND_PROTECTION_GUIDE.md (feature verification)
+
+**Time**: 60 minutes  
+**Outcome**: Can verify all features work
+
+---
+
+## 🗂️ File Organization
 
 ```
 ActivityMonitor-Enterprise-v3/
-├── agent/                          # Rust client agent
-│   ├── src/
-│   │   ├── main.rs                 # Entry point
-│   │   ├── monitoring.rs           # Process & window capture
-│   │   ├── usb_detection.rs        # USB device tracking
-│   │   ├── offline_cache.rs        # SQLite + encryption
-│   │   ├── inventory.rs            # Software scanner
-│   │   ├── device_id.rs            # Device identification
-│   │   └── rabbitmq_publisher.rs   # Event publishing
-│   └── Cargo.toml
 │
-├── server/                         # Rust API server
-│   ├── src/
-│   │   ├── main.rs                 # Server initialization
-│   │   ├── api.rs                  # REST endpoints
-│   │   ├── auth.rs                 # JWT & password hashing
-│   │   ├── db.rs                   # Database layer
-│   │   ├── rabbitmq_consumer.rs    # Event listener
-│   │   └── whitelist.rs            # Hash validation
-│   └── Cargo.toml
+├── START_HERE.md ..................... ENTRY POINT (read first)
+├── ARCHITECTURE.md ................... Technical reference
+├── API_REFERENCE.md .................. Operations guide
+├── CHANGELOG.md ....................... Version history
 │
-├── dashboard/                      # React frontend
-│   ├── src/
-│   │   ├── App.tsx                 # Main router
-│   │   ├── main.tsx                # Entry point
-│   │   ├── pages/
-│   │   │   ├── LoginPage.tsx
-│   │   │   ├── DashboardPage.tsx
-│   │   │   ├── ActivityPage.tsx
-│   │   │   ├── InventoryPage.tsx
-│   │   │   ├── USBPage.tsx
-│   │   │   └── AlertsPage.tsx
-│   │   ├── components/
-│   │   │   └── NavBar.tsx          # Shared navigation
-│   │   ├── hooks/
-│   │   │   └── useAuth.ts          # Auth state
-│   │   ├── api/
-│   │   │   └── client.ts           # HTTP client
-│   │   └── types/
-│   │       └── index.ts            # TypeScript interfaces
-│   ├── index.html
-│   └── package.json
+├── WINDOWS_DEMO_GUIDE.md ............. Windows-specific demo
+├── HEATMAPS_AND_PROTECTION_GUIDE.md . v3.1.0 features
+├── WEBSOCKET_ARCHITECTURE.md ......... Real-time sync design
 │
-├── migrations/                     # Database schema
-│   └── 001_init_schema.sql         # All tables
+├── agent/ ............................ Rust client agent
+├── server/ ........................... Rust API server
+├── dashboard/ ........................ React UI
+├── migrations/ ....................... Database schema
+├── deploy/ ........................... Installation scripts
 │
-├── deploy/                         # Installation scripts
-│   ├── install-windows.bat         # Windows service
-│   ├── install-linux.sh            # systemd setup
-│   └── install-macos.sh            # launchd setup
-│
-├── docs/                           # Additional documentation
-│   └── (Coming: ARCHITECTURE.md, API_REFERENCE.md, etc.)
-│
-├── Cargo.toml                      # Workspace manifest
-├── .env.example                    # Configuration template
-├── README.md                       # Main documentation
-├── QUICK_START.md                  # Setup guide
-├── IMPLEMENTATION_SUMMARY.md       # Code metrics
-├── COMPLETION_REPORT.md            # What was delivered
-└── INDEX.md                        # This file
+└── Cargo.toml ........................ Rust workspace manifest
 ```
 
 ---
 
-## 🚀 Quick Commands
+## 📊 Documentation Statistics
 
-### Build Everything
-```bash
-# Agent
-cd agent && cargo build --release
-
-# Server
-cd ../server && cargo build --release
-
-# Dashboard
-cd ../dashboard && npm install && npm run build
-```
-
-### Deploy
-```bash
-# Windows (Administrator)
-cd deploy
-install-windows.bat
-
-# Linux
-sudo ./deploy/install-linux.sh
-
-# macOS
-sudo ./deploy/install-macos.sh
-```
-
-### Test Connection
-```bash
-# Server health
-curl http://localhost:3000/api/health
-
-# Dashboard (if running dev server)
-npm run dev  # Then visit http://localhost:5173
-```
+| File | Lines | Focus | Audience |
+|------|-------|-------|----------|
+| START_HERE.md | 591 | Getting started | Everyone |
+| ARCHITECTURE.md | 1,200+ | Technical deep-dive | Architects, Developers |
+| API_REFERENCE.md | 600+ | Operations | Operators, API developers |
+| CHANGELOG.md | 250+ | Version history | All |
+| WINDOWS_DEMO_GUIDE.md | 581 | Walkthrough | Windows users |
+| HEATMAPS_AND_PROTECTION_GUIDE.md | 560+ | Feature details | Advanced users |
+| WEBSOCKET_ARCHITECTURE.md | 379 | Design | Developers |
+| **Total** | **~4,000** | **Complete System** | **All audiences** |
 
 ---
 
-## 📊 Key Statistics
+## 🔗 Cross-References
 
-| Component | Files | LOC | Language | Tests |
-|-----------|-------|-----|----------|-------|
-| Agent | 7 | 1,400+ | Rust | 15 |
-| Server | 6 | 1,100+ | Rust | 12 |
-| Dashboard | 8 | 300+ | TypeScript | 0 |
-| Database | 1 | 400+ | SQL | — |
-| Deployment | 3 | 280 | Bash/Batch | — |
-| Docs | 4 | 2,500+ | Markdown | — |
-| **Total** | **28** | **6,000+** | Mixed | **27** |
+### START_HERE.md references:
+- → ARCHITECTURE.md (System Architecture section)
+- → API_REFERENCE.md (Troubleshooting)
+- → CHANGELOG.md (version info)
+- → WINDOWS_DEMO_GUIDE.md (Windows setup)
 
----
+### ARCHITECTURE.md references:
+- → START_HERE.md (Quick Start)
+- → API_REFERENCE.md (API details)
+- → CHANGELOG.md (what's new)
+- → WEBSOCKET_ARCHITECTURE.md (real-time design)
 
-## 🔐 Security Features
-
-- ✅ **Encryption**: AES-GCM-256 for offline cache
-- ✅ **Hashing**: Argon2id for passwords, SHA-256 for binaries
-- ✅ **Authentication**: JWT tokens with 24-hour expiration
-- ✅ **Authorization**: Bearer token validation on all protected routes
-- ✅ **Validation**: SQL parameterization (no SQL injection)
-- ✅ **Device ID**: MAC-address hash (immutable, privacy-respecting)
+### API_REFERENCE.md references:
+- → ARCHITECTURE.md (system design)
+- → START_HERE.md (quick start)
+- → HEATMAPS_AND_PROTECTION_GUIDE.md (v3.1.0 features)
 
 ---
 
-## 📈 Performance Metrics
+## ✅ Completeness Checklist
 
-### Agent
-- **Memory**: 50 MB base + 10 MB/hour cache
-- **CPU**: <1% idle, 2-3% during monitoring
-- **Disk**: ~5 KB/hour offline cache
-- **Network**: ~50 KB/min to server
+Each document covers:
 
-### Server
-- **Throughput**: 10,000+ req/sec
-- **Latency**: <50ms median for queries
-- **Concurrency**: 20-100 active connections
+**START_HERE.md**:
+- ✅ System overview
+- ✅ Quick start (30 min)
+- ✅ Feature overview
+- ✅ Project structure
+- ✅ Common tasks
+- ✅ Security features
+- ✅ Performance specs
+- ✅ Troubleshooting quick ref
+- ✅ Next steps
 
-### Database
-- **Compression**: 98% reduction
-- **Query Time**: <10ms for 1000-row queries
-- **Capacity**: 1000 agents × 90 days = 3.5 TB raw (350 GB compressed)
+**ARCHITECTURE.md**:
+- ✅ Three-tier architecture
+- ✅ Component breakdown (Agent, Server, Database, Dashboard)
+- ✅ Data flow & messaging
+- ✅ Complete database schema
+- ✅ 12 REST endpoints
+- ✅ Deployment options
+- ✅ Security design
+- ✅ Performance benchmarks
+- ✅ Detailed setup guide
+- ✅ Configuration reference
 
----
+**API_REFERENCE.md**:
+- ✅ All 12 endpoints with examples
+- ✅ Request/response formats
+- ✅ Configuration variables
+- ✅ Troubleshooting (7 common issues)
+- ✅ Monitoring procedures
+- ✅ Testing guidelines
+- ✅ Advanced topics (WebSocket, rate limiting)
 
-## 🎯 MVP Scope
-
-### ✅ Included
-- Process monitoring (2-second intervals)
-- Window activity tracking
-- USB device detection ⭐ **NEW**
-- Software inventory scanning
-- Offline cache with encryption
-- REST API (11 endpoints)
-- JWT authentication
-- RabbitMQ integration
-- TimescaleDB hypertables
-- React dashboard (6 pages)
-- Cross-platform deployment
-
-### ❌ Not Included (Future v3.1+)
-- Auto-update mechanism
-- Real-time WebSocket sync
-- Browser history tracking
-- Screenshot capture
-- ML-based anomaly detection
-- Role-based access control (RBAC)
-
----
-
-## 🔧 Common Tasks
-
-### Change Admin Password
-1. Login to dashboard
-2. Go to Settings (future feature)
-3. Change password
-
-### Add a New Agent
-1. Build agent binary: `cd agent && cargo build --release`
-2. Run installer on target machine (Windows/Linux/macOS)
-3. Agent auto-registers with server
-4. Assign nickname in dashboard
-
-### Query Activity Logs
-```bash
-psql -U monitor_user -d activity_monitor -c \
-  "SELECT * FROM activity_logs WHERE device_id='your-device-id' ORDER BY timestamp DESC LIMIT 100;"
-```
-
-### View USB History
-```bash
-psql -U monitor_user -d activity_monitor -c \
-  "SELECT * FROM usb_history ORDER BY timestamp DESC LIMIT 50;"
-```
+**CHANGELOG.md**:
+- ✅ v3.1.0 features (3 major, 3+ improvements)
+- ✅ v3.0.1 changes
+- ✅ v3.0.0 initial features
+- ✅ Future roadmap
+- ✅ Version support policy
 
 ---
 
-## 🆘 Troubleshooting Quick Links
+## 🚀 Quick Links
 
-**Agent won't start?**
-- Check logs: Windows Event Viewer, Linux journalctl, macOS Console.app
-- Verify server is running: `curl http://localhost:3000/api/health`
-
-**Dashboard shows no devices?**
-- Check database: `psql -c "SELECT * FROM devices;"`
-- Verify JWT token: Check browser DevTools → Application → localStorage
-
-**RabbitMQ not connecting?**
-- Check status: `rabbitmqctl status`
-- Verify credentials: `http://localhost:15672` (guest:guest default)
-
-**Database connection failed?**
-- Verify PostgreSQL running: `psql -c "SELECT 1;"`
-- Check DATABASE_URL in .env
+- **Source Code**: `agent/`, `server/`, `dashboard/`
+- **Database**: `migrations/`
+- **Deployment**: `deploy/`
+- **Configuration**: `.env.example`
 
 ---
 
-## 📚 Learn More
+## 📞 Getting Help
 
-- **Architecture Design**: See README.md "Architecture" section
-- **API Endpoints**: See README.md "API Endpoints" table
-- **Database Schema**: See IMPLEMENTATION_SUMMARY.md "Database Schema" section
-- **Deployment Options**: See QUICK_START.md "Step 5-7"
-- **Performance**: See IMPLEMENTATION_SUMMARY.md "Performance Characteristics"
-- **Security**: See README.md "Security Considerations"
-
----
-
-## 📞 Support
-
-For questions or issues:
-1. Check the **QUICK_START.md** for common setup issues
-2. Check **COMPLETION_REPORT.md** for what was delivered
-3. Check **IMPLEMENTATION_SUMMARY.md** for technical details
-4. Review code comments in relevant source files
-5. Check database schema in `migrations/001_init_schema.sql`
+1. **Question about setup?** → START_HERE.md
+2. **Need API endpoint info?** → API_REFERENCE.md
+3. **Understanding architecture?** → ARCHITECTURE.md
+4. **Looking for feature details?** → CHANGELOG.md or HEATMAPS_AND_PROTECTION_GUIDE.md
+5. **Troubleshooting an issue?** → API_REFERENCE.md troubleshooting section
 
 ---
 
-## ✅ Verification Checklist
+**Last Updated**: April 2026 | **Version**: 3.1.0 | **Status**: Production Ready ✅
 
-- [ ] All binaries build without errors
-- [ ] Database schema applies successfully
-- [ ] Server starts and listens on port 3000
-- [ ] Dashboard builds and loads on localhost:5173
-- [ ] Agent can connect to server
-- [ ] Data appears in dashboard within 5 seconds
-- [ ] USB detection works (try plugging in a USB device)
-- [ ] Offline mode works (disconnect RabbitMQ, data buffers locally)
-
----
-
-**Ready to deploy! 🚀**
-
-Next steps:
-1. Read **QUICK_START.md** for setup
-2. Review **README.md** for features
-3. Check **.env.example** for configuration
-4. Run deployment script for your platform
-
----
-
-*ActivityMonitor Enterprise v3 — Production-Ready Activity Monitoring Solution*
-*Built with Rust, PostgreSQL, and React | January 2025*
+Start with **START_HERE.md** →
