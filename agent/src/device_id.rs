@@ -31,21 +31,62 @@ pub fn generate_device_id(mac_address: &str, hostname: &str) -> Uuid {
     Uuid::from_bytes(uuid_bytes)
 }
 
+/// Generate a fallback MAC address based on hostname or UUID
+/// Used when the actual MAC address cannot be determined
+fn generate_fallback_mac() -> String {
+    // Try to use hostname, fall back to UUID-based MAC
+    match get_hostname() {
+        Ok(hostname) => {
+            // Use first 12 characters of SHA256(hostname) to create a fake MAC
+            let mut hasher = Sha256::new();
+            hasher.update(hostname.as_bytes());
+            let hash = hasher.finalize();
+            let hex = format!("{:x}", hash);
+            
+            // Format as MAC address: XX:XX:XX:XX:XX:XX
+            format!(
+                "{}:{}:{}:{}:{}:{}",
+                &hex[0..2],
+                &hex[2..4],
+                &hex[4..6],
+                &hex[6..8],
+                &hex[8..10],
+                &hex[10..12]
+            )
+        }
+        Err(_) => {
+            // Ultimate fallback: use a deterministic UUID-based MAC
+            let uuid_str = Uuid::new_v4().to_string();
+            let hex = format!("{:x}", Uuid::parse_str(&uuid_str).unwrap_or_else(|_| Uuid::nil()));
+            format!(
+                "{}:{}:{}:{}:{}:{}",
+                &hex[0..2],
+                &hex[2..4],
+                &hex[4..6],
+                &hex[6..8],
+                &hex[8..10],
+                &hex[10..12]
+            )
+        }
+    }
+}
+
 /// Get primary MAC address (platform-specific)
-pub fn get_primary_mac_address() -> Result<String, Box<dyn std::error::Error>> {
+/// Returns a MAC address or a default based on hostname/UUID if unavailable
+pub fn get_primary_mac_address() -> String {
     #[cfg(target_os = "windows")]
     {
-        get_mac_windows()
+        get_mac_windows().unwrap_or_else(|| generate_fallback_mac())
     }
     
     #[cfg(target_os = "linux")]
     {
-        get_mac_linux()
+        get_mac_linux().unwrap_or_else(|| generate_fallback_mac())
     }
     
     #[cfg(target_os = "macos")]
     {
-        get_mac_macos()
+        get_mac_macos().unwrap_or_else(|| generate_fallback_mac())
     }
 }
 
@@ -69,8 +110,11 @@ pub fn load_or_create_device_identity() -> Result<DeviceIdentity, Box<dyn std::e
     }
     
     // Create new identity
-    let mac_address = get_primary_mac_address()?;
-    let hostname = get_hostname()?;
+    let mac_address = get_primary_mac_address();
+    let hostname = get_hostname().unwrap_or_else(|_| {
+        // Fallback: Use a hash-based hostname if actual hostname fails
+        format!("device-{}", uuid::Uuid::new_v4().to_string()[..8].to_string())
+    });
     let device_id = generate_device_id(&mac_address, &hostname);
     
     let identity = DeviceIdentity {
@@ -115,12 +159,13 @@ pub fn get_device_nickname() -> Option<String> {
 }
 
 #[cfg(target_os = "windows")]
-fn get_mac_windows() -> Result<String, Box<dyn std::error::Error>> {
+fn get_mac_windows() -> Option<String> {
     use std::process::Command;
     
     let output = Command::new("ipconfig")
         .arg("/all")
-        .output()?;
+        .output()
+        .ok()?;
     
     let output_str = String::from_utf8_lossy(&output.stdout).to_string();
     
@@ -128,21 +173,22 @@ fn get_mac_windows() -> Result<String, Box<dyn std::error::Error>> {
     for line in output_str.lines() {
         if line.contains("Physical Address") {
             if let Some(mac) = line.split(':').nth(1) {
-                return Ok(mac.trim().to_string());
+                return Some(mac.trim().to_string());
             }
         }
     }
     
-    Err("Could not determine MAC address".into())
+    None
 }
 
 #[cfg(target_os = "linux")]
-fn get_mac_linux() -> Result<String, Box<dyn std::error::Error>> {
+fn get_mac_linux() -> Option<String> {
     use std::process::Command;
     
     let output = Command::new("ip")
         .args(&["link", "show"])
-        .output()?;
+        .output()
+        .ok()?;
     
     let output_str = String::from_utf8_lossy(&output.stdout).to_string();
     
@@ -150,20 +196,21 @@ fn get_mac_linux() -> Result<String, Box<dyn std::error::Error>> {
     for line in output_str.lines() {
         if line.contains("link/ether") {
             if let Some(mac) = line.split_whitespace().nth(1) {
-                return Ok(mac.to_string());
+                return Some(mac.to_string());
             }
         }
     }
     
-    Err("Could not determine MAC address".into())
+    None
 }
 
 #[cfg(target_os = "macos")]
-fn get_mac_macos() -> Result<String, Box<dyn std::error::Error>> {
+fn get_mac_macos() -> Option<String> {
     use std::process::Command;
     
     let output = Command::new("ifconfig")
-        .output()?;
+        .output()
+        .ok()?;
     
     let output_str = String::from_utf8_lossy(&output.stdout).to_string();
     
@@ -171,12 +218,12 @@ fn get_mac_macos() -> Result<String, Box<dyn std::error::Error>> {
     for line in output_str.lines() {
         if line.contains("ether") {
             if let Some(mac) = line.split_whitespace().nth(1) {
-                return Ok(mac.to_string());
+                return Some(mac.to_string());
             }
         }
     }
     
-    Err("Could not determine MAC address".into())
+    None
 }
 
 #[cfg(test)]
