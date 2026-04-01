@@ -43,7 +43,7 @@ impl UsbMonitor {
     }
 
     /// Scan for connected USB/external storage devices
-    pub async fn scan_devices(&mut self) -> Result<Vec<UsbEvent>, Box<dyn std::error::Error>> {
+    pub async fn scan_devices(&mut self) -> Result<Vec<UsbEvent>, String> {
         let current_devices = self.get_connected_devices().await?;
         let mut events = Vec::new();
 
@@ -76,7 +76,7 @@ impl UsbMonitor {
     }
 
     /// Get connected USB devices (platform-specific)
-    async fn get_connected_devices(&self) -> Result<Vec<UsbDevice>, Box<dyn std::error::Error>> {
+    async fn get_connected_devices(&self) -> Result<Vec<UsbDevice>, String> {
         #[cfg(target_os = "windows")]
         {
             Self::scan_windows_devices().await
@@ -96,7 +96,7 @@ impl UsbMonitor {
 
 #[cfg(target_os = "windows")]
 impl UsbMonitor {
-    async fn scan_windows_devices() -> Result<Vec<UsbDevice>, Box<dyn std::error::Error>> {
+    async fn scan_windows_devices() -> Result<Vec<UsbDevice>, String> {
         use std::process::Command;
 
         let mut devices = Vec::new();
@@ -108,7 +108,8 @@ impl UsbMonitor {
                 "-Command",
                 "Get-PnpDevice -PresentOnly | Where-Object {$_.Class -eq 'DISKDRIVE'} | Select-Object Name,InstanceId",
             ])
-            .output()?;
+            .output()
+            .map_err(|e| e.to_string())?;
 
         let output_str = String::from_utf8_lossy(&output.stdout);
 
@@ -137,7 +138,7 @@ impl UsbMonitor {
 
 #[cfg(target_os = "linux")]
 impl UsbMonitor {
-    async fn scan_linux_devices() -> Result<Vec<UsbDevice>, Box<dyn std::error::Error>> {
+    async fn scan_linux_devices() -> Result<Vec<UsbDevice>, String> {
         use std::fs;
         use std::path::Path;
 
@@ -145,8 +146,8 @@ impl UsbMonitor {
         let usb_path = Path::new("/sys/bus/usb/devices");
 
         if usb_path.exists() {
-            for entry in fs::read_dir(usb_path)? {
-                let entry = entry?;
+            for entry in fs::read_dir(usb_path).map_err(|e| e.to_string())? {
+                let entry = entry.map_err(|e| e.to_string())?;
                 let path = entry.path();
 
                 if let Some(file_name) = path.file_name() {
@@ -194,7 +195,7 @@ impl UsbMonitor {
 
 #[cfg(target_os = "macos")]
 impl UsbMonitor {
-    async fn scan_macos_devices() -> Result<Vec<UsbDevice>, Box<dyn std::error::Error>> {
+    async fn scan_macos_devices() -> Result<Vec<UsbDevice>, String> {
         use std::process::Command;
 
         let mut devices = Vec::new();
@@ -202,7 +203,8 @@ impl UsbMonitor {
         // Use system_profiler to get USB device info
         let output = Command::new("system_profiler")
             .args(&["SPUSBDataType", "-json"])
-            .output()?;
+            .output()
+            .map_err(|e| e.to_string())?;
 
         if output.status.success() {
             if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {

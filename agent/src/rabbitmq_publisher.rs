@@ -119,7 +119,7 @@ impl RabbitMQPublisher {
     }
 
     /// Generic event publisher
-    async fn publish_event(
+    pub async fn publish_event(
         &self,
         event_type: &str,
         payload: serde_json::Value,
@@ -134,7 +134,7 @@ impl RabbitMQPublisher {
             &body,
             BasicProperties::default()
                 .with_content_type("application/json".into())
-                .with_delivery_mode(lapin::types::AMQPValue::ShortUInt(2)), // Persistent
+                .with_delivery_mode(2u8), // Persistent
         )
         .await?
         .await?;

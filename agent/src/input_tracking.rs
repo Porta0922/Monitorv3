@@ -65,107 +65,93 @@ impl InputTracker {
 
     /// Record mouse movement at coordinates
     pub async fn record_mouse_movement(&self, x: u32, y: u32) {
-        if let Ok(mut heatmap) = self.heatmap.lock().await {
-            let grid_x = (x / self.grid_resolution).min(99);  // Max 100 cells
-            let grid_y = (y / self.grid_resolution).min(99);
-            let key = format!("{},{}", grid_x, grid_y);
-            
-            heatmap.grid_data
-                .entry(key)
-                .and_modify(|count| *count += 1)
-                .or_insert(1);
-            
-            heatmap.stats.mouse_moves += 1;
-            heatmap.stats.last_activity = Some(Utc::now());
-        }
+        let mut heatmap = self.heatmap.lock().await;
+        let grid_x = (x / self.grid_resolution).min(99);  // Max 100 cells
+        let grid_y = (y / self.grid_resolution).min(99);
+        let key = format!("{},{}", grid_x, grid_y);
+        
+        heatmap.grid_data
+            .entry(key)
+            .and_modify(|count| *count += 1)
+            .or_insert(1);
+        
+        heatmap.stats.mouse_moves += 1;
+        heatmap.stats.last_activity = Some(Utc::now());
     }
 
     /// Record mouse click
     pub async fn record_mouse_click(&self, x: u32, y: u32) {
         self.record_mouse_movement(x, y).await;
         
-        if let Ok(mut heatmap) = self.heatmap.lock().await {
-            heatmap.stats.mouse_clicks += 1;
-        }
+        let mut heatmap = self.heatmap.lock().await;
+        heatmap.stats.mouse_clicks += 1;
     }
 
     /// Record keyboard event
     pub async fn record_keyboard_event(&self, _key: &str) {
-        if let Ok(mut heatmap) = self.heatmap.lock().await {
-            heatmap.stats.keyboard_events += 1;
-            heatmap.stats.last_activity = Some(Utc::now());
-        }
+        let mut heatmap = self.heatmap.lock().await;
+        heatmap.stats.keyboard_events += 1;
+        heatmap.stats.last_activity = Some(Utc::now());
     }
 
     /// Update screen resolution
     pub async fn set_screen_resolution(&self, width: u32, height: u32) {
-        if let Ok(mut heatmap) = self.heatmap.lock().await {
-            heatmap.screen_width = width;
-            heatmap.screen_height = height;
-        }
+        let mut heatmap = self.heatmap.lock().await;
+        heatmap.screen_width = width;
+        heatmap.screen_height = height;
     }
 
     /// Check if it's time to upload the heatmap
     pub async fn should_upload(&self) -> bool {
-        if let Ok(last_upload) = self.last_upload.lock().await {
-            let elapsed = Utc::now() - *last_upload;
-            elapsed >= self.upload_interval
-        } else {
-            false
-        }
+        let last_upload = self.last_upload.lock().await;
+        let elapsed = Utc::now() - *last_upload;
+        elapsed >= self.upload_interval
     }
 
     /// Get current heatmap for upload
     pub async fn get_heatmap_for_upload(&self) -> Option<ActivityHeatmap> {
-        if let Ok(mut heatmap) = self.heatmap.lock().await {
-            // Only upload if there's activity
-            if heatmap.stats.mouse_moves > 0 || heatmap.stats.keyboard_events > 0 {
-                let heatmap_to_upload = heatmap.clone();
-                
-                // Reset for next period
-                heatmap.timestamp = Utc::now();
-                heatmap.grid_data.clear();
-                heatmap.stats = InputStats::default();
-                
-                // Update last upload time
-                if let Ok(mut last_upload) = self.last_upload.lock().await {
-                    *last_upload = Utc::now();
-                }
-                
-                return Some(heatmap_to_upload);
-            }
+        let mut heatmap = self.heatmap.lock().await;
+        // Only upload if there's activity
+        if heatmap.stats.mouse_moves > 0 || heatmap.stats.keyboard_events > 0 {
+            let heatmap_to_upload = heatmap.clone();
+            
+            // Reset for next period
+            heatmap.timestamp = Utc::now();
+            heatmap.grid_data.clear();
+            heatmap.stats = InputStats::default();
+            
+            // Update last upload time
+            drop(heatmap);  // Release lock before getting last_upload
+            let mut last_upload = self.last_upload.lock().await;
+            *last_upload = Utc::now();
+            
+            return Some(heatmap_to_upload);
         }
         None
     }
 
     /// Get current statistics without uploading
     pub async fn get_stats(&self) -> InputStats {
-        if let Ok(heatmap) = self.heatmap.lock().await {
-            heatmap.stats.clone()
-        } else {
-            InputStats::default()
-        }
+        let heatmap = self.heatmap.lock().await;
+        heatmap.stats.clone()
     }
 
     /// Get heatmap for dashboard display (current period so far)
     pub async fn get_current_heatmap_data(&self) -> serde_json::Value {
-        if let Ok(heatmap) = self.heatmap.lock().await {
-            json!({
-                "timestamp": heatmap.timestamp.to_rfc3339(),
-                "device_id": heatmap.device_id,
-                "screen_width": heatmap.screen_width,
-                "screen_height": heatmap.screen_height,
-                "grid_data": heatmap.grid_data,
-                "stats": {
-                    "mouse_moves": heatmap.stats.mouse_moves,
-                    "mouse_clicks": heatmap.stats.mouse_clicks,
-                    "keyboard_events": heatmap.stats.keyboard_events,
-                },
-                "heatmap_generated_at": Utc::now().to_rfc3339(),
-            })
-        } else {
-            json!(null)
-        }
+        let heatmap = self.heatmap.lock().await;
+        json!({
+            "timestamp": heatmap.timestamp.to_rfc3339(),
+            "device_id": heatmap.device_id,
+            "screen_width": heatmap.screen_width,
+            "screen_height": heatmap.screen_height,
+            "grid_data": heatmap.grid_data,
+            "stats": {
+                "mouse_moves": heatmap.stats.mouse_moves,
+                "mouse_clicks": heatmap.stats.mouse_clicks,
+                "keyboard_events": heatmap.stats.keyboard_events,
+            },
+            "heatmap_generated_at": Utc::now().to_rfc3339(),
+        })
     }
 }
 

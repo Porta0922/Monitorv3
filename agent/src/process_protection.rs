@@ -2,7 +2,6 @@
 // Process Protection and Anti-Termination Mechanism
 // Prevents the monitoring agent from being killed and alerts on termination attempts
 
-use std::process;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use chrono::Utc;
@@ -64,28 +63,35 @@ impl ProcessProtection {
     /// Windows: Create Job Object to protect process
     #[cfg(target_os = "windows")]
     fn init_windows(&self) -> Result<(), String> {
-        use winapi::um::winnt::{JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE};
-        use winapi::um::jobapi2::CreateJobObjectA;
-        use winapi::um::jobapi2::SetInformationJobObject;
+        use winapi::um::winnt::{JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JobObjectBasicLimitInformation, JOBOBJECT_BASIC_LIMIT_INFORMATION};
+        use winapi::um::jobapi2::{CreateJobObjectW, SetInformationJobObject};
         use std::ptr;
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
         
         unsafe {
+            // Create wide string for job name
+            let job_name: Vec<u16> = OsStr::new("ActivityMonitorJob")
+                .encode_wide()
+                .chain(Some(0))
+                .collect();
+            
             // Create job object
-            let job = CreateJobObjectA(ptr::null_mut(), b"ActivityMonitorJob\0".as_ptr() as *const i8);
+            let job = CreateJobObjectW(ptr::null_mut(), job_name.as_ptr());
             
             if job.is_null() {
                 return Err("Failed to create job object".to_string());
             }
             
             // Configure job to prevent killing
-            let mut info: winapi::um::winnt::JOBOBJECT_BASIC_LIMIT_INFORMATION = std::mem::zeroed();
+            let mut info: JOBOBJECT_BASIC_LIMIT_INFORMATION = std::mem::zeroed();
             info.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
             
             let result = SetInformationJobObject(
                 job,
-                winapi::um::jobapi::JobObjectBasicLimitInformation,
+                JobObjectBasicLimitInformation,
                 &mut info as *mut _ as *mut std::ffi::c_void,
-                std::mem::size_of::<winapi::um::winnt::JOBOBJECT_BASIC_LIMIT_INFORMATION>() as u32,
+                std::mem::size_of::<JOBOBJECT_BASIC_LIMIT_INFORMATION>() as u32,
             );
             
             if result == 0 {
@@ -204,13 +210,12 @@ impl ProcessProtection {
     /// Auto-restart mechanism (if enabled)
     pub async fn auto_restart_if_needed(&self) {
         if self.auto_restart_enabled {
-            if let Ok(attempt_count) = self.attempt_count.lock().await.as_ref() {
-                if *attempt_count > 0 {
-                    eprintln!("[ALERT] Process termination attempt detected! Auto-restarting...");
-                    
-                    // In production, the parent process would respawn this process
-                    // Here we just log it
-                }
+            let attempt_count = self.attempt_count.lock().await;
+            if *attempt_count > 0 {
+                eprintln!("[ALERT] Process termination attempt detected! Auto-restarting...");
+                
+                // In production, the parent process would respawn this process
+                // Here we just log it
             }
         }
     }

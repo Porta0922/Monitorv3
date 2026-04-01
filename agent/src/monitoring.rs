@@ -1,8 +1,7 @@
 // Process and window monitoring module
 use chrono::Utc;
-use sysinfo::{System, SystemExt, ProcessExt};
+use sysinfo::{System, SystemExt, ProcessExt, PidExt};
 use sha2::{Sha256, Digest};
-use std::path::Path;
 
 #[derive(Debug, Clone)]
 pub struct ProcessSnapshot {
@@ -36,15 +35,16 @@ impl MonitoringLoop {
         
         let mut processes = Vec::new();
         for (pid, process) in self.sys.processes() {
-            let exe_path = process.exe().map(|p| p.to_string_lossy().to_string());
-            let exe_hash = exe_path.as_ref().and_then(|path| {
-                calculate_file_hash(path).ok()
-            });
+            let exe_path = {
+                let p = process.exe();
+                p.to_string_lossy().to_string()
+            };
+            let exe_hash = calculate_file_hash(&exe_path).ok();
 
             processes.push(ProcessSnapshot {
                 pid: pid.as_u32(),
                 name: process.name().to_string(),
-                exe_path,
+                exe_path: Some(exe_path),
                 exe_hash,
             });
         }
@@ -52,15 +52,22 @@ impl MonitoringLoop {
         processes
     }
 
-    /// Get currently active window (requires window_titles or platform-specific code)
+    /// Get currently active window using platform APIs
     pub fn capture_active_window(&self) -> Option<WindowCapture> {
-        // Platform-specific implementation required
-        // For now, return None as this requires platform APIs
+        // Platform-specific implementation
         #[cfg(target_os = "windows")]
         {
             return capture_active_window_windows();
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "linux")]
+        {
+            return capture_active_window_linux();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            return capture_active_window_macos();
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
         {
             None
         }
@@ -101,10 +108,59 @@ pub fn calculate_file_hash(file_path: &str) -> Result<String, Box<dyn std::error
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+// Windows implementation using winapi
 #[cfg(target_os = "windows")]
 fn capture_active_window_windows() -> Option<WindowCapture> {
-    // TODO: Use Windows API via winapi crate to get active window
-    // For now, placeholder
+    use winapi::um::winuser::{GetForegroundWindow, GetWindowTextW, GetWindowModuleFileNameW};
+
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() {
+            return None;
+        }
+
+        // Get window title
+        let mut title_buffer = [0u16; 256];
+        let title_len = GetWindowTextW(hwnd, title_buffer.as_mut_ptr(), title_buffer.len() as i32);
+        
+        let window_title = if title_len > 0 {
+            String::from_utf16_lossy(&title_buffer[..title_len as usize]).to_string()
+        } else {
+            "Unknown".to_string()
+        };
+
+        // Get window class/app name
+        let mut class_buffer = [0u16; 256];
+        let class_len = GetWindowModuleFileNameW(hwnd, class_buffer.as_mut_ptr(), class_buffer.len() as u32);
+        
+        let app_name = if class_len > 0 {
+            String::from_utf16_lossy(&class_buffer[..class_len as usize]).to_string()
+        } else {
+            "Unknown".to_string()
+        };
+
+        Some(WindowCapture {
+            app_name,
+            window_title,
+            timestamp: Utc::now(),
+        })
+    }
+}
+
+// Linux implementation (basic - requires x11-clipboard or similar)
+#[cfg(target_os = "linux")]
+fn capture_active_window_linux() -> Option<WindowCapture> {
+    // Linux window title capture requires X11 or Wayland libraries
+    // For now, return None as this requires additional dependencies
+    // Consider adding: x11-clipboard or wmctrl integration
+    None
+}
+
+// macOS implementation (requires Cocoa framework)
+#[cfg(target_os = "macos")]
+fn capture_active_window_macos() -> Option<WindowCapture> {
+    // macOS implementation would use Cocoa framework
+    // For now, return None as this requires additional dependencies
     None
 }
 

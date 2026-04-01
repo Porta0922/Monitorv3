@@ -50,7 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("✅ Offline cache initialized");
     
     // Initialize Process Protection (Anti-Kill)
-    let protection = ProcessProtection::new(device_identity.device_id.clone(), true);
+    let protection = ProcessProtection::new(device_identity.device_id.to_string(), true);
     if let Err(e) = protection.init() {
         tracing::warn!("⚠️  Process protection initialization warning: {}", e);
     } else {
@@ -58,7 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     
     // Initialize Input Tracking (Keyboard/Mouse Heatmaps)
-    let input_tracker = Arc::new(InputTracker::new(device_identity.device_id.clone(), 19));
+    let input_tracker = Arc::new(InputTracker::new(device_identity.device_id.to_string(), 19));
     input_tracker.set_screen_resolution(1920, 1080).await;
     tracing::info!("✅ Input activity tracking enabled");
     
@@ -67,9 +67,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|_| "amqp://guest:guest@localhost:5672/".to_string());
     
     let publisher = match rabbitmq_publisher::RabbitMQPublisher::connect(&rabbitmq_url).await {
-        Ok(pub) => {
+        Ok(conn) => {
             tracing::info!("✅ RabbitMQ connected");
-            Some(Arc::new(pub))
+            Some(Arc::new(conn))
         }
         Err(e) => {
             tracing::warn!("⚠️  RabbitMQ connection failed: {}. Running in offline mode.", e);
@@ -166,7 +166,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             "heatmap": heatmap,
                         });
                         
-                        if let Err(e) = pub_.publish_event("input_heatmaps", &event.to_string()).await {
+                        if let Err(e) = pub_.publish_event("input_heatmaps", event).await {
                             tracing::warn!("Failed to publish heatmap: {}", e);
                         }
                     }

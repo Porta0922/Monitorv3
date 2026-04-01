@@ -1,11 +1,8 @@
 // Offline cache using SQLite + AES-GCM encryption
 use rusqlite::{Connection, Result as SqliteResult};
-use aes_gcm::{
-    Aes256Gcm, Key, Nonce,
-    aead::{Aead, NewAead},
-};
+use aes_gcm::{Aes256Gcm, Key, Nonce, aead::Aead, KeyInit};
 use rand::Rng;
-use serde_json::{json, Value};
+use serde_json::Value;
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -36,7 +33,7 @@ impl OfflineCache {
         conn.close().ok();
         
         // Initialize cipher
-        let key = Key::from_slice(encryption_key);
+        let key = Key::<Aes256Gcm>::from_slice(encryption_key);
         let cipher = Aes256Gcm::new(key);
         
         Ok(Self {

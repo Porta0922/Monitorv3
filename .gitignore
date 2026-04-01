@@ -1,0 +1,16 @@
+# Rust
+/target
+Cargo.lock
+
+# Ejecutables y archivos de depuración
+*.exe
+*.pdb
+*.dll
+
+# Configuración sensible (¡Muy importante!)
+.env
+.env.*
+
+# Docker
+.data/
+target/

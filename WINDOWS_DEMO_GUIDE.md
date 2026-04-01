@@ -1,8 +1,8 @@
-# ActivityMonitor Enterprise v3 — Windows Demo Guide
+# ActivityMonitor Enterprise v3 — Windows Demo Guide (Docker)
 
-**Complete Step-by-Step Guide for Testing on Windows**
+**Complete Step-by-Step Guide for Testing on Windows Using Docker**
 
-This guide walks you through setting up and testing ActivityMonitor on a single Windows machine (for demonstration purposes).
+This guide walks you through setting up and testing ActivityMonitor on a single Windows machine using Docker containers (no manual installation needed).
 
 ---
 
@@ -11,90 +11,88 @@ This guide walks you through setting up and testing ActivityMonitor on a single 
 Before starting, ensure you have:
 
 - **Windows 10/11** (tested)
-- **PostgreSQL 14+** installed locally
-- **RabbitMQ 3.10+** running (or Docker)
-- **Rust 1.70+** installed
-- **Node.js 18+** installed
-- **Administrator privileges** (for service installation)
+- **Docker Desktop for Windows** installed and running
+- **Rust 1.70+** installed (for building agent + server)
+- **Node.js 18+** installed (for dashboard)
 - **Git** (for cloning)
+- **Administrator privileges** (for Docker + service installation)
+- **~5 GB disk space** (Docker images + data)
 
 ### Quick Check
 ```powershell
 # Open PowerShell and verify installations:
-psql --version          # Should show PostgreSQL 14+
-rabbitmqctl version     # Should work if RabbitMQ is running
-rustc --version         # Should show Rust 1.70+
-node --version          # Should show Node.js 18+
+docker --version          # Should show Docker version
+docker ps                 # Should work (lists containers)
+rustc --version          # Should show Rust 1.70+
+node --version           # Should show Node.js 18+
 ```
+
+**✅ That's it! All backend services run in Docker.**
 
 ---
 
-## Part 1: Setup Backend Infrastructure (15 minutes)
+## Part 1: Start Backend Infrastructure with Docker (5 minutes)
 
-### Step 1.1: Create PostgreSQL Database
-
-```powershell
-# Open Command Prompt or PowerShell as Administrator
-
-# Connect to PostgreSQL
-psql -U postgres
-
-# In psql, run:
-CREATE USER monitor_user WITH PASSWORD 'password123';
-CREATE DATABASE activity_monitor OWNER monitor_user;
-\c activity_monitor
-CREATE EXTENSION IF NOT EXISTS timescaledb;
-\q
-```
-
-### Step 1.2: Apply Database Schema
+### Step 1.1: Start Docker Services
 
 ```powershell
 # From project root directory
 cd C:\dev\Monitor_nuevo\ActivityMonitor-Enterprise-v3
 
-# Apply migrations
-psql -U monitor_user -d activity_monitor -f migrations\001_init_schema.sql
+# Start all services (PostgreSQL + RabbitMQ + Redis)
+docker-compose up -d
 
-# Verify (should show 7 tables)
-psql -U monitor_user -d activity_monitor -c "\dt"
+# Wait for containers to start (10-15 seconds)
+# Output should show:
+# ✓ activity-monitor-postgres is healthy
+# ✓ activity-monitor-rabbitmq is healthy
+# ✓ activity-monitor-redis is healthy
 ```
 
-### Step 1.3: Start RabbitMQ
+### Step 1.2: Verify Backend Services
 
-**Option A: Using Docker (Recommended)**
 ```powershell
-# If Docker is installed
-docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3-management
+# Check all containers running
+docker-compose ps
 
-# Access management UI: http://localhost:15672 (guest/guest)
+# Expected output:
+# NAME                    STATUS
+# activity-monitor-postgres    Up (healthy)
+# activity-monitor-rabbitmq    Up (healthy)
+# activity-monitor-redis       Up (healthy)
+
+# Test PostgreSQL
+docker-compose exec postgres psql -U monitor_user -d activity_monitor -c "SELECT 1;"
+
+# Access RabbitMQ Management UI
+# Open browser: http://localhost:15672
+# Username: guest
+# Password: guest
+
+# View logs for any service
+docker-compose logs postgres   # PostgreSQL logs
+docker-compose logs rabbitmq   # RabbitMQ logs
+docker-compose logs redis      # Redis logs
 ```
 
-**Option B: Native Installation**
-```powershell
-# If RabbitMQ installed via Chocolatey
-rabbitmq-service start
-
-# Verify status
-rabbitmqctl status
-```
-
-### Step 1.4: Configure Environment
+### Step 1.3: Configure Environment
 
 ```powershell
-# Copy and edit .env
+# Copy environment template
 Copy-Item .env.example .env
 
-# Edit .env with your values:
-# DATABASE_URL=postgresql://monitor_user:password123@localhost:5432/activity_monitor
+# Verify .env has these values (for Docker):
+# DATABASE_URL=postgresql://monitor_user:monitor_password@localhost:5432/activity_monitor
 # RABBITMQ_URL=amqp://guest:guest@localhost:5672/%2F
-# JWT_SECRET=your-random-32-char-key
+# JWT_SECRET=your-random-32-char-key-generate-this
 # AES_KEY=0123456789abcdef0123456789abcdef
 ```
 
+**That's all for backend! Docker is now running everything.** ✅
+
 ---
 
-## Part 2: Build Server (10 minutes)
+## Part 2: Build & Start Server (10 minutes)
 
 ```powershell
 cd C:\dev\Monitor_nuevo\ActivityMonitor-Enterprise-v3\server
@@ -122,6 +120,8 @@ curl http://localhost:3000/api/health
 
 # Should return: {"status":"ok"}
 ```
+
+**Note**: Server automatically connects to Docker services via environment variables. ✅
 
 ---
 
@@ -239,44 +239,40 @@ npx http-server dist -p 8000
 
 ---
 
-## Part 7: Login & Verify (5 minutes)
+## Part 7: Create Admin User (3 minutes)
 
-### Step 7.1: Access Dashboard
+### Option A: Using curl (Recommended)
+
+```powershell
+# Register admin user via API
+curl -X POST http://localhost:3000/api/register `
+  -H "Content-Type: application/json" `
+  -d '{"username":"admin","password":"demo123"}'
+
+# Response contains JWT token
+```
+
+### Option B: Database Insert
+
+```powershell
+# Direct insert into users table
+docker-compose exec postgres psql -U monitor_user -d activity_monitor -c `
+  "INSERT INTO users (username, password_hash, role) VALUES ('admin', 'DEMO_HASH', 'admin');"
+```
+
+---
+
+## Part 8: Login & Verify (5 minutes)
+
+---
+
+### Step 8.1: Access Dashboard
 
 Navigate to: **http://localhost:5173** (or 8000 if using production build)
 
 You should see the **Login page**.
 
-### Step 7.2: Create Admin User
-
-First, add a user to the database:
-
-```powershell
-# Open PowerShell
-psql -U monitor_user -d activity_monitor
-
-# Generate Argon2id hash for password "demo123":
-# You can use an online tool or PostgreSQL:
-INSERT INTO users (username, password_hash, role) VALUES 
-  ('admin', '$argon2id$v=19$m=19456,t=2,p=1$XXXX$XXXX...', 'admin');
-
-# For demo, you can use a simple query:
-INSERT INTO users (username, password_hash, role) VALUES
-  ('admin', 'DEMO_HASH_REPLACE_ME', 'admin');
-```
-
-**Alternative: Use Server Registration Endpoint**
-
-```powershell
-# Once server is running, register a user
-curl -X POST http://localhost:3000/api/register `
-  -H "Content-Type: application/json" `
-  -d '{"username":"admin","password":"demo123"}'
-
-# Response should contain JWT token
-```
-
-### Step 7.3: Login
+### Step 8.2: Login
 
 - **Username**: admin
 - **Password**: demo123
@@ -285,16 +281,26 @@ After login, you should see a dashboard saying "No devices registered yet" (this
 
 ---
 
-## Part 8: Monitor Device Registration (10 minutes)
+## Part 9: Monitor Device Registration (10 minutes)
 
 ### Wait for Agent to Register
 
-1. **Keep all processes running**:
-   - ✅ PostgreSQL (running)
-   - ✅ RabbitMQ (running)
-   - ✅ Server (listening on :3000)
-   - ✅ Agent (service running or in console)
-   - ✅ Dashboard (open in browser)
+1. **Verify all services running**:
+   ```powershell
+   # Docker services
+   docker-compose ps
+   
+   # Server
+   curl http://localhost:3000/api/health
+   
+   # Dashboard
+   http://localhost:5173 (or 8000)
+   
+   # Agent service
+   Get-Service -Name "ActivityMonitor" | Select-Object Status
+   ```
+
+   Expected: All should show status "running/ok"
 
 2. **Wait 10-30 seconds** for agent to register
 
@@ -345,7 +351,7 @@ Click the **"🚨 Alerts"** tab to see:
 
 ---
 
-## Part 9: Test Key Features (20 minutes)
+## Part 10: Test Key Features (20 minutes)
 
 ### Test 1: Real-Time Updates
 
@@ -372,33 +378,26 @@ Click the **"🚨 Alerts"** tab to see:
 
 ### Test 4: Offline Resilience
 
-1. **Stop RabbitMQ**:
+1. **Stop Docker services**:
    ```powershell
-   # If using Docker
-   docker stop rabbitmq
+   # Pause RabbitMQ (simulates network outage)
+   docker-compose pause rabbitmq
    
-   # If native
-   rabbitmq-service stop
+   # Keep agent running (it will buffer data locally)
    ```
 
-2. **Keep agent running** (it will buffer data locally)
-
-3. Perform actions:
+2. Perform actions:
    - Launch/close applications
    - Plug/unplug USB device
    - Keep agent running for 2-5 minutes
 
-4. **Restart RabbitMQ**:
+3. **Resume Docker services**:
    ```powershell
-   # If using Docker
-   docker start rabbitmq
-   
-   # If native
-   rabbitmq-service start
+   docker-compose unpause rabbitmq
    ```
 
-5. **Verify**: Agent syncs buffered data to server
-6. Check dashboard—should show activity from offline period
+4. **Verify**: Agent syncs buffered data to server
+5. Check dashboard—should show activity from offline period
 
 ### Test 5: Update Device Nickname
 
@@ -410,7 +409,7 @@ Click the **"🚨 Alerts"** tab to see:
 
 ---
 
-## Part 10: Cleanup & Teardown (5 minutes)
+## Part 11: Cleanup & Teardown (5 minutes)
 
 When done testing:
 
@@ -426,12 +425,11 @@ net stop ActivityMonitor
 # Stop dashboard
 # In dashboard window, press Ctrl+C
 
-# Stop RabbitMQ (optional)
-docker stop rabbitmq
-# OR
-rabbitmq-service stop
+# Stop all Docker containers
+docker-compose down
 
-# (Keep PostgreSQL running for next test)
+# (Optional: Clean volumes if you want fresh data next time)
+# docker-compose down -v
 ```
 
 ### Optional: Uninstall Service
@@ -447,33 +445,66 @@ sc delete ActivityMonitor
 Remove-Item -Recurse -Force "$env:PROGRAMDATA\ActivityMonitor"
 ```
 
+### Restart Docker Services (Next Demo)
+
+```powershell
+# Next time you want to demo:
+cd C:\dev\Monitor_nuevo\ActivityMonitor-Enterprise-v3
+
+# Start fresh
+docker-compose up -d
+
+# Follow from Part 2 (Build Server)
+```
+
 ---
 
 ## Troubleshooting During Demo
+
+### Docker Services Won't Start
+
+**Error**: `docker-compose up -d` fails
+
+```powershell
+# Check Docker is running
+docker ps
+
+# If Docker not running, start Docker Desktop
+
+# Check for port conflicts
+netstat -ano | findstr "5432 5672 15672 6379"
+
+# If ports in use, stop conflicting containers
+docker-compose down
+docker system prune -f
+
+# Try again
+docker-compose up -d
+```
 
 ### Agent shows "Offline" in Dashboard
 
 **Possible causes**:
 1. Agent not running: `Get-Service -Name "ActivityMonitor"`
 2. Server not running: `curl http://localhost:3000/api/health`
-3. Database not accessible: `psql -U monitor_user -d activity_monitor`
+3. Docker database not responding: `docker-compose logs postgres`
 
 **Solution**:
-- Check logs: `$env:PROGRAMDATA\ActivityMonitor\logs\`
+- Check agent logs: `$env:PROGRAMDATA\ActivityMonitor\logs\`
 - Restart agent: `net start ActivityMonitor`
-- Restart server (close and rerun)
+- Restart Docker: `docker-compose restart postgres`
 
 ### No Activity Logs Appearing
 
 **Possible causes**:
 1. Agent just started (takes 10-30 seconds to register)
-2. RabbitMQ not running
-3. Server logs not being saved
+2. RabbitMQ not running: `docker-compose logs rabbitmq`
+3. Server logs not showing (startup issue)
 
 **Solution**:
 - Wait 30 seconds and refresh
-- Check RabbitMQ: `docker logs rabbitmq` or `rabbitmqctl status`
-- Check server console for errors
+- Check RabbitMQ: `docker-compose logs rabbitmq` (look for errors)
+- Check server console for startup errors
 
 ### Dashboard Won't Load
 
@@ -486,24 +517,24 @@ Remove-Item -Recurse -Force "$env:PROGRAMDATA\ActivityMonitor"
 - Start dev server: `cd dashboard && npm run dev`
 - Check server health: `curl http://localhost:3000/api/health`
 - Try different port: `npm run dev -- --port 5174`
+- Check Docker containers: `docker-compose ps`
 
-### PostgreSQL Connection Fails
+### PostgreSQL Container Fails to Start
 
 **Possible causes**:
-1. PostgreSQL not running
-2. Wrong connection string in .env
-3. User/database doesn't exist
+1. Port 5432 already in use
+2. Old Docker volume with permission issues
 
 **Solution**:
 ```powershell
-# Verify PostgreSQL running
-pg_isready -h localhost
+# Stop and remove containers + volumes
+docker-compose down -v
 
-# Check connection
-psql -U monitor_user -d activity_monitor -c "SELECT 1;"
+# Check for zombie processes
+Get-Process *docker* | Stop-Process -Force
 
-# Update .env with correct credentials
-# Restart server after changing .env
+# Start fresh
+docker-compose up -d
 ```
 
 ---
@@ -518,12 +549,17 @@ When presenting to stakeholders:
 - **Server** receives events via RabbitMQ and stores in TimescaleDB
 - **Dashboard** queries the server and displays real-time information"
 
+### Setup Simplicity
+"We're using Docker for all backend services—PostgreSQL, RabbitMQ, and Redis—just run `docker-compose up -d` and you're ready to go. No complex manual installation."
+
 ### Key Features to Highlight
 1. **Real-time Monitoring**: "See activity within 2 seconds of it happening"
 2. **Offline Resilience**: "Data buffers locally if server is down, syncs automatically"
 3. **Cross-Platform**: "Works on Windows, Linux, macOS"
 4. **USB Tracking**: "See exactly when external devices were connected"
 5. **Security**: "All data encrypted, hash validation on executables"
+6. **Heatmaps (v3.1.0)**: "Visual activity maps showing user focus areas"
+7. **Process Protection (v3.1.0)**: "Agent cannot be killed, anti-tampering security"
 
 ### Performance
 "With compression, we can store 1000 agents' data for 90 days in under 350GB."
@@ -547,23 +583,28 @@ When presenting to stakeholders:
 ## Useful Demo Commands
 
 ```powershell
-# Quick status check
-$status = @{
-    'PostgreSQL' = (Test-Connection localhost -Count 1 -ErrorAction Ignore)
-    'RabbitMQ' = (Test-NetConnection localhost -Port 5672).TcpTestSucceeded
-    'Server' = (curl http://localhost:3000/api/health -ErrorAction Ignore).StatusCode
-    'Dashboard' = (curl http://localhost:5173 -ErrorAction Ignore).StatusCode
-}
-$status | Format-Table
+# Quick status check (Docker)
+docker-compose ps
+
+# View Docker logs
+docker-compose logs -f
+
+# Check RabbitMQ management
+Start-Process "http://localhost:15672"
 
 # View agent logs in real-time
 Get-Content "$env:PROGRAMDATA\ActivityMonitor\logs\output.log" -Tail 100 -Wait
 
-# Query recent activity
-psql -U monitor_user -d activity_monitor -c "SELECT device_id, app_name, window_title, timestamp FROM activity_logs ORDER BY timestamp DESC LIMIT 20;"
+# Query recent activity from Docker
+docker-compose exec postgres psql -U monitor_user -d activity_monitor -c `
+  "SELECT device_id, app_name, window_title, timestamp FROM activity_logs ORDER BY timestamp DESC LIMIT 20;"
 
 # Check device status
-psql -U monitor_user -d activity_monitor -c "SELECT device_id, nickname, online, last_seen FROM devices;"
+docker-compose exec postgres psql -U monitor_user -d activity_monitor -c `
+  "SELECT device_id, nickname, is_online, last_seen FROM devices;"
+
+# Monitor all containers
+docker-compose logs -f --tail=50
 ```
 
 ---
@@ -576,6 +617,36 @@ psql -U monitor_user -d activity_monitor -c "SELECT device_id, nickname, online,
 
 ---
 
+## Quick Reference: Docker Commands
+
+```powershell
+# Start all services
+docker-compose up -d
+
+# Check status
+docker-compose ps
+
+# View logs
+docker-compose logs
+
+# Stop all services
+docker-compose down
+
+# Stop and remove volumes
+docker-compose down -v
+
+# Access PostgreSQL
+docker-compose exec postgres psql -U monitor_user -d activity_monitor
+
+# Access RabbitMQ Web UI
+Start-Process "http://localhost:15672"  # Username: guest, Password: guest
+
+# Rebuild specific service
+docker-compose build postgres
+```
+
+---
+
 **Ready to demo! Good luck! 🚀**
 
-For more details, see: `README.md`, `QUICK_START.md`, or `INDEX.md`
+For more details, see: `README.md`, `START_HERE.md`, or `INDEX.md`

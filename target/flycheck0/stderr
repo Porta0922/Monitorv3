@@ -1,4 +1,0 @@
-    Updating crates.io index
-error: no matching package named `window-titles` found
-location searched: crates.io index
-required by package `activity-monitor-agent v0.1.0 (C:\dev\Monitor_nuevo\ActivityMonitor-Enterprise-v3\agent)`

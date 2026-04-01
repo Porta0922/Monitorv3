@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use chrono::{DateTime, Utc};
+use crate::monitoring;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstalledApp {
@@ -50,8 +51,6 @@ impl InventoryScanner {
 #[cfg(target_os = "windows")]
 impl InventoryScanner {
     async fn scan_windows_software() -> Result<Vec<InstalledApp>, Box<dyn std::error::Error>> {
-        use std::process::Command;
-        
         let mut apps = Vec::new();
         
         // Common program paths
@@ -68,7 +67,7 @@ impl InventoryScanner {
                     
                     // Look for executable files
                     if path.is_file() && path.extension().map_or(false, |ext| ext == "exe") {
-                        if let Ok(hash) = super::super::monitoring::calculate_file_hash(&path.to_string_lossy()) {
+                        if let Ok(hash) = monitoring::calculate_file_hash(&path.to_string_lossy()) {
                             let app = InstalledApp {
                                 app_name: path.file_stem()
                                     .and_then(|s| s.to_str())
