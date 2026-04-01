@@ -34,6 +34,8 @@ Quick Navigation Guide
 
 ## 📚 Documentation Files
 
+## 📚 Documentation Files (11 Total)
+
 ### Essential (Read First)
 - **START_HERE.md** — Entry point, quick start, features overview
   - Best for: Everyone getting started
@@ -55,10 +57,24 @@ Quick Navigation Guide
   - Read time: 5 minutes
   - Contains: v3.1.0 features, v3.0.0 initial features, roadmap
 
+- **README.md** — Minimalist entry point
+  - Best for: Quick reference, directs to START_HERE.md
+  - Read time: 1 minute
+  - Contains: Navigation to main documentation
+
+### Session Reports & Guides
+- **AGENT_BUILD_SUMMARY.md** — Compilation details & fixes
+  - Details: 22 errors resolved, 10 files fixed, zero final errors
+  - Contains: Technical changes, Windows API implementation, lessons learned
+
+- **SESSION_SUMMARY.md** — Complete session report
+  - Details: Objectives, technical learnings, validation checklist
+  - Contains: Build results, deliverables, next steps
+
 ### Specialized (Reference as Needed)
-- **WINDOWS_DEMO_GUIDE.md** — Step-by-step Windows demo
+- **WINDOWS_DEMO_GUIDE.md** — Step-by-step Windows demo (Docker-based)
   - Best for: Testing on Windows machine
-  - Contains: Pre-setup, installation, testing procedures
+  - Contains: Pre-setup, Docker backend, testing procedures
 
 - **HEATMAPS_AND_PROTECTION_GUIDE.md** — v3.1.0 feature details
   - Best for: Understanding heatmaps & process protection
