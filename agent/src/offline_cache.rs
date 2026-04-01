@@ -1,6 +1,6 @@
 // Offline cache using SQLite + AES-GCM encryption
 use rusqlite::{Connection, Result as SqliteResult};
-use aes_gcm::{AeadInPlace, KeyInit, Aes256Gcm};
+use aes_gcm::{KeyInit, Aes256Gcm, aead::Aead};
 use aes_gcm::{Key, Nonce};
 use rand::Rng;
 use serde_json::Value;
