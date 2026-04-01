@@ -113,10 +113,6 @@ export function LoginPage() {
             {isLoading ? 'Logging in...' : 'Login'}
           </button>
         </form>
-
-        <p style={{ marginTop: '1rem', textAlign: 'center', color: '#666', fontSize: '0.9rem' }}>
-          Demo: Use any credentials (authentication coming soon)
-        </p>
       </div>
     </div>
   );
