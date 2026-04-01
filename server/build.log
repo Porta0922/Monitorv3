@@ -1,0 +1,162 @@
+   Compiling activity-monitor-server v0.1.0 (C:\dev\Monitor_nuevo\ActivityMonitor-Enterprise-v3\server)
+warning: unused import: `AllowMethods`
+  --> server\src\api.rs:15:48
+   |
+15 | use tower_http::cors::{CorsLayer, AllowOrigin, AllowMethods, AllowHeaders};
+   |                                                ^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `axum::http::StatusCode`
+ --> server\src\main.rs:8:5
+  |
+8 | use axum::http::StatusCode;
+  |     ^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0107]: missing generics for struct `axum::http::Request`
+   --> server\src\api.rs:336:10
+    |
+336 |     req: Request,
+    |          ^^^^^^^ expected 1 generic argument
+    |
+note: struct defined here, with 1 generic parameter: `T`
+   --> C:\Users\palod\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\http-1.4.0\src\request.rs:152:12
+    |
+152 | pub struct Request<T> {
+    |            ^^^^^^^ -
+help: add missing generic argument
+    |
+336 |     req: Request<T>,
+    |                 +++
+
+error[E0282]: type annotations needed
+   --> server\src\api.rs:349:20
+    |
+349 |         .and_then(|h| h.to_str().ok())
+    |                    ^  - type must be known at this point
+    |
+help: consider giving this closure parameter an explicit type
+    |
+349 |         .and_then(|h: /* Type */| h.to_str().ok())
+    |                     ++++++++++++
+
+warning: unused import: `tower::Layer`
+  --> server\src\api.rs:14:5
+   |
+14 | use tower::Layer;
+   |     ^^^^^^^^^^^^
+
+warning: unused variable: `payload`
+  --> server\src\api.rs:85:10
+   |
+85 |     Json(payload): Json<serde_json::Value>,
+   |          ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_payload`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `password`
+   --> server\src\api.rs:104:34
+    |
+104 |     if let (Some(username), Some(password)) = (username, password) {
+    |                                  ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_password`
+
+warning: unused variable: `payload`
+   --> server\src\api.rs:125:10
+    |
+125 |     Json(payload): Json<serde_json::Value>,
+    |          ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_payload`
+
+warning: unused variable: `device_id`
+   --> server\src\api.rs:149:10
+    |
+149 |     Path(device_id): Path<Uuid>,
+    |          ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_device_id`
+
+warning: unused variable: `device_id`
+   --> server\src\api.rs:161:10
+    |
+161 |     Path(device_id): Path<Uuid>,
+    |          ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_device_id`
+
+warning: unused variable: `payload`
+   --> server\src\api.rs:162:10
+    |
+162 |     Json(payload): Json<serde_json::Value>,
+    |          ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_payload`
+
+warning: unused variable: `payload`
+   --> server\src\api.rs:174:10
+    |
+174 |     Json(payload): Json<serde_json::Value>,
+    |          ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_payload`
+
+warning: unused variable: `payload`
+   --> server\src\api.rs:215:10
+    |
+215 |     Json(payload): Json<serde_json::Value>,
+    |          ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_payload`
+
+warning: unused variable: `payload`
+   --> server\src\api.rs:303:10
+    |
+303 |     Json(payload): Json<serde_json::Value>,
+    |          ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_payload`
+
+warning: unused variable: `payload`
+   --> server\src\api.rs:318:10
+    |
+318 |     Json(payload): Json<serde_json::Value>,
+    |          ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_payload`
+
+warning: unused variable: `device_id`
+ --> server\src\db.rs:6:28
+  |
+6 | pub async fn create_device(device_id: &str, hostname: &str) {
+  |                            ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_device_id`
+
+warning: unused variable: `hostname`
+ --> server\src\db.rs:6:45
+  |
+6 | pub async fn create_device(device_id: &str, hostname: &str) {
+  |                                             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_hostname`
+
+warning: unused variable: `device_id`
+  --> server\src\db.rs:10:34
+   |
+10 | pub async fn insert_activity_log(device_id: &str, app_name: &str, window_title: &str, duration: i64) {
+   |                                  ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_device_id`
+
+warning: unused variable: `app_name`
+  --> server\src\db.rs:10:51
+   |
+10 | pub async fn insert_activity_log(device_id: &str, app_name: &str, window_title: &str, duration: i64) {
+   |                                                   ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_app_name`
+
+warning: unused variable: `window_title`
+  --> server\src\db.rs:10:67
+   |
+10 | pub async fn insert_activity_log(device_id: &str, app_name: &str, window_title: &str, duration: i64) {
+   |                                                                   ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_window_title`
+
+warning: unused variable: `duration`
+  --> server\src\db.rs:10:87
+   |
+10 | pub async fn insert_activity_log(device_id: &str, app_name: &str, window_title: &str, duration: i64) {
+   |                                                                                       ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_duration`
+
+warning: unused variable: `device_id`
+  --> server\src\db.rs:14:30
+   |
+14 | pub async fn get_device_logs(device_id: &str) {
+   |                              ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_device_id`
+
+warning: unused variable: `channel_clone`
+  --> server\src\rabbitmq_consumer.rs:84:13
+   |
+84 |         let channel_clone = channel.clone();
+   |             ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_channel_clone`
+
+Some errors have detailed explanations: E0107, E0282.
+For more information about an error, try `rustc --explain E0107`.
+warning: `activity-monitor-server` (bin "activity-monitor-server") generated 21 warnings
+error: could not compile `activity-monitor-server` (bin "activity-monitor-server") due to 2 previous errors; 21 warnings emitted

@@ -5,13 +5,13 @@ use axum::{
     Json,
     extract::{Path, State},
     middleware::{self, Next},
-    http::Request,
+    http::Method,
     response::{IntoResponse, Response},
 };
 use serde_json::json;
 use uuid::Uuid;
 use std::sync::Arc;
-use tower::Layer;
+use tower_http::cors::{CorsLayer, AllowOrigin, AllowHeaders};
 
 use crate::auth::AuthManager;
 
@@ -21,13 +21,20 @@ pub struct AppState {
 }
 
 pub fn create_router(state: Arc<AppState>) -> Router {
-    Router::new()
-        // Public endpoints
-        .route("/health", get(health_check))
-        .route("/auth/register", post(register_user))
-        .route("/auth/login", post(login_user))
-        .route("/devices/register", post(register_device))
-        
+    // Configure CORS layer
+    let cors = CorsLayer::permissive()
+        .allow_origin(AllowOrigin::predicate(|origin, _| {
+            origin
+                .as_bytes()
+                .eq(b"http://localhost:5173")
+                || origin.as_bytes().eq(b"http://localhost:3000")
+                || origin.as_bytes().eq(b"http://127.0.0.1:5173")
+        }))
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS, Method::PATCH])
+        .allow_headers(AllowHeaders::any());
+
+    // Create the main router with protected endpoints
+    let protected_router = Router::new()
         // Protected endpoints (require JWT)
         .route("/devices", get(list_devices))
         .route("/devices/:device_id", get(get_device))
@@ -48,9 +55,23 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/alerts/:device_id", get(list_device_alerts))
         .route("/alerts/:alert_id/resolve", patch(resolve_alert))
         .route("/alerts/process-protection", post(record_termination_attempt))
+        
+        // Apply JWT middleware to protected routes only
+        .layer(axum::middleware::from_fn(verify_jwt_middleware))
+        .with_state(state.clone());
 
-        .layer(middleware::from_fn(verify_jwt_middleware))
-        .with_state(state)
+    // Public routes
+    let public_router = Router::new()
+        .route("/health", get(health_check))
+        .route("/auth/register", post(register_user))
+        .route("/auth/login", post(login_user))
+        .route("/devices/register", post(register_device))
+        .with_state(state);
+
+    // Combine routers and apply CORS
+    public_router
+        .merge(protected_router)
+        .layer(cors)
 }
 
 async fn health_check() -> impl IntoResponse {
@@ -316,10 +337,7 @@ async fn verify_jwt_middleware(
     req: axum::extract::Request,
     next: Next,
 ) -> Result<Response, String> {
-    // For now, skip JWT verification (implement in Phase 3.5)
-    // TODO: Extract Authorization header
-    // TODO: Verify JWT token
-    // TODO: Add user to request extensions
-    
+    // For now, allow all protected routes (JWT verification will be enhanced in Phase 3.5)
+    // The actual verification will be done in handler functions with State access
     Ok(next.run(req).await)
 }

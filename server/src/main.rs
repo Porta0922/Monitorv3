@@ -5,7 +5,6 @@ mod rabbitmq_consumer;
 mod whitelist;
 
 use std::sync::Arc;
-use axum::http::StatusCode;
 use tokio::task;
 use dotenv::dotenv;
 
