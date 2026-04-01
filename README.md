@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # ActivityMonitor Enterprise v3
 
 **Enterprise-grade activity monitoring solution** with offline resilience, hardware telemetry, centralized audit, and cross-platform support (Windows/Linux/macOS).
@@ -454,3 +455,6 @@ Proprietary—Internal Use Only
 ---
 
 **Version**: 3.0.0 (MVP) | **Last Updated**: January 2025 | **Status**: Production Ready ✅
+=======
+# Monitorv3
+>>>>>>> a4fe8ca8e95efcc081d870b3f3fd77cf57b67983
