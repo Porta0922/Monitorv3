@@ -8,15 +8,15 @@ authors.workspace = true
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-chrono = { version = "0.4", features = ["serde"] }
+chrono = "0.4.31"
 uuid = { version = "1", features = ["v4", "serde"] }
 rusqlite = { version = "0.29", features = ["bundled"] }
 sha2 = "0.10"
 hex = "0.4"
-aes-gcm = "0.10"
+aes-gcm = "0.10.3"
 rand = "0.8"
 sysinfo = "0.29"
-lapin = "2.5"
+lapin = "2.3.1"
 futures = "0.3"
 tracing = "0.1"
 tracing-subscriber = "0.3"
@@ -26,7 +26,7 @@ hostname = "0.4"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.50"
-winapi = { version = "0.3", features = ["winnt", "jobapi", "jobapi2", "processthreadsapi", "winuser", "handleapi", "winbase"] }
+winapi = { version = "0.3", features = ["all"] }
 windows = { version = "0.48", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Memory"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

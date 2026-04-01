@@ -35,8 +35,8 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/logs/ingest", post(ingest_activity_logs))
         .route("/logs", get(query_activity_logs))
         .route("/logs/:device_id", get(get_device_logs))
-        .route("/inventory/apps", get(list_all_apps))
-        .route("/inventory/apps/:device_id", get(list_device_apps))
+        // TODO: .route("/inventory/apps", get(list_all_apps))
+        // TODO: .route("/inventory/apps/:device_id", get(list_device_apps))
         
         // NEW: Input Heatmaps
         .route("/heatmaps/upload", post(upload_heatmap))
@@ -312,8 +312,8 @@ async fn record_termination_attempt(
 }
 
 // JWT Verification Middleware
-async fn verify_jwt_middleware<B>(
-    req: Request<B>,
+async fn verify_jwt_middleware(
+    req: axum::extract::Request,
     next: Next,
 ) -> Result<Response, String> {
     // For now, skip JWT verification (implement in Phase 3.5)

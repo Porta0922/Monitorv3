@@ -60,14 +60,16 @@ impl AuthManager {
     pub fn hash_password(&self, password: &str) -> Result<String, Box<dyn std::error::Error>> {
         let argon2 = Argon2::default();
         let salt = SaltString::generate(thread_rng());
-        let hash = argon2.hash_password(password.as_bytes(), &salt)?
+        let hash = argon2.hash_password(password.as_bytes(), &salt)
+            .map_err(|e| e.to_string())?
             .to_string();
         Ok(hash)
     }
 
     /// Verify password against hash
     pub fn verify_password(&self, password: &str, hash: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        let parsed_hash = PasswordHash::new(hash)?;
+        let parsed_hash = PasswordHash::new(hash)
+            .map_err(|e| e.to_string())?;
         let argon2 = Argon2::default();
         
         Ok(argon2.verify_password(password.as_bytes(), &parsed_hash).is_ok())

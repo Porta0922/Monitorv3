@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { apiClient } from '../api/client';
 import { NavBar } from '../components/NavBar';
 
 interface Heatmap {
@@ -16,7 +15,7 @@ interface Heatmap {
 }
 
 export function HeatmapsPage() {
-  const [heatmaps, setHeatmaps] = useState<Heatmap[]>([]);
+  const [heatmaps, _setHeatmaps] = useState<Heatmap[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedDevice, setSelectedDevice] = useState<string>('');
 
