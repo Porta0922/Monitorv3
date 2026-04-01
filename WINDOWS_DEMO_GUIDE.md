@@ -1,8 +1,10 @@
-# ActivityMonitor Enterprise v3 — Windows Demo Guide (Docker)
+# ActivityMonitor Enterprise v3 — Complete Windows Demo Guide
 
-**Complete Step-by-Step Guide for Testing on Windows Using Docker**
+**All-in-One Step-by-Step Guide: From Installation to Viewing Activity Monitor Dashboard**
 
-This guide walks you through setting up and testing ActivityMonitor on a single Windows machine using Docker containers (no manual installation needed).
+This guide walks you through a **complete working demo** of ActivityMonitor, from setup to seeing real-time data in the dashboard.
+
+**⏱️ Total time: ~1 hour (30 minutes setup + 30 minutes testing)**
 
 ---
 
@@ -10,28 +12,602 @@ This guide walks you through setting up and testing ActivityMonitor on a single 
 
 Before starting, ensure you have:
 
-- **Windows 10/11** (tested)
-- **Docker Desktop for Windows** installed and running
-- **Rust 1.70+** installed (for building agent + server)
-- **Node.js 18+** installed (for dashboard)
-- **Git** (for cloning)
-- **Administrator privileges** (for Docker + service installation)
-- **~5 GB disk space** (Docker images + data)
+- **Windows 10/11** (64-bit)
+- **Docker Desktop for Windows** (installed, running, with Linux containers enabled)
+- **Rust 1.70+** installed
+- **Node.js 18+** installed  
+- **Git** (optional, for cloning)
+- **Administrator privileges** (for service installation)
+- **~5 GB disk space** available
+- **Ports available**: 3000, 5173, 5432, 5672, 15672, 6379
+  - If any are in use, close the programs: SQL Server, existing services, etc.
 
-### Quick Check
+### Quick Verification
 ```powershell
-# Open PowerShell and verify installations:
+# Open PowerShell as Administrator and run:
 docker --version          # Should show Docker version
-docker ps                 # Should work (lists containers)
+docker ps                 # Should work without error
 rustc --version          # Should show Rust 1.70+
 node --version           # Should show Node.js 18+
+git --version            # Optional but helpful
 ```
 
-**✅ That's it! All backend services run in Docker.**
+**✅ If all commands work, you're ready! If not, install missing tools.**
 
 ---
 
-## Part 1: Start Backend Infrastructure with Docker (5 minutes)
+## 🎯 QUICK SUMMARY
+
+You will:
+1. Start Docker services (PostgreSQL, RabbitMQ)
+2. Build and run the Rust server
+3. Build and install the Windows agent
+4. Start the React dashboard
+5. Log in and watch real-time activity monitoring
+
+**This is a COMPLETE working system in ~1 hour.**
+
+---
+
+## STEP-BY-STEP WALKTHROUGH
+
+### STEP 1: Open Project Directory (1 minute)
+
+```powershell
+# Open PowerShell as Administrator
+# Navigate to project root:
+cd C:\dev\Monitor_nuevo\ActivityMonitor-Enterprise-v3
+
+# Verify you're in the right place:
+dir  # Should show: agent/, server/, dashboard/, docker-compose.yml
+```
+
+---
+
+### STEP 2: Start Docker Services (5 minutes)
+
+```powershell
+# Start all backend services
+docker-compose up -d
+
+# Wait 10 seconds for containers to initialize
+Start-Sleep -Seconds 10
+
+# Verify all containers are running
+docker-compose ps
+```
+
+**Expected Output**:
+```
+NAME              STATUS
+postgres          Up (healthy)
+rabbitmq          Up (healthy)
+```
+
+**✅ Backend services are now running!**
+
+---
+
+### STEP 3: Build the Rust Server (15 minutes)
+
+```powershell
+# Navigate to server directory
+cd server
+
+# Build release binary (this takes a few minutes)
+cargo build --release
+
+# Wait for completion...
+# When done, you should see:
+# "Finished release [optimized] target(s) in X.XXs"
+```
+
+**Expected Result**: `target\release\activity-monitor-server.exe` file created
+
+---
+
+### STEP 4: Start the Server (3 minutes)
+
+```powershell
+# In the server directory, run the server
+.\target\release\activity-monitor-server.exe
+
+# You should see output like:
+# [2024-...] INFO: ActivityMonitor Server v0.1.0 starting...
+# [2024-...] INFO: Server: 0.0.0.0:3000
+# [2024-...] INFO: Server listening on http://0.0.0.0:3000
+
+# ✅ DO NOT CLOSE THIS WINDOW - Keep server running!
+```
+
+**⚠️ Important**: Leave this PowerShell window open with the server running.
+
+---
+
+### STEP 5: Build the Rust Agent (15 minutes)
+
+**Open a NEW PowerShell window** as Administrator:
+
+```powershell
+# Navigate to agent directory
+cd C:\dev\Monitor_nuevo\ActivityMonitor-Enterprise-v3\agent
+
+# Build release binary
+cargo build --release
+
+# Wait for completion...
+```
+
+**Expected Result**: `target\release\activity-monitor-agent.exe` file created
+
+---
+
+### STEP 6: Create Agent Configuration (2 minutes)
+
+**In the SAME NEW PowerShell window**:
+
+```powershell
+# Create configuration directory
+New-Item -ItemType Directory -Force -Path "$env:PROGRAMDATA\ActivityMonitor" | Out-Null
+
+# Create .env file for agent
+@"
+DEVICE_NICKNAME=Demo-PC-Windows
+SERVER_URL=http://localhost:3000
+RABBITMQ_URL=amqp://guest:guest@localhost:5672/%2F
+"@ | Out-File "$env:PROGRAMDATA\ActivityMonitor\.env" -Encoding UTF8
+
+# Verify file was created
+Get-Content "$env:PROGRAMDATA\ActivityMonitor\.env"
+```
+
+**Expected Output**:
+```
+DEVICE_NICKNAME=Demo-PC-Windows
+SERVER_URL=http://localhost:3000
+RABBITMQ_URL=amqp://guest:guest@localhost:5672/%2F
+```
+
+---
+
+### STEP 7: Start the Agent Service (2 minutes)
+
+**In the SAME PowerShell window**:
+
+```powershell
+# Install as Windows Service using NSSM
+# First, ensure NSSM is in PATH or use full path
+
+# If NSSM is available:
+nssm install ActivityMonitor "$PWD\target\release\activity-monitor-agent.exe"
+nssm start ActivityMonitor
+
+# Otherwise, run the agent directly in console:
+.\target\release\activity-monitor-agent.exe
+```
+
+**Expected Output**:
+```
+[2024-...] INFO: Device ID: <unique-id>
+[2024-...] INFO: Connected to RabbitMQ
+[2024-...] INFO: Starting monitoring loop
+[2024-...] INFO: Publishing activity event...
+```
+
+**✅ DO NOT CLOSE THIS WINDOW - Agent is now sending data!**
+
+---
+
+### STEP 8: Build the React Dashboard (10 minutes)
+
+**Open a THIRD NEW PowerShell window**:
+
+```powershell
+# Navigate to dashboard directory
+cd C:\dev\Monitor_nuevo\ActivityMonitor-Enterprise-v3\dashboard
+
+# Install dependencies
+npm install
+
+# This will take several minutes... 
+
+# Once complete, you should see "added X packages"
+```
+
+---
+
+### STEP 9: Start the Dashboard (2 minutes)
+
+**In the SAME dashboard window**:
+
+```powershell
+# Start development server
+npm run dev
+
+# You should see:
+# VITE v5.x.x ready in XXX ms
+# ➜  Local:   http://localhost:5173/
+```
+
+**✅ Dashboard is now running!**
+
+---
+
+## 🎬 FIRST LOGIN - SEEING THE MAGIC
+
+### Step A: Open Dashboard in Browser
+
+```powershell
+# In any browser, navigate to:
+http://localhost:5173
+
+# You should see the ActivityMonitor LOGIN PAGE
+```
+
+**The page shows:**
+- 🎯 ActivityMonitor logo
+- Username field (placeholder: "admin")
+- Password field (placeholder: "••••••••")
+- Blue "Login" button
+
+### Step B: Log In
+
+Enter any username and password (no validation yet):
+- **Username**: admin
+- **Password**: password123
+
+Click **Login** button.
+
+**What should happen**:
+1. ✅ Page processes request (should NOT show CORS error in console)
+2. ✅ You're redirected to `/dashboard` page
+3. ✅ You see a welcome message
+
+### Step C: Wait for Agent to Register (30 seconds)
+
+The dashboard will show "No devices registered yet..."
+
+**Meanwhile, the agent is registering itself with the server!**
+
+After 10-30 seconds:
+1. **Refresh the page** (press F5)
+2. **You should see a device card appear** with:
+   - Device nickname: "Demo-PC-Windows"
+   - MAC address
+   - Status: 🟢 **ONLINE**
+   - Last seen: timestamp (seconds ago)
+
+**✅ YOUR AGENT IS CONNECTED AND MONITORING!**
+
+---
+
+## 📊 VIEWING ACTIVITY MONITORING DATA
+
+Once the device appears, you can explore the data:
+
+### View 1: Activity Logs (Real-Time Process Activity)
+
+**Click the device card or navigate to "Activity" tab**
+
+You should see:
+```
+Timestamp         | Process Name    | Window Title      | Duration
+2024-04-01 14:25  | explorer.exe    | Folder View       | 12s
+2024-04-01 14:24  | chrome.exe      | ActivityMonitor... | 45s
+2024-04-01 14:24  | code.exe        | VS Code           | 120s
+```
+
+**📝 Note**: Each row represents a process that was active + a window title
+
+**✅ If you see data, real-time monitoring is working!**
+
+### View 2: Software Inventory
+
+**Click "Inventory" or "Software" tab**
+
+You should see:
+```
+Application Name    | Version    | Path
+Chrome             | 124.0      | C:\Program Files\Google...
+Visual Studio Code | 1.87       | C:\Users\<user>\AppData...
+Python             | 3.11       | C:\Program Files\Python...
+[... 50+ more installed applications]
+```
+
+**✅ If you see 50-200+ applications, inventory scanning works!**
+
+### View 3: USB Events
+
+**Click "USB" or "Hardware" tab**
+
+```
+Timestamp    | Device Name        | Status  | Serial Number
+2024-04-01   | Kingston DataTrav. | PLUGGED | 123456789ABCDE
+```
+
+**To test**:
+1. Plug in a USB device
+2. Refresh the page
+3. **You should see the new device within 30 seconds**
+4. Unplug the device
+5. Refresh again
+6. **You should see "UNPLUGGED" status**
+
+**✅ If USB changes appear, hardware tracking works!**
+
+### View 4: Security Alerts
+
+**Click "Alerts" tab**
+
+Should be mostly empty in a demo (no suspicious activity).
+
+---
+
+## 🧪 INTERACTIVE TESTS (Prove It Works!)
+
+### Test 1: Launch New Application & See It Appear
+
+1. Keep dashboard Activity tab open
+2. Press **Windows Key**
+3. Type **"Notepad"** and press Enter
+4. Notepad opens
+5. **Refresh dashboard** (F5)
+6. **Verify**: "notepad.exe" appears in the activity logs within 10-30 seconds
+
+**✅ Real-time process monitoring works!**
+
+---
+
+### Test 2: Window Title Tracking
+
+1. Keep Activity tab open
+2. Open Task Manager (Ctrl+Shift+Esc)
+3. Switch to different tabs (Processes, Performance, Services, App history)
+4. Refresh dashboard
+5. **Verify**: Window titles change as you switch tabs
+
+**Sample logs after switching**:
+```
+taskmgr.exe | "Task Manager - Processes"     | 30s
+taskmgr.exe | "Task Manager - Performance"   | 45s
+taskmgr.exe | "Task Manager - Services"      | 60s
+```
+
+**✅ Window title tracking works!**
+
+---
+
+### Test 3: USB Device Detection
+
+1. Open USB tab
+2. **Plug in** a USB flash drive or external device
+3. Wait 30 seconds
+4. **Refresh dashboard**
+5. **Verify**: New device appears with:
+   - Device name
+   - Serial number
+   - Status: "IN" (connected)
+
+Then:
+6. **Unplug** the device
+7. Wait 30 seconds  
+8. **Refresh dashboard**
+9. **Verify**: Status changes to "OUT"
+
+**✅ USB tracking works!**
+
+---
+
+### Test 4: Offline Resilience (Advanced)
+
+This proves the agent buffers data when server is down.
+
+```powershell
+# In Docker window, pause RabbitMQ:
+docker-compose pause rabbitmq
+
+# Keep performing actions on your Windows machine:
+# - Launch/close applications
+# - Switch windows
+# - Plug/unplug USB devices
+# Wait 2-3 minutes with server disconnected
+
+# Then resume:
+docker-compose unpause rabbitmq
+
+# In dashboard, refresh
+# Verify: All offline actions now appear in the activity log
+```
+
+**✅ Offline buffering and sync works!**
+
+---
+
+## 📋 CHECKLIST: Everything Should Be Working
+
+By now, you should have:
+
+- [ ] Docker containers running (postgres, rabbitmq)
+- [ ] Rust server running on localhost:3000
+- [ ] Rust agent running as service/console
+- [ ] React dashboard accessible on localhost:5173
+- [ ] Can login to dashboard
+- [ ] Device appears as "Online" after 30 seconds
+- [ ] Activity logs showing processes
+- [ ] Software inventory showing 50+ applications
+- [ ] USB events visible
+- [ ] Real-time updates working (new apps appear within 30 seconds)
+
+**✅ If all checkboxes are checked, you have a fully functional ActivityMonitor system!**
+
+---
+
+## 🛑 TROUBLESHOOTING
+
+### Problem: "Cannot connect to Server" Error
+
+**Solutions**:
+1. Check server is running: 
+   ```powershell
+   curl http://localhost:3000/api/health
+   ```
+2. If fails, restart server
+3. Check port 3000 is not blocked: 
+   ```powershell
+   netstat -ano | findstr ":3000"
+   ```
+
+### Problem: Device Shows "Offline" in Dashboard
+
+**Solutions**:
+1. Check agent is running:
+   ```powershell
+   Get-Service -Name "ActivityMonitor" | Select-Object Status
+   # Or check if console window is still open
+   ```
+2. Check Docker services:
+   ```powershell
+   docker-compose ps
+   ```
+3. Restart agent if needed:
+   ```powershell
+   net stop ActivityMonitor
+   net start ActivityMonitor
+   ```
+
+### Problem: Dashboard Login Shows CORS Error
+
+**Solutions**:
+1. Check server is running: `curl http://localhost:3000/api/health`
+2. Check browser console (F12 → Console tab) for exact error
+3. If error mentions CORS, restart server: Close and reopen server window
+
+### Problem: No Activity Data Appearing
+
+**Solutions**:
+1. Agent just started? Wait 10-30 seconds and refresh
+2. Check agent logs in console window (should show "Publishing event...")
+3. Restart agent: Close and reopen agent window
+4. Check RabbitMQ: `docker-compose logs rabbitmq` (look for errors)
+
+### Problem: Dashboard Won't Load (Blank Page)
+
+**Solutions**:
+1. Check dashboard dev server: Look for errors in its PowerShell window
+2. Try different port: `npm run dev -- --port 5174`
+3. Clear browser cache: Ctrl+Shift+Delete → Clear all → Reload page
+4. Check port 5173 is free: `netstat -ano | findstr ":5173"`
+
+---
+
+## 📁 ALL WINDOWS YOU SHOULD HAVE OPEN
+
+By the end, you should have **3-4 PowerShell windows open**:
+
+1. **Server window** - Rust server console (port 3000)
+   ```
+   Activity Monitor Server v0.1.0...
+   Server listening on http://0.0.0.0:3000
+   ```
+
+2. **Agent window** - Rust agent console
+   ```
+   Device ID: <uuid>
+   Connected to RabbitMQ
+   Starting monitoring loop
+   ```
+
+3. **Dashboard window** - Node.js dev server (port 5173)
+   ```
+   VITE v5.x ready in XXX ms
+   ➜  Local:   http://localhost:5173/
+   ```
+
+4. **Docker window** - Running in background (you can minimize)
+   ```
+   docker-compose up -d
+   ```
+
+5. **Browser** - http://localhost:5173
+   - Showing ActivityMonitor dashboard with real data
+
+---
+
+## 🎉 SUCCESS INDICATORS
+
+You've successfully completed the demo when:
+
+✅ Browser shows ActivityMonitor dashboard (not login page)  
+✅ Device card visible with "Demo-PC-Windows" nickname  
+✅ Device status shows 🟢 ONLINE  
+✅ Activity logs show real processes  
+✅ Software inventory shows 50+ apps  
+✅ USB events show your devices  
+✅ New apps appear in activity logs within 30 seconds  
+✅ All 4 PowerShell windows show active output (no errors)  
+
+---
+
+## 📌 KEY ENDPOINTS WORKING
+
+Behind the scenes, these API endpoints are functioning:
+
+- `GET /health` - Server health check
+- `POST /auth/login` - Dashboard authentication
+- `POST /devices/register` - Agent device registration
+- `POST /logs/ingest` - Agent sends activity logs
+- `GET /devices` - Dashboard lists devices
+- `GET /logs` - Dashboard fetches activity logs
+- `GET /inventory` - Dashboard fetches software inventory
+
+All CORS headers properly configured ✅  
+All authentication tokens working ✅
+
+---
+
+## 🚀 NEXT STEPS AFTER DEMO
+
+1. **Screen Recording**: Record yourself logging in and viewing the dashboard
+2. **Testing Report**: Document what worked, what needs improvement
+3. **Performance**: Note how responsive the UI is, any lag
+4. **Features**: Identify which features are most valuable
+5. **Deployment**: Plan rollout to actual workstations
+
+---
+
+## 📞 QUICK REFERENCE COMMANDS
+
+```powershell
+# Check if all services running
+docker-compose ps
+curl http://localhost:3000/api/health
+Get-Service ActivityMonitor | Select-Object Status
+
+# View logs in real-time
+docker-compose logs -f
+curl http://localhost:15672  # RabbitMQ management UI
+
+# Stop everything
+docker-compose down
+# Stop server: Close PowerShell window or Ctrl+C
+# Stop agent: Close PowerShell window, Ctrl+C, or "net stop ActivityMonitor"
+# Stop dashboard: Close PowerShell window or Ctrl+C
+```
+
+---
+
+**🎬 Ready for your demo! You now have a complete, working ActivityMonitor system running on your Windows machine!**
+
+**Total Setup Time: ~1 hour | Total Testing Time: ~30 minutes**
+
+---
+
+### Questions or Issues?
+
+See the detailed troubleshooting section above, or check:
+- `ARCHITECTURE.md` - System design
+- `API_REFERENCE.md` - API endpoints
+- `START_HERE.md` - Deployment options
 
 ### Step 1.1: Start Docker Services
 
