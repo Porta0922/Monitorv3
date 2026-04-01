@@ -122,7 +122,7 @@ fn get_mac_windows() -> Result<String, Box<dyn std::error::Error>> {
         .arg("/all")
         .output()?;
     
-    let output_str = String::from_utf8(output.stdout)?;
+    let output_str = String::from_utf8_lossy(&output.stdout).to_string();
     
     // Parse MAC address from ipconfig output
     for line in output_str.lines() {
@@ -144,7 +144,7 @@ fn get_mac_linux() -> Result<String, Box<dyn std::error::Error>> {
         .args(&["link", "show"])
         .output()?;
     
-    let output_str = String::from_utf8(output.stdout)?;
+    let output_str = String::from_utf8_lossy(&output.stdout).to_string();
     
     // Parse first non-loopback MAC address
     for line in output_str.lines() {
@@ -165,7 +165,7 @@ fn get_mac_macos() -> Result<String, Box<dyn std::error::Error>> {
     let output = Command::new("ifconfig")
         .output()?;
     
-    let output_str = String::from_utf8(output.stdout)?;
+    let output_str = String::from_utf8_lossy(&output.stdout).to_string();
     
     // Parse first MAC address
     for line in output_str.lines() {
