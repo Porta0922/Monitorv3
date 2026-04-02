@@ -26,91 +26,47 @@ export function LoginPage() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f5f5f5' }}>
-      <div style={{
-        backgroundColor: 'white',
-        padding: '2rem',
-        borderRadius: '8px',
-        boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-        width: '100%',
-        maxWidth: '400px'
-      }}>
-        <h1 style={{ textAlign: 'center', marginBottom: '2rem', color: '#333' }}>
-          🎯 ActivityMonitor
-        </h1>
+    <div
+      className="flex min-h-screen items-center justify-center bg-[#0a0e27]"
+      style={{ backgroundImage: 'radial-gradient(circle at 10% 0%, rgba(0,217,255,0.16), transparent 38%), radial-gradient(circle at 90% 100%, rgba(0,255,136,0.1), transparent 32%)' }}
+    >
+      <div className="cyber-card w-[520px] rounded-2xl p-8">
+        <h1 className="font-display mb-2 text-center text-3xl font-black text-[#e4e6eb]">CYBERPUNK NEXUS</h1>
+        <p className="mb-8 text-center text-sm text-[#a0a5b2]">Autenticacion de consola central</p>
 
-        <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: '1rem' }}>
-            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', color: '#333' }}>
-              Username
-            </label>
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div>
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-[#00d9ff]">Usuario</label>
             <input
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               placeholder="admin"
-              style={{
-                width: '100%',
-                padding: '0.75rem',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                fontSize: '1rem',
-                boxSizing: 'border-box'
-              }}
+              className="w-full rounded-lg border border-[#1e2339] bg-[#0a0e27] px-4 py-3 text-[#e4e6eb]"
               required
             />
           </div>
 
-          <div style={{ marginBottom: '1.5rem' }}>
-            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', color: '#333' }}>
-              Password
-            </label>
+          <div>
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-[#00d9ff]">Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              style={{
-                width: '100%',
-                padding: '0.75rem',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                fontSize: '1rem',
-                boxSizing: 'border-box'
-              }}
+              className="w-full rounded-lg border border-[#1e2339] bg-[#0a0e27] px-4 py-3 text-[#e4e6eb]"
               required
             />
           </div>
 
-          {error && (
-            <div style={{
-              marginBottom: '1rem',
-              padding: '0.75rem',
-              backgroundColor: '#fee',
-              color: '#c33',
-              borderRadius: '4px',
-              fontSize: '0.9rem'
-            }}>
-              {error}
-            </div>
-          )}
+          {error && <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</div>}
 
           <button
             type="submit"
             disabled={isLoading}
-            style={{
-              width: '100%',
-              padding: '0.75rem',
-              backgroundColor: isLoading ? '#ccc' : '#0066cc',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              fontSize: '1rem',
-              fontWeight: '500',
-              cursor: isLoading ? 'not-allowed' : 'pointer'
-            }}
+            className="w-full rounded-lg border border-[#00d9ff]/40 bg-[#00d9ff]/15 px-4 py-3 text-sm font-semibold uppercase tracking-wider text-[#00d9ff] hover:bg-[#00d9ff]/25 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isLoading ? 'Logging in...' : 'Login'}
+            {isLoading ? 'Conectando...' : 'Ingresar al Nexus'}
           </button>
         </form>
       </div>

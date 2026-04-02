@@ -6,12 +6,17 @@ import { ActivityPage } from './pages/ActivityPage';
 import { InventoryPage } from './pages/InventoryPage';
 import { USBPage } from './pages/USBPage';
 import { AlertsPage } from './pages/AlertsPage';
+import { DeviceDetailPage } from './pages/DeviceDetailPage';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
 
   if (isLoading) {
-    return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>Loading...</div>;
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#0a0e27] text-[#00d9ff]">
+        <div className="cyber-card rounded-xl px-8 py-5 font-display text-lg">Syncing Nexus...</div>
+      </div>
+    );
   }
 
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" />;
@@ -27,6 +32,14 @@ function App() {
           element={
             <PrivateRoute>
               <DashboardPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/devices/:deviceId"
+          element={
+            <PrivateRoute>
+              <DeviceDetailPage />
             </PrivateRoute>
           }
         />
