@@ -75,6 +75,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             None
         }
     };
+
+    // Publish initial snapshots as soon as RabbitMQ is available.
+    if let Some(ref pub_) = publisher {
+        match inventory::InventoryScanner::generate_inventory_report().await {
+            Ok(report) => {
+                if let Err(e) = pub_.publish_event("inventory", serde_json::json!({
+                    "device_id": device_identity.device_id.to_string(),
+                    "inventory": report,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                })).await {
+                    tracing::warn!("Failed to publish initial inventory event: {}", e);
+                } else {
+                    tracing::info!("✅ Initial inventory event published");
+                }
+            }
+            Err(e) => tracing::warn!("Failed to generate initial inventory report: {}", e),
+        }
+
+        let startup_monitoring = MonitoringLoop::new();
+        if let Some(window) = startup_monitoring.capture_active_window() {
+            if let Err(e) = pub_.publish_event("activity", serde_json::json!({
+                "device_id": device_identity.device_id.to_string(),
+                "app_name": window.app_name,
+                "window_title": window.window_title,
+                "duration_seconds": 0,
+                "timestamp": window.timestamp.to_rfc3339(),
+            })).await {
+                tracing::warn!("Failed to publish initial activity event: {}", e);
+            } else {
+                tracing::info!("✅ Initial activity event published");
+            }
+        } else {
+            tracing::warn!("No active window detected for initial activity publish");
+        }
+    }
     
     // Spawn monitoring task
     let device_id = device_identity.device_id;
