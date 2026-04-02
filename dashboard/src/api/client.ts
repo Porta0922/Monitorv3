@@ -3,7 +3,7 @@ import axios from 'axios';
 import type { AxiosInstance } from 'axios';
 import type { Device, ActivityLog, AppInfo, USBEvent, SecurityAlert, LoginResponse } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const BASE_URL = 'http://localhost:3000/api';
 
 class ApiClient {
   private client: AxiosInstance;
@@ -11,7 +11,7 @@ class ApiClient {
 
   constructor() {
     this.client = axios.create({
-      baseURL: API_BASE_URL,
+      baseURL: BASE_URL,
       timeout: 10000,
     });
 
@@ -149,6 +149,45 @@ class ApiClient {
       resolved: true,
     });
     return response.data;
+  }
+
+  // Dashboard Overview & Insights
+  async getOverview(): Promise<{
+    devices_today: number;
+    active_time: number;
+    idle_time: number;
+    idle_pct: string;
+    keys_today: number;
+  }> {
+    const response = await this.client.get<{
+      success: boolean;
+      data: {
+        devices_today: number;
+        active_time: number;
+        idle_time: number;
+        idle_pct: string;
+        keys_today: number;
+      };
+    }>('/overview');
+    return response.data.data;
+  }
+
+  async getTopApps(): Promise<
+    Array<{
+      app_name: string;
+      total_duration_seconds: number;
+      total_duration_hours: string;
+    }>
+  > {
+    const response = await this.client.get<{
+      success: boolean;
+      data: Array<{
+        app_name: string;
+        total_duration_seconds: number;
+        total_duration_hours: string;
+      }>;
+    }>('/top_apps');
+    return response.data.data || [];
   }
 
   // Health

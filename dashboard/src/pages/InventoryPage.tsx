@@ -1,11 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../api/client';
-import { NavBar } from '../components/NavBar';
+import { AppShell } from '../components/AppShell';
 import type { AppInfo } from '../types';
 
 export function InventoryPage() {
-  const navigate = useNavigate();
   const [apps, setApps] = useState<AppInfo[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -26,98 +24,63 @@ export function InventoryPage() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f5' }}>
-      <NavBar currentPage="inventory" />
-
-      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '2rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-          <h2 style={{ margin: 0 }}>Installed Applications ({apps.length})</h2>
-          <button
-            onClick={loadSoftwareInventory}
-            style={{
-              padding: '0.5rem 1rem',
-              backgroundColor: '#0066cc',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer'
-            }}
-          >
-            🔄 Refresh
-          </button>
+    <AppShell
+      currentPage="inventory"
+      title="Inventario de Software"
+      subtitle="Aplicaciones instaladas y validacion de binarios"
+      actions={
+        <button
+          onClick={loadSoftwareInventory}
+          className="rounded-lg border border-[#00d9ff]/40 bg-[#00d9ff]/10 px-4 py-2 text-sm font-medium text-[#00d9ff] hover:border-[#00d9ff] hover:bg-[#00d9ff]/20"
+        >
+          Actualizar
+        </button>
+      }
+    >
+      <section className="overflow-hidden rounded-xl border border-[#1e2339] bg-gradient-to-br from-[#131829] to-[#0a0e27] shadow-2xl">
+        <div className="border-b border-[#1e2339] bg-[#0a0e27] px-6 py-4">
+          <h2 className="text-lg font-semibold text-[#e4e6eb]">Aplicaciones detectadas ({apps.length})</h2>
         </div>
 
         {isLoading ? (
-          <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
-            Loading software inventory...
-          </div>
+          <div className="px-6 py-10 text-center text-[#a0a5b2]">Cargando inventario...</div>
         ) : apps.length === 0 ? (
-          <div style={{
-            textAlign: 'center',
-            padding: '2rem',
-            backgroundColor: 'white',
-            borderRadius: '8px',
-            color: '#666'
-          }}>
-            No software inventory available
-          </div>
+          <div className="px-6 py-10 text-center text-[#a0a5b2]">No hay inventario disponible.</div>
         ) : (
-          <div style={{ backgroundColor: 'white', borderRadius: '8px', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
               <thead>
-                <tr style={{ backgroundColor: '#f5f5f5', borderBottom: '2px solid #ddd' }}>
-                  <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#333' }}>Application</th>
-                  <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#333' }}>Version</th>
-                  <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#333' }}>Status</th>
-                  <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#333' }}>SHA-256 Hash</th>
+                <tr className="border-b border-[#1e2339] bg-[#0a0e27]">
+                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Aplicacion</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Version</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Estado</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Hash SHA-256</th>
                 </tr>
               </thead>
               <tbody>
-                {apps.slice(0, 100).map((app, idx) => (
-                  <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
-                    <td style={{ padding: '1rem', color: '#333', fontWeight: '500' }}>
-                      {app.app_name}
-                    </td>
-                    <td style={{ padding: '1rem', color: '#666' }}>
-                      {app.version || 'Unknown'}
-                    </td>
-                    <td style={{ padding: '1rem' }}>
-                      <span style={{
-                        padding: '0.25rem 0.75rem',
-                        borderRadius: '20px',
-                        fontSize: '0.85rem',
-                        fontWeight: '500',
-                        backgroundColor: app.verified ? '#efe' : '#fee',
-                        color: app.verified ? '#060' : '#c33'
-                      }}>
-                        {app.verified ? '✓ Verified' : '⚠ Unverified'}
+                {apps.slice(0, 120).map((app, idx) => (
+                  <tr key={`${app.app_name}-${idx}`} className="border-b border-[#1e2339] hover:bg-[#131829]">
+                    <td className="px-6 py-3 font-medium text-[#e4e6eb]">{app.app_name}</td>
+                    <td className="px-6 py-3 text-[#a0a5b2]">{app.version || 'Unknown'}</td>
+                    <td className="px-6 py-3">
+                      <span
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                          app.verified
+                            ? 'border-[#00ff88]/50 bg-[#00ff88]/10 text-[#00ff88]'
+                            : 'border-red-400/50 bg-red-500/10 text-red-400'
+                        }`}
+                      >
+                        {app.verified ? 'Verified' : 'Unverified'}
                       </span>
                     </td>
-                    <td style={{ padding: '1rem', color: '#666', fontFamily: 'monospace', fontSize: '0.8rem', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {app.exe_hash}
-                    </td>
+                    <td className="max-w-[380px] truncate px-6 py-3 font-mono text-xs text-[#a0a5b2]">{app.exe_hash}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
-
-        <button
-          onClick={() => navigate('/dashboard')}
-          style={{
-            marginTop: '1rem',
-            padding: '0.5rem 1rem',
-            backgroundColor: '#666',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer'
-          }}
-        >
-          ← Back to Dashboard
-        </button>
-      </div>
-    </div>
+      </section>
+    </AppShell>
   );
 }

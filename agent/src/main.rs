@@ -5,6 +5,7 @@ mod device_id;
 mod rabbitmq_publisher;
 mod usb_detection;
 mod input_tracking;
+mod keystroke_tracker;
 mod process_protection;
 
 use std::sync::Arc;
@@ -13,6 +14,7 @@ use device_id::{load_or_create_device_identity, get_device_nickname};
 use monitoring::MonitoringLoop;
 use usb_detection::UsbMonitor;
 use input_tracking::InputTracker;
+use keystroke_tracker::KeystrokeTracker;
 use process_protection::ProcessProtection;
 
 #[tokio::main]
@@ -61,6 +63,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let input_tracker = Arc::new(InputTracker::new(device_identity.device_id.to_string(), 19));
     input_tracker.set_screen_resolution(1920, 1080).await;
     tracing::info!("✅ Input activity tracking enabled");
+
+    // Initialize Keystroke Tracking (Idle detection + keystroke counting)
+    let keystroke_tracker = Arc::new(KeystrokeTracker::new());
+    
+    // Initialize platform-specific input listener
+    #[cfg(target_os = "windows")]
+    {
+        use keystroke_tracker::windows_input_listener;
+        if let Err(e) = windows_input_listener::init_input_listener(keystroke_tracker.clone()).await {
+            tracing::warn!("⚠️  Failed to initialize keystroke tracking: {}", e);
+        } else {
+            tracing::info!("✅ Keystroke tracking enabled");
+        }
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        use keystroke_tracker::linux_input_listener;
+        if let Err(e) = linux_input_listener::init_input_listener(keystroke_tracker.clone()).await {
+            tracing::warn!("⚠️  Failed to initialize keystroke tracking: {}", e);
+        } else {
+            tracing::info!("✅ Keystroke tracking enabled");
+        }
+    }
+    
+    #[cfg(target_os = "macos")]
+    {
+        use keystroke_tracker::macos_input_listener;
+        if let Err(e) = macos_input_listener::init_input_listener(keystroke_tracker.clone()).await {
+            tracing::warn!("⚠️  Failed to initialize keystroke tracking: {}", e);
+        } else {
+            tracing::info!("✅ Keystroke tracking enabled");
+        }
+    }
     
     // Initialize RabbitMQ publisher
     let rabbitmq_url = "amqp://guest:guest@localhost:5672/%2F".to_string();
@@ -115,11 +151,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let device_id = device_identity.device_id;
     let mut monitoring = MonitoringLoop::new();
     let publisher_clone = publisher.clone();
+    let keystroke_tracker_clone = keystroke_tracker.clone();
     
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(2));
         loop {
             interval.tick().await;
+            
+            // Update idle status based on recent activity
+            keystroke_tracker_clone.update_idle_status().await;
+            
             let _processes = monitoring.capture_processes();
             // TODO: Send to RabbitMQ or cache
         }

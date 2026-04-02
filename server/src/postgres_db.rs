@@ -6,8 +6,8 @@ use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActivityLog {
-    pub id: String,
-    pub device_id: String,
+    pub id: Uuid,
+    pub device_id: Uuid,
     pub app_name: String,
     pub window_title: String,
     pub duration_seconds: i64,
@@ -26,11 +26,38 @@ pub struct InventoryItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Device {
-    pub id: String,
+    pub id: Uuid,
     pub hostname: String,
-    pub device_id: String,
+    pub device_id: Uuid,
+    pub mac_address: Option<String>,
+    pub created_at: DateTime<Utc>,
     pub last_seen: DateTime<Utc>,
     pub nickname: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Overview {
+    pub devices_today: i64,
+    pub active_time: i64,
+    pub idle_time: i64,
+    pub idle_pct: f64,
+    pub keys_today: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopApp {
+    pub app_name: String,
+    pub total_duration_seconds: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamEvent {
+    pub device_id: String,
+    pub app: String,
+    pub title: String,
+    pub is_idle: bool,
+    pub is_live: bool,
+    pub last_seen: String,
 }
 
 pub struct Database {
@@ -57,17 +84,35 @@ impl Database {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS devices (
-                id UUID PRIMARY KEY,
-                device_id VARCHAR(255) UNIQUE NOT NULL,
+                device_id UUID PRIMARY KEY,
                 hostname VARCHAR(255) NOT NULL,
                 nickname VARCHAR(255),
+                mac_address VARCHAR(17),
                 last_seen TIMESTAMPTZ NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
             "#,
         )
         .execute(pool)
         .await?;
+
+        // Reconcile older device table versions with the current schema.
+        sqlx::query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS nickname VARCHAR(255)")
+            .execute(pool)
+            .await?;
+        sqlx::query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS mac_address VARCHAR(17)")
+            .execute(pool)
+            .await?;
+        sqlx::query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            .execute(pool)
+            .await?;
+        sqlx::query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            .execute(pool)
+            .await?;
+        sqlx::query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            .execute(pool)
+            .await?;
 
         // Create activity_logs table
         sqlx::query(
@@ -116,6 +161,8 @@ impl Database {
     ) -> Result<ActivityLog, sqlx::Error> {
         let id = Uuid::new_v4();
         let timestamp = Utc::now();
+        let device_uuid = Uuid::parse_str(&device_id)
+            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
 
         sqlx::query(
             r#"
@@ -124,7 +171,7 @@ impl Database {
             "#,
         )
         .bind(id)
-        .bind(&device_id)
+        .bind(device_uuid)
         .bind(&app_name)
         .bind(&window_title)
         .bind(duration_seconds)
@@ -135,8 +182,8 @@ impl Database {
         tracing::info!("📝 Saved activity log: {} | {} | {} seconds", device_id, app_name, duration_seconds);
 
         Ok(ActivityLog {
-            id: id.to_string(),
-            device_id,
+            id,
+            device_id: device_uuid,
             app_name,
             window_title,
             duration_seconds,
@@ -144,17 +191,17 @@ impl Database {
         })
     }
 
-    pub async fn get_activity_logs(&self, device_id: Option<&str>) -> Result<Vec<ActivityLog>, sqlx::Error> {
+    pub async fn get_activity_logs(&self, device_id: Option<Uuid>) -> Result<Vec<ActivityLog>, sqlx::Error> {
         let logs = if let Some(did) = device_id {
-            sqlx::query_as::<_, (String, String, String, String, i64, DateTime<Utc>)>(
-                "SELECT id::text, device_id, app_name, window_title, duration_seconds, timestamp FROM activity_logs WHERE device_id = $1 ORDER BY timestamp DESC"
+            sqlx::query_as::<_, (Uuid, Uuid, String, String, i64, DateTime<Utc>)>(
+                "SELECT id, device_id, app_name, window_title, duration_seconds, timestamp FROM activity_logs WHERE device_id = $1 ORDER BY timestamp DESC"
             )
             .bind(did)
             .fetch_all(&self.pool)
             .await?
         } else {
-            sqlx::query_as::<_, (String, String, String, String, i64, DateTime<Utc>)>(
-                "SELECT id::text, device_id, app_name, window_title, duration_seconds, timestamp FROM activity_logs ORDER BY timestamp DESC"
+            sqlx::query_as::<_, (Uuid, Uuid, String, String, i64, DateTime<Utc>)>(
+                "SELECT id, device_id, app_name, window_title, duration_seconds, timestamp FROM activity_logs ORDER BY timestamp DESC"
             )
             .fetch_all(&self.pool)
             .await?
@@ -245,22 +292,29 @@ impl Database {
         &self,
         hostname: String,
         device_id: String,
+        mac_address: Option<String>,
         nickname: Option<String>,
     ) -> Result<Device, sqlx::Error> {
-        let id = Uuid::new_v4();
         let last_seen = Utc::now();
+        let device_uuid = Uuid::parse_str(&device_id)
+            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
 
         sqlx::query(
             r#"
-            INSERT INTO devices (id, device_id, hostname, nickname, last_seen)
+            INSERT INTO devices (device_id, hostname, nickname, mac_address, last_seen)
             VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (device_id) DO UPDATE SET last_seen = $5
+            ON CONFLICT (device_id) DO UPDATE SET
+                hostname = EXCLUDED.hostname,
+                nickname = COALESCE(EXCLUDED.nickname, devices.nickname),
+                mac_address = COALESCE(EXCLUDED.mac_address, devices.mac_address),
+                last_seen = EXCLUDED.last_seen,
+                updated_at = NOW()
             "#,
         )
-        .bind(id)
-        .bind(&device_id)
+        .bind(device_uuid)
         .bind(&hostname)
         .bind(&nickname)
+        .bind(&mac_address)
         .bind(last_seen)
         .execute(&self.pool)
         .await?;
@@ -268,27 +322,31 @@ impl Database {
         tracing::info!("🖥️  Registered device: {} ({})", hostname, device_id);
 
         Ok(Device {
-            id: id.to_string(),
+            id: device_uuid,
             hostname,
-            device_id,
+            device_id: device_uuid,
+            mac_address,
+            created_at: last_seen,
             last_seen,
             nickname,
         })
     }
 
     pub async fn get_devices(&self) -> Result<Vec<Device>, sqlx::Error> {
-        let devices = sqlx::query_as::<_, (String, String, String, Option<String>, DateTime<Utc>)>(
-            "SELECT id::text, hostname, device_id, nickname, last_seen FROM devices ORDER BY last_seen DESC"
+        let devices = sqlx::query_as::<_, (Uuid, String, Uuid, Option<String>, DateTime<Utc>, DateTime<Utc>, Option<String>)>(
+            "SELECT device_id AS id, hostname, device_id, nickname, last_seen, created_at, mac_address FROM devices ORDER BY last_seen DESC"
         )
         .fetch_all(&self.pool)
         .await?;
 
         Ok(devices
             .into_iter()
-            .map(|(id, hostname, device_id, nickname, last_seen)| Device {
+            .map(|(id, hostname, device_id, nickname, last_seen, created_at, mac_address)| Device {
                 id,
                 hostname,
                 device_id,
+                mac_address,
+                created_at,
                 last_seen,
                 nickname,
             })
@@ -303,6 +361,72 @@ impl Database {
 
         tracing::debug!("⏱️  Updated device last_seen: {}", device_id);
         Ok(())
+    }
+
+    /// Get overview statistics for the dashboard (devices today, active time, idle time, etc.)
+    pub async fn get_overview(&self) -> Result<Overview, sqlx::Error> {
+        // Count unique devices that have activity today
+        let devices_today_result = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(DISTINCT device_id) FROM activity_logs WHERE timestamp >= NOW() - INTERVAL '1 day'"
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .unwrap_or(0);
+
+        // Sum of duration_seconds for today (active time)
+        let active_time_result = sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(SUM(duration_seconds), 0)::BIGINT FROM activity_logs WHERE timestamp >= NOW() - INTERVAL '1 day' AND window_title NOT LIKE '%idle%'"
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        // Sum of duration_seconds for idle activity today
+        let idle_time_result = sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(SUM(duration_seconds), 0)::BIGINT FROM activity_logs WHERE timestamp >= NOW() - INTERVAL '1 day' AND window_title LIKE '%idle%'"
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        // Calculate idle percentage
+        let total_time = active_time_result + idle_time_result;
+        let idle_pct = if total_time > 0 {
+            (idle_time_result as f64 / total_time as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        // For now, keys_today is a placeholder (would need keystroke tracking in the agent)
+        let keys_today = 0i64;
+
+        Ok(Overview {
+            devices_today: devices_today_result,
+            active_time: active_time_result,
+            idle_time: idle_time_result,
+            idle_pct,
+            keys_today,
+        })
+    }
+
+    /// Get top 6 most used applications in the last N days
+    pub async fn get_top_apps(&self, days: i64) -> Result<Vec<TopApp>, sqlx::Error> {
+        let apps = sqlx::query_as::<_, (String, i64)>(
+            "SELECT app_name, COALESCE(SUM(duration_seconds), 0)::BIGINT as total_duration FROM activity_logs 
+             WHERE timestamp >= NOW() - INTERVAL '1 day' * $1 
+             GROUP BY app_name 
+             ORDER BY total_duration DESC 
+             LIMIT 6"
+        )
+        .bind(days)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(apps
+            .into_iter()
+            .map(|(app_name, total_duration_seconds)| TopApp {
+                app_name,
+                total_duration_seconds,
+            })
+            .collect())
     }
 }
 

@@ -216,6 +216,7 @@ impl RabbitMQConsumer {
             device_id.clone(),
             device_id.clone(),
             None,
+            None,
         ).await;
 
         // Insert activity log
@@ -241,6 +242,7 @@ impl RabbitMQConsumer {
         let _ = db.register_device(
             device_id.clone(),
             device_id.clone(),
+            None,
             None,
         ).await;
 

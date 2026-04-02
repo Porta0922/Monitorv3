@@ -4,14 +4,17 @@ use axum::{
     routing::{get, post, patch},
     Json,
     extract::{Path, State},
-    middleware::{self, Next},
+    middleware::Next,
     http::Method,
     response::{IntoResponse, Response},
 };
 use serde_json::json;
 use uuid::Uuid;
 use std::sync::Arc;
+use chrono::{Duration, Utc};
 use tower_http::cors::{CorsLayer, AllowOrigin, AllowHeaders};
+use futures::stream::{self, StreamExt};
+use std::convert::Infallible;
 
 use crate::auth::AuthManager;
 use crate::postgres_db::Database;
@@ -67,6 +70,9 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/auth/register", post(register_user))
         .route("/auth/login", post(login_user))
         .route("/devices/register", post(register_device))
+        .route("/overview", get(get_overview))
+        .route("/top_apps", get(get_top_apps))
+        .route("/stream", get(stream_events))
         .with_state(state);
 
     // Combine routers with /api prefix and apply CORS
@@ -126,16 +132,48 @@ async fn login_user(
 }
 
 async fn register_device(
-    State(_state): State<Arc<AppState>>,
-    Json(_payload): Json<serde_json::Value>,
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    // TODO: Extract device_id, hostname, mac_address
-    // TODO: Store in devices table
-    
-    Json(json!({
-        "success": true,
-        "message": "Device registered successfully"
-    }))
+    let device_id = match payload.get("device_id").and_then(|value| value.as_str()) {
+        Some(value) => value.to_string(),
+        None => {
+            return Json(json!({
+                "success": false,
+                "error": "device_id is required"
+            }));
+        }
+    };
+
+    let hostname = payload
+        .get("hostname")
+        .and_then(|value| value.as_str())
+        .unwrap_or(&device_id)
+        .to_string();
+
+    let mac_address = payload
+        .get("mac_address")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+
+    let nickname = payload
+        .get("nickname")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+
+    match state.db.register_device(hostname, device_id, mac_address, nickname).await {
+        Ok(device) => Json(json!({
+            "success": true,
+            "device": serialize_device(device)
+        })),
+        Err(error) => {
+            tracing::error!("Failed to register device: {}", error);
+            Json(json!({
+                "success": false,
+                "error": "Failed to register device"
+            }))
+        }
+    }
 }
 
 async fn list_devices(
@@ -143,15 +181,7 @@ async fn list_devices(
 ) -> impl IntoResponse {
     match state.db.get_devices().await {
         Ok(devices) => {
-            let device_json: Vec<serde_json::Value> = devices.iter().map(|d| {
-                json!({
-                    "id": d.id,
-                    "hostname": d.hostname,
-                    "device_id": d.device_id,
-                    "nickname": d.nickname,
-                    "last_seen": d.last_seen.to_rfc3339(),
-                })
-            }).collect();
+            let device_json: Vec<serde_json::Value> = devices.into_iter().map(serialize_device).collect();
             
             Json(json!({
                 "success": true,
@@ -171,21 +201,14 @@ async fn list_devices(
 
 async fn get_device(
     State(state): State<Arc<AppState>>,
-    Path(_device_id): Path<Uuid>,
+    Path(device_id): Path<Uuid>,
 ) -> impl IntoResponse {
-    // Get first device as example (TODO: filter by ID)
     match state.db.get_devices().await {
         Ok(devices) => {
-            if let Some(device) = devices.first() {
+            if let Some(device) = devices.into_iter().find(|device| device.device_id == device_id) {
                 return Json(json!({
                     "success": true,
-                    "device": {
-                        "id": device.id,
-                        "hostname": device.hostname,
-                        "device_id": device.device_id,
-                        "nickname": device.nickname,
-                        "last_seen": device.last_seen.to_rfc3339(),
-                    }
+                    "device": serialize_device(device)
                 }));
             }
         }
@@ -264,7 +287,7 @@ async fn get_device_logs(
 ) -> impl IntoResponse {
     let device_id_str = device_id.to_string();
     
-    match state.db.get_activity_logs(Some(&device_id_str)).await {
+    match state.db.get_activity_logs(Some(device_id)).await {
         Ok(logs) => {
             let logs_json: Vec<serde_json::Value> = logs.iter().map(|l| {
                 json!({
@@ -427,4 +450,152 @@ async fn verify_jwt_middleware(
     // For now, allow all protected routes (JWT verification will be enhanced in Phase 3.5)
     // The actual verification will be done in handler functions with State access
     Ok(next.run(req).await)
+}
+
+fn serialize_device(device: crate::postgres_db::Device) -> serde_json::Value {
+    let online = device.last_seen > Utc::now() - Duration::minutes(5);
+
+    json!({
+        "id": device.id,
+        "device_id": device.device_id,
+        "hostname": device.hostname,
+        "nickname": device.nickname,
+        "mac_address": device.mac_address.unwrap_or_else(|| "Unknown".to_string()),
+        "created_at": device.created_at.to_rfc3339(),
+        "last_seen": device.last_seen.to_rfc3339(),
+        "online": online,
+        "status": if online { "online" } else { "offline" }
+    })
+}
+
+// NEW ENDPOINTS FOR DASHBOARD
+
+async fn get_overview(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    match state.db.get_overview().await {
+        Ok(overview) => Json(json!({
+            "success": true,
+            "data": {
+                "devices_today": overview.devices_today,
+                "active_time": overview.active_time,
+                "idle_time": overview.idle_time,
+                "idle_pct": format!("{:.1}%", overview.idle_pct),
+                "keys_today": overview.keys_today,
+            }
+        })),
+        Err(e) => {
+            tracing::error!("Failed to fetch overview: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch overview data"
+            }))
+        }
+    }
+}
+
+async fn get_top_apps(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    // Get top apps from last 7 days
+    match state.db.get_top_apps(7).await {
+        Ok(apps) => {
+            let apps_json: Vec<serde_json::Value> = apps
+                .into_iter()
+                .map(|app| {
+                    json!({
+                        "app_name": app.app_name,
+                        "total_duration_seconds": app.total_duration_seconds,
+                        "total_duration_hours": format!("{:.2}", app.total_duration_seconds as f64 / 3600.0),
+                    })
+                })
+                .collect();
+
+            Json(json!({
+                "success": true,
+                "data": apps_json
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch top apps: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch top apps",
+                "data": []
+            }))
+        }
+    }
+}
+
+// SSE Stream endpoint
+async fn stream_events(
+    State(state): State<Arc<AppState>>,
+) -> axum::response::sse::Sse<impl futures::stream::Stream<Item = Result<axum::response::sse::Event, Infallible>>> {
+    let db = state.db.clone();
+    
+    // Create a stream that emits events periodically
+    let stream = stream::repeat_with(move || {
+        let db = db.clone();
+        async move {
+            // Wait 2 seconds between emissions
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            
+            // Fetch current activity logs
+            match db.get_activity_logs(None).await {
+                Ok(logs) => {
+                    if logs.is_empty() {
+                        return Ok(axum::response::sse::Event::default());
+                    }
+
+                    // Group logs by device_id, keeping most recent
+                    let mut device_logs: std::collections::HashMap<Uuid, &crate::postgres_db::ActivityLog> = std::collections::HashMap::new();
+                    
+                    for log in &logs {
+                        device_logs.entry(log.device_id)
+                            .and_modify(|existing| {
+                                if log.timestamp > existing.timestamp {
+                                    *existing = log;
+                                }
+                            })
+                            .or_insert(log);
+                    }
+
+                    // Build a combined event with all device activities
+                    let activities: Vec<serde_json::Value> = device_logs
+                        .into_iter()
+                        .map(|(_, log)| {
+                            let is_idle = log.app_name.to_lowercase().contains("idle");
+                            json!({
+                                "device_id": log.device_id.to_string(),
+                                "app": log.app_name,
+                                "title": log.window_title,
+                                "is_idle": is_idle,
+                                "is_live": true,
+                                "last_seen": log.timestamp.to_rfc3339(),
+                            })
+                        })
+                        .collect();
+
+                    let event_data = json!({
+                        "activities": activities,
+                        "timestamp": Utc::now().to_rfc3339(),
+                    });
+
+                    match axum::response::sse::Event::default()
+                        .json_data(event_data) 
+                    {
+                        Ok(event) => Ok(event),
+                        Err(_) => Ok(axum::response::sse::Event::default())
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Error fetching logs for stream: {}", e);
+                    Ok(axum::response::sse::Event::default())
+                }
+            }
+        }
+    })
+    .buffered(1);
+
+    axum::response::sse::Sse::new(Box::pin(stream))
 }

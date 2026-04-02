@@ -1,11 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../api/client';
-import { NavBar } from '../components/NavBar';
+import { AppShell } from '../components/AppShell';
 import type { ActivityLog } from '../types';
 
 export function ActivityPage() {
-  const navigate = useNavigate();
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -26,93 +24,55 @@ export function ActivityPage() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f5' }}>
-      <NavBar currentPage="activity" />
-
-      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '2rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-          <h2 style={{ margin: 0 }}>Recent Activity ({logs.length})</h2>
-          <button
-            onClick={loadActivityLogs}
-            style={{
-              padding: '0.5rem 1rem',
-              backgroundColor: '#0066cc',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer'
-            }}
-          >
-            🔄 Refresh
-          </button>
+    <AppShell
+      currentPage="activity"
+      title="Registro de Actividad"
+      subtitle="Eventos recientes de aplicaciones y ventanas en tiempo real"
+      actions={
+        <button
+          onClick={loadActivityLogs}
+          className="rounded-lg border border-[#00d9ff]/40 bg-[#00d9ff]/10 px-4 py-2 text-sm font-medium text-[#00d9ff] hover:border-[#00d9ff] hover:bg-[#00d9ff]/20"
+        >
+          Actualizar
+        </button>
+      }
+    >
+      <section className="rounded-xl border border-[#1e2339] bg-gradient-to-br from-[#131829] to-[#0a0e27] shadow-2xl overflow-hidden">
+        <div className="border-b border-[#1e2339] bg-[#0a0e27] px-6 py-4">
+          <h2 className="text-lg font-semibold text-[#e4e6eb]">Ultimos eventos ({logs.length})</h2>
         </div>
 
         {isLoading ? (
-          <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
-            Loading activity logs...
-          </div>
+          <div className="px-6 py-10 text-center text-[#a0a5b2]">Cargando actividad...</div>
         ) : logs.length === 0 ? (
-          <div style={{
-            textAlign: 'center',
-            padding: '2rem',
-            backgroundColor: 'white',
-            borderRadius: '8px',
-            color: '#666'
-          }}>
-            No activity recorded yet
-          </div>
+          <div className="px-6 py-10 text-center text-[#a0a5b2]">No hay actividad registrada aun.</div>
         ) : (
-          <div style={{ backgroundColor: 'white', borderRadius: '8px', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
               <thead>
-                <tr style={{ backgroundColor: '#f5f5f5', borderBottom: '2px solid #ddd' }}>
-                  <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#333' }}>Timestamp</th>
-                  <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#333' }}>Device</th>
-                  <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#333' }}>Application</th>
-                  <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#333' }}>Window Title</th>
-                  <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#333' }}>Duration</th>
+                <tr className="border-b border-[#1e2339] bg-[#0a0e27]">
+                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Timestamp</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Device</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Aplicacion</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Ventana</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Duracion</th>
                 </tr>
               </thead>
               <tbody>
-                {logs.slice(0, 100).map((log, idx) => (
-                  <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
-                    <td style={{ padding: '1rem', color: '#666' }}>
-                      {new Date(log.timestamp).toLocaleString()}
-                    </td>
-                    <td style={{ padding: '1rem', color: '#666', fontFamily: 'monospace', fontSize: '0.85rem' }}>
-                      {log.device_id.slice(0, 8)}...
-                    </td>
-                    <td style={{ padding: '1rem', color: '#333', fontWeight: '500' }}>
-                      {log.app_name}
-                    </td>
-                    <td style={{ padding: '1rem', color: '#666', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {log.window_title}
-                    </td>
-                    <td style={{ padding: '1rem', color: '#666' }}>
-                      {log.duration_seconds}s
-                    </td>
+                {logs.slice(0, 120).map((log, idx) => (
+                  <tr key={`${log.device_id}-${log.timestamp}-${idx}`} className="border-b border-[#1e2339] hover:bg-[#131829]">
+                    <td className="px-6 py-3 text-[#a0a5b2]">{new Date(log.timestamp).toLocaleString()}</td>
+                    <td className="px-6 py-3 font-mono text-xs text-[#a0a5b2]">{log.device_id.slice(0, 8)}...</td>
+                    <td className="px-6 py-3 font-medium text-[#e4e6eb]">{log.app_name}</td>
+                    <td className="max-w-[360px] truncate px-6 py-3 text-[#a0a5b2]">{log.window_title}</td>
+                    <td className="px-6 py-3 font-mono text-[#00ff88]">{log.duration_seconds}s</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
-
-        <button
-          onClick={() => navigate('/dashboard')}
-          style={{
-            marginTop: '1rem',
-            padding: '0.5rem 1rem',
-            backgroundColor: '#666',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer'
-          }}
-        >
-          ← Back to Dashboard
-        </button>
-      </div>
-    </div>
+      </section>
+    </AppShell>
   );
 }

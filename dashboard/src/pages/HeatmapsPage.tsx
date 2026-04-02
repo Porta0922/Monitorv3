@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { NavBar } from '../components/NavBar';
+import { AppShell } from '../components/AppShell';
 
 interface Heatmap {
   timestamp: string;
@@ -91,13 +91,11 @@ export function HeatmapsPage() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f5' }}>
-      <NavBar currentPage="heatmaps" />
+    <AppShell currentPage="dashboard" title="Heatmaps" subtitle="Mapa de actividad de teclado y mouse">
+      <section className="rounded-xl border border-[#1e2339] bg-gradient-to-br from-[#131829] to-[#0a0e27] p-6 shadow-2xl">
+        <h2 className="mb-4 text-lg font-semibold text-[#e4e6eb]">Keyboard / Mouse Heatmaps</h2>
 
-      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '2rem' }}>
-        <h2 style={{ marginBottom: '1.5rem' }}>📊 Keyboard/Mouse Activity Heatmaps</h2>
-
-        <div style={{ marginBottom: '2rem' }}>
+        <div className="mb-8">
           <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
             Select Device:
           </label>
@@ -117,17 +115,9 @@ export function HeatmapsPage() {
         </div>
 
         {isLoading ? (
-          <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
-            Loading heatmaps...
-          </div>
+          <div className="py-8 text-center text-[#a0a5b2]">Loading heatmaps...</div>
         ) : heatmaps.length === 0 ? (
-          <div style={{
-            textAlign: 'center',
-            padding: '2rem',
-            backgroundColor: 'white',
-            borderRadius: '8px',
-            color: '#666'
-          }}>
+          <div className="rounded-lg border border-[#1e2339] bg-[#0a0e27] px-6 py-8 text-center text-[#a0a5b2]">
             No heatmap data available. Select a device to view activity.
           </div>
         ) : (
@@ -135,12 +125,7 @@ export function HeatmapsPage() {
             {heatmaps.map((heatmap, idx) => (
               <div
                 key={idx}
-                style={{
-                  backgroundColor: 'white',
-                  borderRadius: '8px',
-                  padding: '1.5rem',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                }}
+                style={{ backgroundColor: '#0a0e27', borderRadius: '8px', padding: '1.5rem', border: '1px solid #1e2339' }}
               >
                 <div style={{ display: 'flex', gap: '2rem' }}>
                   {/* Heatmap Visualization */}
@@ -193,7 +178,7 @@ export function HeatmapsPage() {
             ))}
           </div>
         )}
-      </div>
-    </div>
+      </section>
+    </AppShell>
   );
 }
