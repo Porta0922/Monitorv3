@@ -81,6 +81,20 @@ impl RabbitMQConsumer {
                 e
             })?;
 
+        Self::setup_queue(&channel, "heartbeat_queue", "monitoring.heartbeat", db.clone()).await
+            .map_err(|e| {
+                error!("❌ Failed to setup heartbeat_queue: {}", e);
+                println!("ERROR CRÍTICO: heartbeat_queue falló");
+                e
+            })?;
+
+        Self::setup_queue(&channel, "usb_queue", "monitoring.usb", db.clone()).await
+            .map_err(|e| {
+                error!("❌ Failed to setup usb_queue: {}", e);
+                println!("ERROR CRÍTICO: usb_queue falló");
+                e
+            })?;
+
         println!("");
         println!("✅ RabbitMQ Queues initialized");
         println!("========================================");
@@ -183,6 +197,16 @@ impl RabbitMQConsumer {
                                         warn!("Failed to process inventory event: {}", e);
                                     }
                                 }
+                                "heartbeat_queue" => {
+                                    if let Err(e) = Self::handle_heartbeat_event(&event, &db_clone).await {
+                                        warn!("Failed to process heartbeat event: {}", e);
+                                    }
+                                }
+                                "usb_queue" => {
+                                    if let Err(e) = Self::handle_usb_event(&event, &db_clone).await {
+                                        warn!("Failed to process usb event: {}", e);
+                                    }
+                                }
                                 _ => {}
                             }
                         } else {
@@ -204,18 +228,26 @@ impl RabbitMQConsumer {
     /// Handle activity event - IMPLEMENTED
     async fn handle_activity_event(event: &Value, db: &Database) -> Result<(), Box<dyn std::error::Error>> {
         info!("📊 Processing activity event...");
+
+        let payload = event.get("payload").unwrap_or(event);
         
         // Extract fields from event
         let device_id = event["device_id"].as_str().unwrap_or("unknown").to_string();
-        let app_name = event["app_name"].as_str().unwrap_or("unknown").to_string();
-        let window_title = event["window_title"].as_str().unwrap_or("").to_string();
-        let duration_seconds = event["duration_seconds"].as_i64().unwrap_or(0);
+        let hostname = event["hostname"].as_str().unwrap_or(&device_id).to_string();
+        let mac_address = event["mac_address"].as_str().map(str::to_string);
+        let app_name = payload["app_name"].as_str().unwrap_or("unknown").to_string();
+        let window_title = payload["window_title"].as_str().unwrap_or("").to_string();
+        let duration_seconds = payload["duration_seconds"].as_i64().unwrap_or(0);
+
+        if app_name == "unknown" || duration_seconds <= 0 {
+            return Ok(());
+        }
 
         // Register device if not exists
         let _ = db.register_device(
+            hostname,
             device_id.clone(),
-            device_id.clone(),
-            None,
+            mac_address,
             None,
         ).await;
 
@@ -234,37 +266,109 @@ impl RabbitMQConsumer {
     /// Handle inventory event - IMPLEMENTED
     async fn handle_inventory_event(event: &Value, db: &Database) -> Result<(), Box<dyn std::error::Error>> {
         info!("📦 Processing inventory event...");
+
+        let payload = event.get("payload").unwrap_or(event);
         
         // Extract fields
         let device_id = event["device_id"].as_str().unwrap_or("unknown").to_string();
+        let hostname = event["hostname"].as_str().unwrap_or(&device_id).to_string();
+        let mac_address = event["mac_address"].as_str().map(str::to_string);
         
         // Register device if not exists
         let _ = db.register_device(
+            hostname,
             device_id.clone(),
-            device_id.clone(),
-            None,
+            mac_address,
             None,
         ).await;
 
-        // Insert each app in inventory
+        // New format: payload.apps = [ { app_name, version, exe_hash, detected_at } ]
+        if let Some(apps) = payload["apps"].as_array() {
+            for app in apps {
+                let app_name = app["app_name"].as_str().unwrap_or("unknown").to_string();
+                let version = app["version"].as_str().unwrap_or("unknown").to_string();
+                let exe_hash = app["exe_hash"].as_str().unwrap_or("unknown").to_string();
+
+                let item = db.insert_inventory(
+                    device_id.clone(),
+                    app_name,
+                    version,
+                    exe_hash,
+                ).await?;
+
+                info!("✅ Inventory item stored: {}", item.id);
+            }
+            return Ok(());
+        }
+
+        // Backward compatibility format
         if let Some(inventory) = event["inventory"].as_object() {
             for (app_name, details) in inventory {
                 if let Some(obj) = details.as_object() {
                     let version = obj.get("version").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
                     let exe_hash = obj.get("exe_hash").and_then(|h| h.as_str()).unwrap_or("unknown").to_string();
-
-                    let item = db.insert_inventory(
-                        device_id.clone(),
-                        app_name.clone(),
-                        version,
-                        exe_hash,
-                    ).await?;
-
-                    info!("✅ Inventory item stored: {}", item.id);
+                    let _ = db.insert_inventory(device_id.clone(), app_name.clone(), version, exe_hash).await?;
                 }
             }
         }
 
+        Ok(())
+    }
+
+    async fn handle_heartbeat_event(event: &Value, db: &Database) -> Result<(), Box<dyn std::error::Error>> {
+        let payload = event.get("payload").unwrap_or(event);
+
+        let device_id = event["device_id"].as_str().unwrap_or("unknown").to_string();
+        let hostname = event["hostname"].as_str().unwrap_or(&device_id).to_string();
+        let mac_address = event["mac_address"].as_str().map(str::to_string);
+        let status = payload["status"].as_str().unwrap_or("active");
+
+        let _ = db.register_device(hostname, device_id.clone(), mac_address, None).await;
+
+        // Input summary events carry active/idle minute counters.
+        let active_seconds = payload["active_seconds"].as_i64().unwrap_or(0);
+        let idle_seconds = payload["idle_seconds"].as_i64().unwrap_or(0);
+        if active_seconds > 0 || idle_seconds > 0 {
+            let _ = db
+                .insert_input_summary(
+                    device_id.clone(),
+                    active_seconds,
+                    idle_seconds,
+                    status.to_string(),
+                )
+                .await;
+        }
+
+        info!("✅ Heartbeat processed: {} ({})", device_id, status);
+        Ok(())
+    }
+
+    async fn handle_usb_event(event: &Value, db: &Database) -> Result<(), Box<dyn std::error::Error>> {
+        let payload = event.get("payload").unwrap_or(event);
+        let device_id = event["device_id"].as_str().unwrap_or("unknown").to_string();
+        let hostname = event["hostname"].as_str().unwrap_or(&device_id).to_string();
+        let mac_address = event["mac_address"].as_str().map(str::to_string);
+
+        let _ = db.register_device(hostname, device_id.clone(), mac_address, None).await;
+
+        let device_name = payload["device_name"].as_str().unwrap_or("USB Device").to_string();
+        let action = payload["action"].as_str().unwrap_or("IN").to_string();
+        let hardware_id = payload["hardware_id"].as_str().unwrap_or("unknown").to_string();
+        let serial_number = payload["serial_number"].as_str().map(str::to_string);
+        let volume_label = payload["volume_label"].as_str().map(str::to_string);
+
+        let usb_event = db
+            .insert_usb_event(
+                device_id.clone(),
+                action.clone(),
+                hardware_id,
+                device_name.clone(),
+                serial_number,
+                volume_label,
+            )
+            .await?;
+
+        info!("✅ USB event processed: {} {} {} ({})", device_id, action, device_name, usb_event.id);
         Ok(())
     }
 }

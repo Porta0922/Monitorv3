@@ -11,6 +11,16 @@ export function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
+  const formatDuration = (seconds?: number) => {
+    const safeSeconds = Math.max(0, seconds || 0);
+    const hours = Math.floor(safeSeconds / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    return `${hours}h ${minutes}m`;
+  };
+
+  const totalActiveSeconds = devices.reduce((acc, device) => acc + (device.active_time_today_seconds || 0), 0);
+  const totalIdleSeconds = devices.reduce((acc, device) => acc + (device.idle_time_today_seconds || 0), 0);
+
   useEffect(() => {
     loadDevices();
     // Refresh devices every 30 seconds
@@ -86,6 +96,8 @@ export function DashboardPage() {
                 <th className="font-mono text-[9px] uppercase tracking-[0.18em]">Nodo</th>
                 <th className="font-mono text-[9px] uppercase tracking-[0.18em]">Dispositivo ID</th>
                 <th className="font-mono text-[9px] uppercase tracking-[0.18em]">Estado</th>
+                <th className="font-mono text-[9px] uppercase tracking-[0.18em]">Activo hoy</th>
+                <th className="font-mono text-[9px] uppercase tracking-[0.18em]">Inactivo hoy</th>
                 <th className="font-mono text-[9px] uppercase tracking-[0.18em]">Ultimo registro</th>
                 <th className="font-mono text-[9px] uppercase tracking-[0.18em]">Consola</th>
               </tr>
@@ -93,11 +105,11 @@ export function DashboardPage() {
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={5} className="py-10 text-center font-mono text-xs text-[#8a97ba]">Cargando dispositivos...</td>
+                  <td colSpan={7} className="py-10 text-center font-mono text-xs text-[#8a97ba]">Cargando dispositivos...</td>
                 </tr>
               ) : devices.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-10 text-center font-mono text-xs text-[#5f6e95]">No hay dispositivos registrados aun.</td>
+                  <td colSpan={7} className="py-10 text-center font-mono text-xs text-[#5f6e95]">No hay dispositivos registrados aun.</td>
                 </tr>
               ) : (
                 devices.map((device) => (
@@ -117,6 +129,8 @@ export function DashboardPage() {
                         </span>
                       </div>
                     </td>
+                    <td className="font-mono text-[10px] text-[#00d9ff]">{formatDuration(device.active_time_today_seconds)}</td>
+                    <td className="font-mono text-[10px] text-[#ff9f1a]">{formatDuration(device.idle_time_today_seconds)}</td>
                     <td className="font-mono text-[10px] text-[#8ea0cf]">{new Date(device.last_seen).toLocaleString()}</td>
                     <td>
                       <div className="flex gap-2">
@@ -146,8 +160,8 @@ export function DashboardPage() {
         {[
           { label: 'Dispositivos en vivo', value: devices.filter((d) => d.online).length.toString(), note: 'ultimos 3 min', color: '#00ff88' },
           { label: 'Activos hoy', value: devices.length.toString(), note: 'dispositivos', color: '#00d9ff' },
-          { label: 'Tiempo activo hoy', value: '-', note: 'global', color: '#00d9ff' },
-          { label: 'Tiempo inactivo hoy', value: '-', note: 'global', color: '#ff9f1a' },
+          { label: 'Tiempo activo hoy', value: formatDuration(totalActiveSeconds), note: 'global', color: '#00d9ff' },
+          { label: 'Tiempo inactivo hoy', value: formatDuration(totalIdleSeconds), note: 'global', color: '#ff9f1a' },
           { label: 'Alertas nuevas', value: alerts.length.toString(), note: 'sin resolver', color: '#ffd54a' },
           { label: 'Estado general', value: alerts.length > 0 ? 'Riesgo' : 'OK', note: 'todos los dispositivos', color: alerts.length > 0 ? '#ff5f7a' : '#8f7bff' },
         ].map((kpi) => (

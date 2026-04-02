@@ -5,6 +5,14 @@ import { AppShell } from '../components/AppShell';
 import type { ActivityLog, AppInfo, Device, USBEvent } from '../types';
 
 type TabKey = 'activity' | 'inventory' | 'usb';
+type ActivityWindow = '1h' | '24h' | '7d' | '30d';
+
+const activityWindowToHours: Record<ActivityWindow, number> = {
+  '1h': 1,
+  '24h': 24,
+  '7d': 24 * 7,
+  '30d': 24 * 30,
+};
 
 export function DeviceDetailPage() {
   const { deviceId } = useParams<{ deviceId: string }>();
@@ -15,6 +23,7 @@ export function DeviceDetailPage() {
   const [inventory, setInventory] = useState<AppInfo[]>([]);
   const [usbEvents, setUsbEvents] = useState<USBEvent[]>([]);
   const [tab, setTab] = useState<TabKey>('activity');
+  const [activityWindow, setActivityWindow] = useState<ActivityWindow>('24h');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -28,7 +37,10 @@ export function DeviceDetailPage() {
       try {
         const [devices, logs] = await Promise.all([
           apiClient.getDevices(),
-          apiClient.getActivityLogs(deviceId, 250),
+          apiClient.getActivityLogs(deviceId, {
+            limit: 500,
+            hours: activityWindowToHours[activityWindow],
+          }),
         ]);
 
         const selected = devices.find((d) => d.device_id === deviceId) || null;
@@ -56,7 +68,7 @@ export function DeviceDetailPage() {
     };
 
     load();
-  }, [deviceId]);
+  }, [deviceId, activityWindow]);
 
   const tabStats = useMemo(
     () => ({
@@ -122,6 +134,25 @@ export function DeviceDetailPage() {
           USB ({tabStats.usb})
         </button>
       </section>
+
+      {tab === 'activity' && (
+        <section className="flex items-center gap-2">
+          <span className="text-xs uppercase tracking-[0.2em] text-[#717579]">Ventana</span>
+          {(['1h', '24h', '7d', '30d'] as ActivityWindow[]).map((windowKey) => (
+            <button
+              key={windowKey}
+              onClick={() => setActivityWindow(windowKey)}
+              className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition-all ${
+                activityWindow === windowKey
+                  ? 'border-[#00d9ff] bg-[#00d9ff]/15 text-[#00d9ff]'
+                  : 'border-[#1e2339] bg-[#131829] text-[#a0a5b2] hover:border-[#00d9ff]/40 hover:text-[#e4e6eb]'
+              }`}
+            >
+              {windowKey}
+            </button>
+          ))}
+        </section>
+      )}
 
       {error && <section className="rounded-xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm text-red-300">{error}</section>}
 

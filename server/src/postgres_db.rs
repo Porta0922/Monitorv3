@@ -1,5 +1,5 @@
 // PostgreSQL database module for real data storage
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::{PgPool, Postgres, QueryBuilder, postgres::PgPoolOptions};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
@@ -22,6 +22,25 @@ pub struct InventoryItem {
     pub version: String,
     pub exe_hash: String,
     pub timestamp: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsbEvent {
+    pub id: Uuid,
+    pub device_id: Uuid,
+    pub action: String,
+    pub hardware_id: String,
+    pub device_name: String,
+    pub serial_number: String,
+    pub volume_label: Option<String>,
+    pub timestamp: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceTimeTotals {
+    pub device_id: Uuid,
+    pub active_seconds: i64,
+    pub idle_seconds: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,6 +167,54 @@ impl Database {
         .execute(pool)
         .await?;
 
+        // Create USB events table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS usb_events (
+                id UUID PRIMARY KEY,
+                device_id UUID NOT NULL REFERENCES devices(device_id),
+                action VARCHAR(10) NOT NULL,
+                hardware_id VARCHAR(255) NOT NULL,
+                device_name VARCHAR(255) NOT NULL,
+                serial_number VARCHAR(255),
+                volume_label VARCHAR(255),
+                timestamp TIMESTAMPTZ NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_usb_events_device_timestamp ON usb_events(device_id, timestamp DESC)"
+        )
+        .execute(pool)
+        .await?;
+
+        // Create input activity metrics table (minute-level active/idle summaries)
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS input_activity_metrics (
+                id UUID PRIMARY KEY,
+                device_id UUID NOT NULL REFERENCES devices(device_id),
+                timestamp TIMESTAMPTZ NOT NULL,
+                active_seconds BIGINT NOT NULL DEFAULT 0,
+                idle_seconds BIGINT NOT NULL DEFAULT 0,
+                status VARCHAR(16) NOT NULL DEFAULT 'active',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_input_activity_metrics_device_timestamp ON input_activity_metrics(device_id, timestamp DESC)"
+        )
+        .execute(pool)
+        .await?;
+
         Ok(())
     }
 
@@ -208,6 +275,68 @@ impl Database {
         };
 
         Ok(logs
+            .into_iter()
+            .map(|(id, device_id, app_name, window_title, duration_seconds, timestamp)| ActivityLog {
+                id,
+                device_id,
+                app_name,
+                window_title,
+                duration_seconds,
+                timestamp,
+            })
+            .collect())
+    }
+
+    pub async fn get_activity_logs_filtered(
+        &self,
+        device_id: Option<Uuid>,
+        from: Option<DateTime<Utc>>,
+        to: Option<DateTime<Utc>>,
+        limit: Option<i64>,
+    ) -> Result<Vec<ActivityLog>, sqlx::Error> {
+        let mut query_builder = QueryBuilder::<Postgres>::new(
+            "SELECT id, device_id, app_name, window_title, duration_seconds, timestamp FROM activity_logs"
+        );
+
+        let mut has_where = false;
+
+        if let Some(did) = device_id {
+            query_builder.push(" WHERE device_id = ").push_bind(did);
+            has_where = true;
+        }
+
+        if let Some(from_ts) = from {
+            if has_where {
+                query_builder.push(" AND timestamp >= ");
+            } else {
+                query_builder.push(" WHERE timestamp >= ");
+                has_where = true;
+            }
+            query_builder.push_bind(from_ts);
+        }
+
+        if let Some(to_ts) = to {
+            if has_where {
+                query_builder.push(" AND timestamp <= ");
+            } else {
+                query_builder.push(" WHERE timestamp <= ");
+                has_where = true;
+            }
+            query_builder.push_bind(to_ts);
+        }
+
+        query_builder.push(" ORDER BY timestamp DESC");
+
+        if let Some(limit_value) = limit {
+            query_builder.push(" LIMIT ").push_bind(limit_value.max(1));
+        }
+
+        let rows = query_builder
+            .build_query_as::<(Uuid, Uuid, String, String, i64, DateTime<Utc>)>()
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(rows
             .into_iter()
             .map(|(id, device_id, app_name, window_title, duration_seconds, timestamp)| ActivityLog {
                 id,
@@ -285,6 +414,171 @@ impl Database {
                 timestamp,
             })
             .collect())
+    }
+
+    pub async fn insert_usb_event(
+        &self,
+        device_id: String,
+        action: String,
+        hardware_id: String,
+        device_name: String,
+        serial_number: Option<String>,
+        volume_label: Option<String>,
+    ) -> Result<UsbEvent, sqlx::Error> {
+        let id = Uuid::new_v4();
+        let timestamp = Utc::now();
+        let device_uuid = Uuid::parse_str(&device_id)
+            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO usb_events (id, device_id, action, hardware_id, device_name, serial_number, volume_label, timestamp)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            "#,
+        )
+        .bind(id)
+        .bind(device_uuid)
+        .bind(&action)
+        .bind(&hardware_id)
+        .bind(&device_name)
+        .bind(&serial_number)
+        .bind(&volume_label)
+        .bind(timestamp)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(UsbEvent {
+            id,
+            device_id: device_uuid,
+            action,
+            hardware_id,
+            device_name,
+            serial_number: serial_number.unwrap_or_default(),
+            volume_label,
+            timestamp,
+        })
+    }
+
+    pub async fn get_usb_events(
+        &self,
+        device_id: Option<Uuid>,
+        limit: Option<i64>,
+    ) -> Result<Vec<UsbEvent>, sqlx::Error> {
+        let rows = if let Some(did) = device_id {
+            if let Some(limit_value) = limit {
+                sqlx::query_as::<_, (Uuid, Uuid, String, String, String, Option<String>, Option<String>, DateTime<Utc>)>(
+                    "SELECT id, device_id, action, hardware_id, device_name, serial_number, volume_label, timestamp FROM usb_events WHERE device_id = $1 ORDER BY timestamp DESC LIMIT $2"
+                )
+                .bind(did)
+                .bind(limit_value.max(1))
+                .fetch_all(&self.pool)
+                .await?
+            } else {
+                sqlx::query_as::<_, (Uuid, Uuid, String, String, String, Option<String>, Option<String>, DateTime<Utc>)>(
+                    "SELECT id, device_id, action, hardware_id, device_name, serial_number, volume_label, timestamp FROM usb_events WHERE device_id = $1 ORDER BY timestamp DESC"
+                )
+                .bind(did)
+                .fetch_all(&self.pool)
+                .await?
+            }
+        } else if let Some(limit_value) = limit {
+            sqlx::query_as::<_, (Uuid, Uuid, String, String, String, Option<String>, Option<String>, DateTime<Utc>)>(
+                "SELECT id, device_id, action, hardware_id, device_name, serial_number, volume_label, timestamp FROM usb_events ORDER BY timestamp DESC LIMIT $1"
+            )
+            .bind(limit_value.max(1))
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as::<_, (Uuid, Uuid, String, String, String, Option<String>, Option<String>, DateTime<Utc>)>(
+                "SELECT id, device_id, action, hardware_id, device_name, serial_number, volume_label, timestamp FROM usb_events ORDER BY timestamp DESC"
+            )
+            .fetch_all(&self.pool)
+            .await?
+        };
+
+        Ok(rows
+            .into_iter()
+            .map(|(id, device_id, action, hardware_id, device_name, serial_number, volume_label, timestamp)| UsbEvent {
+                id,
+                device_id,
+                action,
+                hardware_id,
+                device_name,
+                serial_number: serial_number.unwrap_or_default(),
+                volume_label,
+                timestamp,
+            })
+            .collect())
+    }
+
+    pub async fn insert_input_summary(
+        &self,
+        device_id: String,
+        active_seconds: i64,
+        idle_seconds: i64,
+        status: String,
+    ) -> Result<(), sqlx::Error> {
+        let id = Uuid::new_v4();
+        let timestamp = Utc::now();
+        let device_uuid = Uuid::parse_str(&device_id)
+            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO input_activity_metrics (id, device_id, timestamp, active_seconds, idle_seconds, status)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            "#,
+        )
+        .bind(id)
+        .bind(device_uuid)
+        .bind(timestamp)
+        .bind(active_seconds.max(0))
+        .bind(idle_seconds.max(0))
+        .bind(&status)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_device_time_totals_today(&self) -> Result<Vec<DeviceTimeTotals>, sqlx::Error> {
+        let rows = sqlx::query_as::<_, (Uuid, i64, i64)>(
+            "SELECT device_id, COALESCE(SUM(active_seconds), 0)::BIGINT, COALESCE(SUM(idle_seconds), 0)::BIGINT
+             FROM input_activity_metrics
+             WHERE timestamp >= date_trunc('day', NOW())
+             GROUP BY device_id"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(device_id, active_seconds, idle_seconds)| DeviceTimeTotals {
+                device_id,
+                active_seconds,
+                idle_seconds,
+            })
+            .collect())
+    }
+
+    pub async fn get_single_device_time_totals_today(
+        &self,
+        device_id: Uuid,
+    ) -> Result<DeviceTimeTotals, sqlx::Error> {
+        let row = sqlx::query_as::<_, (i64, i64)>(
+            "SELECT COALESCE(SUM(active_seconds), 0)::BIGINT, COALESCE(SUM(idle_seconds), 0)::BIGINT
+             FROM input_activity_metrics
+             WHERE device_id = $1 AND timestamp >= date_trunc('day', NOW())"
+        )
+        .bind(device_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(DeviceTimeTotals {
+            device_id,
+            active_seconds: row.0,
+            idle_seconds: row.1,
+        })
     }
 
     // Device Methods

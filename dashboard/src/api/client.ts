@@ -94,8 +94,21 @@ class ApiClient {
   }
 
   // Activity Logs
-  async getActivityLogs(deviceId?: string, limit = 100): Promise<ActivityLog[]> {
-    const params = { limit };
+  async getActivityLogs(
+    deviceId?: string,
+    options: {
+      limit?: number;
+      hours?: number;
+      from?: string;
+      to?: string;
+    } = {}
+  ): Promise<ActivityLog[]> {
+    const params = {
+      limit: options.limit ?? 100,
+      ...(options.hours ? { hours: options.hours } : {}),
+      ...(options.from ? { from: options.from } : {}),
+      ...(options.to ? { to: options.to } : {}),
+    };
     if (deviceId) {
       const response = await this.client.get<{ logs: ActivityLog[] }>(`/logs/${deviceId}`, {
         params,

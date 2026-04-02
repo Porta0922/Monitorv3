@@ -14,7 +14,7 @@ export function ActivityPage() {
   const loadActivityLogs = async () => {
     try {
       setIsLoading(true);
-      const data = await apiClient.getActivityLogs(undefined, 1000);
+      const data = await apiClient.getActivityLogs(undefined, { limit: 1000 });
       setLogs(data);
     } catch (err) {
       console.error('Error loading activity logs:', err);

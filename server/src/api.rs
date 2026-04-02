@@ -3,14 +3,16 @@ use axum::{
     Router,
     routing::{get, post, patch},
     Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     middleware::Next,
     http::Method,
     response::{IntoResponse, Response},
 };
+use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 use std::sync::Arc;
+use std::collections::HashMap;
 use chrono::{Duration, Utc};
 use tower_http::cors::{CorsLayer, AllowOrigin, AllowHeaders};
 use futures::stream::{self, StreamExt};
@@ -46,8 +48,10 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/logs/ingest", post(ingest_activity_logs))
         .route("/logs", get(query_activity_logs))
         .route("/logs/:device_id", get(get_device_logs))
-        // TODO: .route("/inventory/apps", get(list_all_apps))
-        // TODO: .route("/inventory/apps/:device_id", get(list_device_apps))
+        .route("/inventory/apps", get(list_all_apps))
+        .route("/inventory/apps/:device_id", get(list_device_apps))
+        .route("/usb", get(list_usb_events))
+        .route("/usb/:device_id", get(list_device_usb_events))
         
         // NEW: Input Heatmaps
         .route("/heatmaps/upload", post(upload_heatmap))
@@ -181,7 +185,34 @@ async fn list_devices(
 ) -> impl IntoResponse {
     match state.db.get_devices().await {
         Ok(devices) => {
-            let device_json: Vec<serde_json::Value> = devices.into_iter().map(serialize_device).collect();
+            let totals_map: HashMap<Uuid, (i64, i64)> = match state.db.get_device_time_totals_today().await {
+                Ok(totals) => totals
+                    .into_iter()
+                    .map(|item| (item.device_id, (item.active_seconds, item.idle_seconds)))
+                    .collect(),
+                Err(e) => {
+                    tracing::warn!("Failed to fetch device time totals: {}", e);
+                    HashMap::new()
+                }
+            };
+
+            let device_json: Vec<serde_json::Value> = devices
+                .into_iter()
+                .map(|device| {
+                    let mut value = serialize_device(device.clone());
+                    let (active_seconds, idle_seconds) = totals_map
+                        .get(&device.device_id)
+                        .copied()
+                        .unwrap_or((0, 0));
+
+                    if let Some(obj) = value.as_object_mut() {
+                        obj.insert("active_time_today_seconds".to_string(), json!(active_seconds));
+                        obj.insert("idle_time_today_seconds".to_string(), json!(idle_seconds));
+                    }
+
+                    value
+                })
+                .collect();
             
             Json(json!({
                 "success": true,
@@ -206,9 +237,20 @@ async fn get_device(
     match state.db.get_devices().await {
         Ok(devices) => {
             if let Some(device) = devices.into_iter().find(|device| device.device_id == device_id) {
+                let (active_seconds, idle_seconds) = match state.db.get_single_device_time_totals_today(device_id).await {
+                    Ok(totals) => (totals.active_seconds, totals.idle_seconds),
+                    Err(_) => (0, 0),
+                };
+
+                let mut device_json = serialize_device(device);
+                if let Some(obj) = device_json.as_object_mut() {
+                    obj.insert("active_time_today_seconds".to_string(), json!(active_seconds));
+                    obj.insert("idle_time_today_seconds".to_string(), json!(idle_seconds));
+                }
+
                 return Json(json!({
                     "success": true,
-                    "device": serialize_device(device)
+                    "device": device_json
                 }));
             }
         }
@@ -251,8 +293,10 @@ async fn ingest_activity_logs(
 
 async fn query_activity_logs(
     State(state): State<Arc<AppState>>,
+    Query(filters): Query<ActivityLogFilters>,
 ) -> impl IntoResponse {
-    match state.db.get_activity_logs(None).await {
+    let (from, to) = parse_time_bounds(&filters);
+    match state.db.get_activity_logs_filtered(None, from, to, filters.limit).await {
         Ok(logs) => {
             let logs_json: Vec<serde_json::Value> = logs.iter().map(|l| {
                 json!({
@@ -284,10 +328,12 @@ async fn query_activity_logs(
 async fn get_device_logs(
     State(state): State<Arc<AppState>>,
     Path(device_id): Path<Uuid>,
+    Query(filters): Query<ActivityLogFilters>,
 ) -> impl IntoResponse {
     let device_id_str = device_id.to_string();
+    let (from, to) = parse_time_bounds(&filters);
     
-    match state.db.get_activity_logs(Some(device_id)).await {
+    match state.db.get_activity_logs_filtered(Some(device_id), from, to, filters.limit).await {
         Ok(logs) => {
             let logs_json: Vec<serde_json::Value> = logs.iter().map(|l| {
                 json!({
@@ -313,6 +359,200 @@ async fn get_device_logs(
                 "error": "Failed to fetch device logs",
                 "device_id": device_id_str,
                 "logs": []
+            }))
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ActivityLogFilters {
+    limit: Option<i64>,
+    from: Option<String>,
+    to: Option<String>,
+    hours: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ListLimitQuery {
+    limit: Option<i64>,
+}
+
+fn parse_time_bounds(filters: &ActivityLogFilters) -> (Option<chrono::DateTime<Utc>>, Option<chrono::DateTime<Utc>>) {
+    let from = filters
+        .from
+        .as_deref()
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.with_timezone(&Utc));
+
+    let to = filters
+        .to
+        .as_deref()
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.with_timezone(&Utc));
+
+    if from.is_none() {
+        if let Some(hours) = filters.hours {
+            if hours > 0 {
+                return (Some(Utc::now() - Duration::hours(hours)), to);
+            }
+        }
+    }
+
+    (from, to)
+}
+
+async fn list_all_apps(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    match state.db.get_inventory(None).await {
+        Ok(apps) => {
+            let app_json: Vec<serde_json::Value> = apps
+                .into_iter()
+                .enumerate()
+                .map(|(idx, app)| {
+                    json!({
+                        "id": idx + 1,
+                        "device_id": app.device_id,
+                        "app_name": app.app_name,
+                        "version": app.version,
+                        "exe_hash": app.exe_hash,
+                        "verified": false,
+                        "last_detected": app.timestamp.to_rfc3339(),
+                    })
+                })
+                .collect();
+
+            Json(json!({
+                "success": true,
+                "apps": app_json
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch inventory apps: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch inventory apps",
+                "apps": []
+            }))
+        }
+    }
+}
+
+async fn list_device_apps(
+    State(state): State<Arc<AppState>>,
+    Path(device_id): Path<Uuid>,
+) -> impl IntoResponse {
+    let device_id_str = device_id.to_string();
+    match state.db.get_inventory(Some(&device_id_str)).await {
+        Ok(apps) => {
+            let app_json: Vec<serde_json::Value> = apps
+                .into_iter()
+                .enumerate()
+                .map(|(idx, app)| {
+                    json!({
+                        "id": idx + 1,
+                        "device_id": app.device_id,
+                        "app_name": app.app_name,
+                        "version": app.version,
+                        "exe_hash": app.exe_hash,
+                        "verified": false,
+                        "last_detected": app.timestamp.to_rfc3339(),
+                    })
+                })
+                .collect();
+
+            Json(json!({
+                "success": true,
+                "device_id": device_id_str,
+                "apps": app_json
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch device inventory apps: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch device inventory apps",
+                "device_id": device_id_str,
+                "apps": []
+            }))
+        }
+    }
+}
+
+async fn list_usb_events(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ListLimitQuery>,
+) -> impl IntoResponse {
+    match state.db.get_usb_events(None, query.limit).await {
+        Ok(events) => {
+            let events_json: Vec<serde_json::Value> = events
+                .into_iter()
+                .map(|event| {
+                    json!({
+                        "timestamp": event.timestamp.to_rfc3339(),
+                        "device_id": event.device_id,
+                        "action": event.action,
+                        "hardware_id": event.hardware_id,
+                        "device_name": event.device_name,
+                        "serial_number": event.serial_number,
+                        "volume_label": event.volume_label,
+                    })
+                })
+                .collect();
+
+            Json(json!({
+                "success": true,
+                "events": events_json
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch usb events: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch usb events",
+                "events": []
+            }))
+        }
+    }
+}
+
+async fn list_device_usb_events(
+    State(state): State<Arc<AppState>>,
+    Path(device_id): Path<Uuid>,
+    Query(query): Query<ListLimitQuery>,
+) -> impl IntoResponse {
+    let device_id_str = device_id.to_string();
+
+    match state.db.get_usb_events(Some(device_id), query.limit).await {
+        Ok(events) => {
+            let events_json: Vec<serde_json::Value> = events
+                .into_iter()
+                .map(|event| {
+                    json!({
+                        "timestamp": event.timestamp.to_rfc3339(),
+                        "device_id": event.device_id,
+                        "action": event.action,
+                        "hardware_id": event.hardware_id,
+                        "device_name": event.device_name,
+                        "serial_number": event.serial_number,
+                        "volume_label": event.volume_label,
+                    })
+                })
+                .collect();
+
+            Json(json!({
+                "success": true,
+                "device_id": device_id_str,
+                "events": events_json
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch device usb events: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch device usb events",
+                "device_id": device_id_str,
+                "events": []
             }))
         }
     }

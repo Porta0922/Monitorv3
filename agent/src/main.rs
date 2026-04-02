@@ -16,6 +16,49 @@ use usb_detection::UsbMonitor;
 use input_tracking::InputTracker;
 use keystroke_tracker::KeystrokeTracker;
 use process_protection::ProcessProtection;
+use chrono::{DateTime, Utc};
+
+fn build_event_envelope(
+    event_type: &str,
+    schema_version: u32,
+    device_id: &str,
+    hostname: &str,
+    mac_address: &str,
+    token: &str,
+    payload: serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": schema_version,
+        "event_type": event_type,
+        "device_id": device_id,
+        "hostname": hostname,
+        "mac_address": mac_address,
+        "timestamp": Utc::now().to_rfc3339(),
+        "auth_token": token,
+        "payload": payload,
+    })
+}
+
+async fn publish_or_cache(
+    publisher: Option<&Arc<rabbitmq_publisher::RabbitMQPublisher>>,
+    cache: &Arc<offline_cache::OfflineCache>,
+    routing_event_type: &str,
+    payload: serde_json::Value,
+) {
+    if let Some(pub_) = publisher {
+        let publish_error = match pub_.publish_event(routing_event_type, payload.clone()).await {
+            Ok(_) => None,
+            Err(err) => Some(err.to_string()),
+        };
+
+        if let Some(err_msg) = publish_error {
+            tracing::warn!("Publish failed for {}. Caching event: {}", routing_event_type, err_msg);
+            let _ = cache.save_event(routing_event_type, &payload).await;
+        }
+    } else {
+        let _ = cache.save_event(routing_event_type, &payload).await;
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -28,6 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let device_identity = load_or_create_device_identity()?;
     tracing::info!("📱 Device ID: {}", device_identity.device_id);
     tracing::info!("💻 Hostname: {}", device_identity.hostname);
+    tracing::info!("🔐 Device auth token enabled: {}", std::env::var("AGENT_AUTH_TOKEN").is_ok());
     
     // Check for nickname
     if let Some(nickname) = get_device_nickname() {
@@ -42,7 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or([0u8; 32]);
     
     let cache = Arc::new(
-        offline_cache::OfflineCache::new("/var/lib/activity-monitor/cache.db", &encryption_key)
+        offline_cache::OfflineCache::new("agent_offline_cache.db", &encryption_key)
             .unwrap_or_else(|_| {
                 tracing::warn!("Failed to initialize offline cache, continuing without it");
                 offline_cache::OfflineCache::new(":memory:", &encryption_key).unwrap()
@@ -112,63 +156,156 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // Publish initial snapshots as soon as RabbitMQ is available.
-    if let Some(ref pub_) = publisher {
-        match inventory::InventoryScanner::generate_inventory_report().await {
-            Ok(report) => {
-                if let Err(e) = pub_.publish_event("inventory", serde_json::json!({
-                    "device_id": device_identity.device_id.to_string(),
-                    "inventory": report,
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
-                })).await {
-                    tracing::warn!("Failed to publish initial inventory event: {}", e);
-                } else {
-                    tracing::info!("✅ Initial inventory event published");
-                }
-            }
-            Err(e) => tracing::warn!("Failed to generate initial inventory report: {}", e),
-        }
+    let auth_token = std::env::var("AGENT_AUTH_TOKEN").unwrap_or_else(|_| "dev-agent-token".to_string());
+    let device_id_str = device_identity.device_id.to_string();
+    let hostname = device_identity.hostname.clone();
+    let mac_address = device_identity.mac_address.clone();
 
-        let startup_monitoring = MonitoringLoop::new();
-        if let Some(window) = startup_monitoring.capture_active_window() {
-            if let Err(e) = pub_.publish_event("activity", serde_json::json!({
-                "device_id": device_identity.device_id.to_string(),
-                "app_name": window.app_name,
-                "window_title": window.window_title,
-                "duration_seconds": 0,
-                "timestamp": window.timestamp.to_rfc3339(),
-            })).await {
-                tracing::warn!("Failed to publish initial activity event: {}", e);
-            } else {
-                tracing::info!("✅ Initial activity event published");
-            }
-        } else {
-            tracing::warn!("No active window detected for initial activity publish");
+    // Publish initial inventory snapshot at startup.
+    match inventory::InventoryScanner::scan_installed_software().await {
+        Ok(apps) => {
+            let inventory_payload = build_event_envelope(
+                "inventory",
+                1,
+                &device_id_str,
+                &hostname,
+                &mac_address,
+                &auth_token,
+                serde_json::json!({
+                    "detected_at": Utc::now().to_rfc3339(),
+                    "apps": apps.into_iter().map(|app| serde_json::json!({
+                        "app_name": app.app_name,
+                        "version": app.version,
+                        "exe_hash": app.exe_hash,
+                        "detected_at": Utc::now().to_rfc3339(),
+                    })).collect::<Vec<_>>(),
+                }),
+            );
+            publish_or_cache(publisher.as_ref(), &cache, "inventory", inventory_payload).await;
+            tracing::info!("✅ Initial inventory snapshot queued/published");
         }
+        Err(e) => tracing::warn!("Failed to generate initial inventory report: {}", e),
     }
     
     // Spawn monitoring task
-    let device_id = device_identity.device_id;
-    let mut monitoring = MonitoringLoop::new();
+    let monitoring = MonitoringLoop::new();
     let publisher_clone = publisher.clone();
     let keystroke_tracker_clone = keystroke_tracker.clone();
+    let cache_clone = cache.clone();
+    let auth_token_clone = auth_token.clone();
+    let device_id_clone_for_activity = device_id_str.clone();
+    let hostname_clone_for_activity = hostname.clone();
+    let mac_clone_for_activity = mac_address.clone();
     
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(2));
+        let mut last_window: Option<(String, String, DateTime<Utc>)> = None;
+
         loop {
             interval.tick().await;
             
             // Update idle status based on recent activity
             keystroke_tracker_clone.update_idle_status().await;
             
-            let _processes = monitoring.capture_processes();
-            // TODO: Send to RabbitMQ or cache
+            if let Some(current) = monitoring.capture_active_window() {
+                if let Some((last_app, last_title, started_at)) = &last_window {
+                    let changed = *last_app != current.app_name || *last_title != current.window_title;
+                    if changed {
+                        let duration_seconds = (current.timestamp - *started_at).num_seconds().max(1);
+                        let activity_payload = build_event_envelope(
+                            "activity",
+                            1,
+                            &device_id_clone_for_activity,
+                            &hostname_clone_for_activity,
+                            &mac_clone_for_activity,
+                            &auth_token_clone,
+                            serde_json::json!({
+                                "app_name": last_app,
+                                "window_title": last_title,
+                                "duration_seconds": duration_seconds,
+                                "timestamp": current.timestamp.to_rfc3339(),
+                            }),
+                        );
+
+                        publish_or_cache(
+                            publisher_clone.as_ref(),
+                            &cache_clone,
+                            "activity",
+                            activity_payload,
+                        ).await;
+
+                        last_window = Some((current.app_name, current.window_title, current.timestamp));
+                    }
+                } else {
+                    last_window = Some((current.app_name, current.window_title, current.timestamp));
+                }
+            }
+        }
+    });
+
+    // Heartbeat task (online/offline + idle status)
+    let publisher_clone = publisher.clone();
+    let cache_clone = cache.clone();
+    let keystroke_tracker_clone = keystroke_tracker.clone();
+    let device_id_clone = device_id_str.clone();
+    let hostname_clone = hostname.clone();
+    let mac_clone = mac_address.clone();
+    let auth_token_clone = auth_token.clone();
+
+    tokio::spawn(async move {
+        let mut hb = interval(Duration::from_secs(15));
+        let mut last_idle_state: Option<bool> = None;
+
+        loop {
+            hb.tick().await;
+            keystroke_tracker_clone.update_idle_status().await;
+            let stats = keystroke_tracker_clone.get_stats().await;
+            let is_idle = stats.is_idle;
+
+            let heartbeat = build_event_envelope(
+                "heartbeat",
+                1,
+                &device_id_clone,
+                &hostname_clone,
+                &mac_clone,
+                &auth_token_clone,
+                serde_json::json!({
+                    "last_seen": Utc::now().to_rfc3339(),
+                    "status": if is_idle { "idle" } else { "active" },
+                    "idle_seconds": stats.idle_duration_seconds,
+                }),
+            );
+
+            publish_or_cache(publisher_clone.as_ref(), &cache_clone, "heartbeat", heartbeat).await;
+
+            // Explicit idle/active transitions
+            if last_idle_state != Some(is_idle) {
+                let transition = build_event_envelope(
+                    "idle_state_change",
+                    1,
+                    &device_id_clone,
+                    &hostname_clone,
+                    &mac_clone,
+                    &auth_token_clone,
+                    serde_json::json!({
+                        "status": if is_idle { "idle" } else { "active" },
+                        "changed_at": Utc::now().to_rfc3339(),
+                    }),
+                );
+                publish_or_cache(publisher_clone.as_ref(), &cache_clone, "heartbeat", transition).await;
+                last_idle_state = Some(is_idle);
+            }
         }
     });
     
     // Spawn USB detection task
     let mut usb_monitor = UsbMonitor::new();
     let publisher_clone = publisher.clone();
+    let cache_clone = cache.clone();
+    let auth_token_clone = auth_token.clone();
+    let hostname_clone = hostname.clone();
+    let mac_clone = mac_address.clone();
+    let device_id_clone_for_usb = device_identity.device_id;
     
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(30)); // Check every 30 seconds
@@ -178,13 +315,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match usb_monitor.scan_devices().await {
                 Ok(events) => {
                     for mut event in events {
-                        event.device_id = device_id;
-                        
-                        if let Some(ref pub_) = publisher_clone {
-                            if let Err(e) = pub_.publish_usb_event(&event).await {
-                                tracing::warn!("Failed to publish USB event: {}", e);
-                            }
-                        }
+                        event.device_id = device_id_clone_for_usb;
+
+                        let usb_payload = build_event_envelope(
+                            "usb",
+                            1,
+                            &event.device_id.to_string(),
+                            &hostname_clone,
+                            &mac_clone,
+                            &auth_token_clone,
+                            serde_json::json!({
+                                "device_name": event.usb_device.device_name,
+                                "serial_number": event.usb_device.serial_number,
+                                "action": match event.action {
+                                    usb_detection::UsbAction::Connected => "IN",
+                                    usb_detection::UsbAction::Disconnected => "OUT",
+                                },
+                                "timestamp": event.timestamp.to_rfc3339(),
+                            }),
+                        );
+
+                        publish_or_cache(publisher_clone.as_ref(), &cache_clone, "usb", usb_payload).await;
                     }
                 }
                 Err(e) => {
@@ -194,22 +345,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     
-    // Spawn software inventory scan (once per hour)
+    // Spawn software inventory scan (startup + every 12h)
+    let publisher_clone = publisher.clone();
+    let cache_clone = cache.clone();
+    let device_id_clone = device_id_str.clone();
+    let hostname_clone = hostname.clone();
+    let mac_clone = mac_address.clone();
+    let auth_token_clone = auth_token.clone();
     tokio::spawn(async move {
-        let mut interval = interval(Duration::from_secs(3600));
+        let mut interval = interval(Duration::from_secs(43200));
         loop {
             interval.tick().await;
             
-            match inventory::InventoryScanner::generate_inventory_report().await {
-                Ok(report) => {
-                    tracing::info!("Software inventory scan complete: {} apps", 
-                        report.get("apps").and_then(|a| a.as_array()).map(|a| a.len()).unwrap_or(0)
-                    );
-                }
+            let apps = match inventory::InventoryScanner::scan_installed_software().await {
+                Ok(apps) => apps,
                 Err(e) => {
                     tracing::warn!("Inventory scan error: {}", e);
+                    continue;
                 }
-            }
+            };
+
+            tracing::info!("Software inventory scan complete: {} apps", apps.len());
+            let inventory_payload = build_event_envelope(
+                "inventory",
+                1,
+                &device_id_clone,
+                &hostname_clone,
+                &mac_clone,
+                &auth_token_clone,
+                serde_json::json!({
+                    "detected_at": Utc::now().to_rfc3339(),
+                    "apps": apps.into_iter().map(|app| serde_json::json!({
+                        "app_name": app.app_name,
+                        "version": app.version,
+                        "exe_hash": app.exe_hash,
+                        "detected_at": Utc::now().to_rfc3339(),
+                    })).collect::<Vec<_>>(),
+                }),
+            );
+            publish_or_cache(publisher_clone.as_ref(), &cache_clone, "inventory", inventory_payload).await;
         }
     });
     
@@ -217,6 +391,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let input_tracker_clone = input_tracker.clone();
     let publisher_clone = publisher.clone();
     let device_id_clone = device_identity.device_id.clone();
+    let cache_clone = cache.clone();
+    let auth_token_clone = auth_token.clone();
+    let hostname_clone = hostname.clone();
+    let mac_clone = mac_address.clone();
     
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(3600));  // Every hour
@@ -232,26 +410,100 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         heatmap.stats.keyboard_events
                     );
                     
-                    // Publish to RabbitMQ if connected
-                    if let Some(ref pub_) = publisher_clone {
-                        let event = serde_json::json!({
-                            "type": "input_heatmap",
-                            "device_id": device_id_clone,
-                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                    let event = build_event_envelope(
+                        "input_heatmap",
+                        1,
+                        &device_id_clone.to_string(),
+                        &hostname_clone,
+                        &mac_clone,
+                        &auth_token_clone,
+                        serde_json::json!({
                             "heatmap": heatmap,
-                        });
-                        
-                        if let Err(e) = pub_.publish_event("input_heatmaps", event).await {
-                            tracing::warn!("Failed to publish heatmap: {}", e);
+                        }),
+                    );
+
+                    publish_or_cache(publisher_clone.as_ref(), &cache_clone, "input_heatmaps", event).await;
+                }
+            }
+        }
+    });
+
+    // Input summary metrics every minute (optional but useful for KPIs)
+    let input_tracker_clone = input_tracker.clone();
+    let keystroke_tracker_clone = keystroke_tracker.clone();
+    let publisher_clone = publisher.clone();
+    let cache_clone = cache.clone();
+    let device_id_clone = device_id_str.clone();
+    let hostname_clone = hostname.clone();
+    let mac_clone = mac_address.clone();
+    let auth_token_clone = auth_token.clone();
+    tokio::spawn(async move {
+        let mut interval = interval(Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+
+            let input_stats = input_tracker_clone.get_stats().await;
+            let key_stats = keystroke_tracker_clone.get_stats().await;
+            let summary_payload = build_event_envelope(
+                "input_summary",
+                1,
+                &device_id_clone,
+                &hostname_clone,
+                &mac_clone,
+                &auth_token_clone,
+                serde_json::json!({
+                    "keys_count": key_stats.keystroke_count,
+                    "clicks_count": input_stats.mouse_clicks,
+                    "idle_seconds": if key_stats.is_idle { 60 } else { 0 },
+                    "active_seconds": if key_stats.is_idle { 0 } else { 60 },
+                    "status": if key_stats.is_idle { "idle" } else { "active" },
+                }),
+            );
+
+            publish_or_cache(publisher_clone.as_ref(), &cache_clone, "heartbeat", summary_payload).await;
+        }
+    });
+
+    // Retry unsynced cached events in FIFO order
+    let publisher_clone = publisher.clone();
+    let cache_clone = cache.clone();
+    tokio::spawn(async move {
+        let mut retry_interval = interval(Duration::from_secs(20));
+        loop {
+            retry_interval.tick().await;
+
+            let Some(pub_) = publisher_clone.as_ref() else {
+                continue;
+            };
+
+            match cache_clone.get_unsynced_events().await {
+                Ok(events) if !events.is_empty() => {
+                    let mut synced_ids = Vec::new();
+
+                    for (event_id, event_type, payload) in events {
+                        match pub_.publish_event(&event_type, payload).await {
+                            Ok(_) => synced_ids.push(event_id),
+                            Err(e) => {
+                                tracing::warn!("Retry publish failed for {}: {}", event_type, e);
+                                break;
+                            }
                         }
                     }
+
+                    if !synced_ids.is_empty() {
+                        let _ = cache_clone.mark_synced(&synced_ids).await;
+                    }
+
+                    let _ = cache_clone.cleanup_synced(3).await;
                 }
+                Ok(_) => {}
+                Err(e) => tracing::warn!("Failed reading offline cache: {}", e),
             }
         }
     });
     
     tracing::info!("✅ Agent started successfully");
-    tracing::info!("📊 Monitoring: process events (2s) | USB detection (30s) | Software inventory (1h) | Input heatmaps (1h)");
+    tracing::info!("📊 Monitoring: focus-activity (2s) | heartbeat (15s) | USB (30s) | inventory (12h) | input summary (60s)");
     
     // Keep agent running
     loop {

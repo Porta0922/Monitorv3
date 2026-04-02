@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 use chrono::{DateTime, Utc, Duration};
 
 /// Idle detection threshold - User is idle if no activity for N seconds
-const IDLE_THRESHOLD_SECONDS: u64 = 300; // 5 minutes
+const IDLE_THRESHOLD_SECONDS: u64 = 60; // 1 minute
 
 /// Keystroke tracking statistics
 #[derive(Debug, Clone, Default)]
