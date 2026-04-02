@@ -9,6 +9,7 @@ mod keystroke_tracker;
 mod process_protection;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::time::{sleep, Duration, interval};
 use device_id::{load_or_create_device_identity, get_device_nickname};
 use monitoring::MonitoringLoop;
@@ -17,6 +18,27 @@ use input_tracking::InputTracker;
 use keystroke_tracker::KeystrokeTracker;
 use process_protection::ProcessProtection;
 use chrono::{DateTime, Utc};
+use uuid::Uuid;
+
+struct EventMetadata {
+    boot_id: String,
+    sequence: AtomicU64,
+}
+
+impl EventMetadata {
+    fn new() -> Self {
+        Self {
+            boot_id: Uuid::new_v4().to_string(),
+            sequence: AtomicU64::new(1),
+        }
+    }
+
+    fn next(&self) -> (String, u64, String) {
+        let event_id = Uuid::new_v4().to_string();
+        let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
+        (event_id, sequence, self.boot_id.clone())
+    }
+}
 
 fn build_event_envelope(
     event_type: &str,
@@ -25,9 +47,15 @@ fn build_event_envelope(
     hostname: &str,
     mac_address: &str,
     token: &str,
+    metadata: &EventMetadata,
     payload: serde_json::Value,
 ) -> serde_json::Value {
+    let (event_id, sequence, boot_id) = metadata.next();
+
     serde_json::json!({
+        "event_id": event_id,
+        "sequence": sequence,
+        "boot_id": boot_id,
         "schema_version": schema_version,
         "event_type": event_type,
         "device_id": device_id,
@@ -160,6 +188,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let device_id_str = device_identity.device_id.to_string();
     let hostname = device_identity.hostname.clone();
     let mac_address = device_identity.mac_address.clone();
+    let envelope_metadata = Arc::new(EventMetadata::new());
 
     // Publish initial inventory snapshot at startup.
     match inventory::InventoryScanner::scan_installed_software().await {
@@ -171,6 +200,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &hostname,
                 &mac_address,
                 &auth_token,
+                envelope_metadata.as_ref(),
                 serde_json::json!({
                     "detected_at": Utc::now().to_rfc3339(),
                     "apps": apps.into_iter().map(|app| serde_json::json!({
@@ -196,6 +226,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let device_id_clone_for_activity = device_id_str.clone();
     let hostname_clone_for_activity = hostname.clone();
     let mac_clone_for_activity = mac_address.clone();
+    let envelope_metadata_clone = envelope_metadata.clone();
     
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(2));
@@ -219,6 +250,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             &hostname_clone_for_activity,
                             &mac_clone_for_activity,
                             &auth_token_clone,
+                            envelope_metadata_clone.as_ref(),
                             serde_json::json!({
                                 "app_name": last_app,
                                 "window_title": last_title,
@@ -251,6 +283,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let hostname_clone = hostname.clone();
     let mac_clone = mac_address.clone();
     let auth_token_clone = auth_token.clone();
+    let envelope_metadata_clone = envelope_metadata.clone();
 
     tokio::spawn(async move {
         let mut hb = interval(Duration::from_secs(15));
@@ -269,6 +302,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &hostname_clone,
                 &mac_clone,
                 &auth_token_clone,
+                envelope_metadata_clone.as_ref(),
                 serde_json::json!({
                     "last_seen": Utc::now().to_rfc3339(),
                     "status": if is_idle { "idle" } else { "active" },
@@ -287,6 +321,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &hostname_clone,
                     &mac_clone,
                     &auth_token_clone,
+                    envelope_metadata_clone.as_ref(),
                     serde_json::json!({
                         "status": if is_idle { "idle" } else { "active" },
                         "changed_at": Utc::now().to_rfc3339(),
@@ -306,6 +341,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let hostname_clone = hostname.clone();
     let mac_clone = mac_address.clone();
     let device_id_clone_for_usb = device_identity.device_id;
+    let envelope_metadata_clone = envelope_metadata.clone();
     
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(30)); // Check every 30 seconds
@@ -324,6 +360,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             &hostname_clone,
                             &mac_clone,
                             &auth_token_clone,
+                            envelope_metadata_clone.as_ref(),
                             serde_json::json!({
                                 "device_name": event.usb_device.device_name,
                                 "serial_number": event.usb_device.serial_number,
@@ -352,6 +389,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let hostname_clone = hostname.clone();
     let mac_clone = mac_address.clone();
     let auth_token_clone = auth_token.clone();
+    let envelope_metadata_clone = envelope_metadata.clone();
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(43200));
         loop {
@@ -373,6 +411,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &hostname_clone,
                 &mac_clone,
                 &auth_token_clone,
+                envelope_metadata_clone.as_ref(),
                 serde_json::json!({
                     "detected_at": Utc::now().to_rfc3339(),
                     "apps": apps.into_iter().map(|app| serde_json::json!({
@@ -395,6 +434,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let auth_token_clone = auth_token.clone();
     let hostname_clone = hostname.clone();
     let mac_clone = mac_address.clone();
+    let envelope_metadata_clone = envelope_metadata.clone();
     
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(3600));  // Every hour
@@ -417,6 +457,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         &hostname_clone,
                         &mac_clone,
                         &auth_token_clone,
+                        envelope_metadata_clone.as_ref(),
                         serde_json::json!({
                             "heatmap": heatmap,
                         }),
@@ -437,6 +478,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let hostname_clone = hostname.clone();
     let mac_clone = mac_address.clone();
     let auth_token_clone = auth_token.clone();
+    let envelope_metadata_clone = envelope_metadata.clone();
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(60));
         loop {
@@ -451,6 +493,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &hostname_clone,
                 &mac_clone,
                 &auth_token_clone,
+                envelope_metadata_clone.as_ref(),
                 serde_json::json!({
                     "keys_count": key_stats.keystroke_count,
                     "clicks_count": input_stats.mouse_clicks,

@@ -215,7 +215,55 @@ impl Database {
         .execute(pool)
         .await?;
 
+        // Create processed events table for idempotency (dedupe retries)
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS processed_events (
+                event_id VARCHAR(64) PRIMARY KEY,
+                device_id VARCHAR(255) NOT NULL,
+                event_type VARCHAR(64) NOT NULL,
+                sequence BIGINT,
+                boot_id VARCHAR(64),
+                received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_processed_events_device_received_at ON processed_events(device_id, received_at DESC)"
+        )
+        .execute(pool)
+        .await?;
+
         Ok(())
+    }
+
+    pub async fn register_processed_event(
+        &self,
+        event_id: &str,
+        device_id: &str,
+        event_type: &str,
+        sequence: Option<i64>,
+        boot_id: Option<&str>,
+    ) -> Result<bool, sqlx::Error> {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO processed_events (event_id, device_id, event_type, sequence, boot_id)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (event_id) DO NOTHING
+            "#,
+        )
+        .bind(event_id)
+        .bind(device_id)
+        .bind(event_type)
+        .bind(sequence)
+        .bind(boot_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
     }
 
     // Activity Methods

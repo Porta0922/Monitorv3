@@ -186,6 +186,28 @@ impl RabbitMQConsumer {
                 if let Ok(delivery) = delivery {
                     if let Ok(payload) = std::str::from_utf8(&delivery.data) {
                         if let Ok(event) = serde_json::from_str::<Value>(payload) {
+                            if let Some(event_id) = event.get("event_id").and_then(|value| value.as_str()) {
+                                let device_id = event.get("device_id").and_then(|value| value.as_str()).unwrap_or("unknown");
+                                let event_type = event.get("event_type").and_then(|value| value.as_str()).unwrap_or(queue_name_str.as_str());
+                                let sequence = event.get("sequence").and_then(|value| value.as_i64());
+                                let boot_id = event.get("boot_id").and_then(|value| value.as_str());
+
+                                match db_clone
+                                    .register_processed_event(event_id, device_id, event_type, sequence, boot_id)
+                                    .await
+                                {
+                                    Ok(false) => {
+                                        info!("⏭️ Skipping duplicate event: {} ({})", event_id, event_type);
+                                        let _ = delivery.ack(Default::default()).await;
+                                        continue;
+                                    }
+                                    Ok(true) => {}
+                                    Err(e) => {
+                                        warn!("Failed to apply idempotency check for event {}: {}", event_id, e);
+                                    }
+                                }
+                            }
+
                             match queue_name_str.as_str() {
                                 "activity_queue" => {
                                     if let Err(e) = Self::handle_activity_event(&event, &db_clone).await {
