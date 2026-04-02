@@ -1,111 +1,67 @@
    Compiling activity-monitor-server v0.1.0 (C:\dev\Monitor_nuevo\ActivityMonitor-Enterprise-v3\server)
-warning: unused import: `AllowMethods`
-  --> server\src\api.rs:15:48
-   |
-15 | use tower_http::cors::{CorsLayer, AllowOrigin, AllowMethods, AllowHeaders};
-   |                                                ^^^^^^^^^^^^
-   |
-   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
-
-warning: unused import: `axum::http::StatusCode`
- --> server\src\main.rs:8:5
+warning: unused import: `self`
+ --> server\src\api.rs:7:18
   |
-8 | use axum::http::StatusCode;
-  |     ^^^^^^^^^^^^^^^^^^^^^^
+7 |     middleware::{self, Next},
+  |                  ^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
 
-error[E0107]: missing generics for struct `axum::http::Request`
-   --> server\src\api.rs:336:10
+error[E0716]: temporary value dropped while borrowed
+   --> server\src\rabbitmq_consumer.rs:213:67
     |
-336 |     req: Request,
-    |          ^^^^^^^ expected 1 generic argument
+213 |         let inventory = event["inventory"].as_object().unwrap_or(&Default::default());
+    |                                                                   ^^^^^^^^^^^^^^^^^^ - temporary value is freed at the end of this statement
+    |                                                                   |
+    |                                                                   creates a temporary value which is freed while still in use
+...
+223 |         for (app_name, details) in inventory {
+    |                                    --------- borrow later used here
     |
-note: struct defined here, with 1 generic parameter: `T`
-   --> C:\Users\palod\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\http-1.4.0\src\request.rs:152:12
-    |
-152 | pub struct Request<T> {
-    |            ^^^^^^^ -
-help: add missing generic argument
-    |
-336 |     req: Request<T>,
-    |                 +++
-
-error[E0282]: type annotations needed
-   --> server\src\api.rs:349:20
-    |
-349 |         .and_then(|h| h.to_str().ok())
-    |                    ^  - type must be known at this point
-    |
-help: consider giving this closure parameter an explicit type
-    |
-349 |         .and_then(|h: /* Type */| h.to_str().ok())
-    |                     ++++++++++++
-
-warning: unused import: `tower::Layer`
-  --> server\src\api.rs:14:5
-   |
-14 | use tower::Layer;
-   |     ^^^^^^^^^^^^
+    = note: consider using a `let` binding to create a longer lived value
 
 warning: unused variable: `payload`
-  --> server\src\api.rs:85:10
+  --> server\src\api.rs:88:10
    |
-85 |     Json(payload): Json<serde_json::Value>,
+88 |     Json(payload): Json<serde_json::Value>,
    |          ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_payload`
    |
    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
 
 warning: unused variable: `password`
-   --> server\src\api.rs:104:34
+   --> server\src\api.rs:107:34
     |
-104 |     if let (Some(username), Some(password)) = (username, password) {
+107 |     if let (Some(username), Some(password)) = (username, password) {
     |                                  ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_password`
 
 warning: unused variable: `payload`
-   --> server\src\api.rs:125:10
+   --> server\src\api.rs:128:10
     |
-125 |     Json(payload): Json<serde_json::Value>,
+128 |     Json(payload): Json<serde_json::Value>,
     |          ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_payload`
 
-warning: unused variable: `device_id`
-   --> server\src\api.rs:149:10
+warning: unused variable: `state`
+   --> server\src\api.rs:215:11
     |
-149 |     Path(device_id): Path<Uuid>,
-    |          ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_device_id`
-
-warning: unused variable: `device_id`
-   --> server\src\api.rs:161:10
-    |
-161 |     Path(device_id): Path<Uuid>,
-    |          ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_device_id`
+215 |     State(state): State<Arc<AppState>>,
+    |           ^^^^^ help: if this is intentional, prefix it with an underscore: `_state`
 
 warning: unused variable: `payload`
-   --> server\src\api.rs:162:10
+   --> server\src\api.rs:302:10
     |
-162 |     Json(payload): Json<serde_json::Value>,
+302 |     Json(payload): Json<serde_json::Value>,
     |          ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_payload`
 
 warning: unused variable: `payload`
-   --> server\src\api.rs:174:10
+   --> server\src\api.rs:390:10
     |
-174 |     Json(payload): Json<serde_json::Value>,
+390 |     Json(payload): Json<serde_json::Value>,
     |          ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_payload`
 
 warning: unused variable: `payload`
-   --> server\src\api.rs:215:10
+   --> server\src\api.rs:405:10
     |
-215 |     Json(payload): Json<serde_json::Value>,
-    |          ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_payload`
-
-warning: unused variable: `payload`
-   --> server\src\api.rs:303:10
-    |
-303 |     Json(payload): Json<serde_json::Value>,
-    |          ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_payload`
-
-warning: unused variable: `payload`
-   --> server\src\api.rs:318:10
-    |
-318 |     Json(payload): Json<serde_json::Value>,
+405 |     Json(payload): Json<serde_json::Value>,
     |          ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_payload`
 
 warning: unused variable: `device_id`
@@ -150,13 +106,6 @@ warning: unused variable: `device_id`
 14 | pub async fn get_device_logs(device_id: &str) {
    |                              ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_device_id`
 
-warning: unused variable: `channel_clone`
-  --> server\src\rabbitmq_consumer.rs:84:13
-   |
-84 |         let channel_clone = channel.clone();
-   |             ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_channel_clone`
-
-Some errors have detailed explanations: E0107, E0282.
-For more information about an error, try `rustc --explain E0107`.
-warning: `activity-monitor-server` (bin "activity-monitor-server") generated 21 warnings
-error: could not compile `activity-monitor-server` (bin "activity-monitor-server") due to 2 previous errors; 21 warnings emitted
+For more information about this error, try `rustc --explain E0716`.
+warning: `activity-monitor-server` (bin "activity-monitor-server") generated 15 warnings
+error: could not compile `activity-monitor-server` (bin "activity-monitor-server") due to 1 previous error; 15 warnings emitted

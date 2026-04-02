@@ -3,6 +3,7 @@ mod auth;
 mod db;
 mod rabbitmq_consumer;
 mod whitelist;
+mod postgres_db;
 
 use std::sync::Arc;
 use tokio::task;
@@ -10,6 +11,7 @@ use dotenv::dotenv;
 
 use api::{AppState, create_router};
 use auth::AuthManager;
+use postgres_db::Database;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -23,19 +25,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let server_port = std::env::var("SERVER_PORT").unwrap_or_else(|_| "3000".to_string());
     let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev-secret-change-in-production".to_string());
     let rabbitmq_url = std::env::var("RABBITMQ_URL").unwrap_or_else(|_| "amqp://guest:guest@localhost:5672/".to_string());
-    let database_url = std::env::var("DATABASE_URL").ok();
+    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://postgres:postgres@localhost:5432/activitymonitor".to_string());
     
     tracing::info!("ActivityMonitor Server v0.1.0 starting...");
     tracing::info!("Server: {}:{}", server_host, server_port);
+    tracing::info!("Database: {}", database_url.split('@').nth(1).unwrap_or("***"));
     
-    // Initialize database connection pool (when ready)
-    if let Some(db_url) = &database_url {
-        tracing::info!("Connecting to database: {}", db_url.split('@').nth(1).unwrap_or("***"));
-        // TODO: Initialize sqlx::PgPool from database_url
-        // let pool = sqlx::PgPool::connect(&database_url).await?;
-    } else {
-        tracing::warn!("DATABASE_URL not set, database features will be unavailable");
-    }
+    // Initialize PostgreSQL connection
+    let db = match Database::connect(&database_url).await {
+        Ok(db) => {
+            tracing::info!("✅ Connected to PostgreSQL");
+            db
+        }
+        Err(e) => {
+            tracing::error!("❌ Failed to connect to PostgreSQL: {}", e);
+            return Err(e.into());
+        }
+    };
     
     // Initialize authentication manager
     let auth_manager = AuthManager::new(&jwt_secret);
@@ -43,16 +49,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create application state
     let app_state = Arc::new(AppState {
         auth: auth_manager,
-        // db: pool,
+        db: db.clone(),
     });
     
     // Build router
-    let app = create_router(app_state);
+    let app = create_router(app_state.clone());
     
     // Start RabbitMQ consumer in background (non-blocking)
     let rabbitmq_url_clone = rabbitmq_url.clone();
+    let db_for_consumer = db.clone();
+    
     task::spawn(async move {
-        match rabbitmq_consumer::RabbitMQConsumer::start_consumer(&rabbitmq_url_clone).await {
+        match rabbitmq_consumer::RabbitMQConsumer::start_consumer(&rabbitmq_url_clone, db_for_consumer).await {
             Ok(_) => tracing::info!("RabbitMQ consumer started"),
             Err(e) => tracing::warn!("Failed to start RabbitMQ consumer: {}", e),
         }

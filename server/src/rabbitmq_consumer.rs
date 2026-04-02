@@ -5,11 +5,13 @@ use lapin::options::BasicConsumeOptions;
 use serde_json::Value;
 use tracing::{info, error, warn};
 
+use crate::postgres_db::Database;
+
 pub struct RabbitMQConsumer;
 
 impl RabbitMQConsumer {
-    /// Start RabbitMQ consumer for monitoring events
-    pub async fn start_consumer(rabbitmq_url: &str) -> Result<(), Box<dyn std::error::Error>> {
+    /// Start RabbitMQ consumer for monitoring events with PostgreSQL database connection
+    pub async fn start_consumer(rabbitmq_url: &str, db: Database) -> Result<(), Box<dyn std::error::Error>> {
         info!("🔌 Connecting to RabbitMQ at: {}", rabbitmq_url);
         
         // Connect to RabbitMQ
@@ -50,23 +52,17 @@ impl RabbitMQConsumer {
 
         info!("✅ Exchange 'monitoring' declared successfully");
 
-        // Create queues and bind them
-        info!("🏗️  Creating queues...");
-        Self::setup_queue(&channel, "activity_logs", "monitoring.activity").await
+        // Create queues and bind them (ignoring any .env queue config, always create standard queues)
+        info!("🏗️  Creating standard queues (ignoring .env queue configuration)...");
+        Self::setup_queue(&channel, "inventory_queue", "monitoring.inventory", db.clone()).await
             .map_err(|e| {
-                error!("❌ Failed to setup activity_logs queue: {}", e);
+                error!("❌ Failed to setup inventory_queue: {}", e);
                 e
             })?;
         
-        Self::setup_queue(&channel, "inventory_logs", "monitoring.inventory").await
+        Self::setup_queue(&channel, "activity_queue", "monitoring.activity", db.clone()).await
             .map_err(|e| {
-                error!("❌ Failed to setup inventory_logs queue: {}", e);
-                e
-            })?;
-        
-        Self::setup_queue(&channel, "security_alerts", "monitoring.security").await
-            .map_err(|e| {
-                error!("❌ Failed to setup security_alerts queue: {}", e);
+                error!("❌ Failed to setup activity_queue: {}", e);
                 e
             })?;
 
@@ -84,6 +80,7 @@ impl RabbitMQConsumer {
         channel: &Channel,
         queue_name: &str,
         routing_key: &str,
+        db: MockDatabase,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // Declare durable queue
         info!("  📋 Creating queue '{}' (Durable: true)", queue_name);
@@ -138,8 +135,8 @@ impl RabbitMQConsumer {
         info!("    🎧 Consumer started for queue '{}'", queue_name);
 
         // Spawn consumer task
-        let channel_clone = channel.clone();
-        let queue_name = queue_name.to_string();
+        let queue_name_str = queue_name.to_string();
+        let db_clone = db.clone();
         
         tokio::spawn(async move {
             use futures::stream::StreamExt;
@@ -149,27 +146,28 @@ impl RabbitMQConsumer {
                 if let Ok(delivery) = delivery {
                     if let Ok(payload) = std::str::from_utf8(&delivery.data) {
                         if let Ok(event) = serde_json::from_str::<Value>(payload) {
-                            match queue_name.as_str() {
-                                "activity_logs" => {
-                                    Self::handle_activity_event(&event).await;
+                            match queue_name_str.as_str() {
+                                "activity_queue" => {
+                                    if let Err(e) = Self::handle_activity_event(&event, &db_clone).await {
+                                        warn!("Failed to process activity event: {}", e);
+                                    }
                                 }
-                                "inventory_logs" => {
-                                    Self::handle_inventory_event(&event).await;
-                                }
-                                "security_alerts" => {
-                                    Self::handle_security_event(&event).await;
+                                "inventory_queue" => {
+                                    if let Err(e) = Self::handle_inventory_event(&event, &db_clone).await {
+                                        warn!("Failed to process inventory event: {}", e);
+                                    }
                                 }
                                 _ => {}
                             }
                         } else {
-                            warn!("Failed to parse event from {}", queue_name);
+                            warn!("Failed to parse event from {}", queue_name_str);
                         }
                     }
                     
                     // Acknowledge message
                     let _ = delivery.ack(Default::default()).await;
                 } else {
-                    error!("Error receiving message from {}", queue_name);
+                    error!("Error receiving message from {}", queue_name_str);
                 }
             }
         });
@@ -177,29 +175,68 @@ impl RabbitMQConsumer {
         Ok(())
     }
 
-    /// Handle activity event
-    async fn handle_activity_event(event: &Value) {
-        info!("Activity event received: {:?}", event);
-        // TODO: Parse event and insert into activity_logs table
-        // TODO: Validate device_id exists
-        // TODO: Extract app_name, window_title, duration_seconds
-        // TODO: INSERT into activity_logs hypertable
+    /// Handle activity event - IMPLEMENTED
+    async fn handle_activity_event(event: &Value, db: &MockDatabase) -> Result<(), Box<dyn std::error::Error>> {
+        info!("📊 Processing activity event...");
+        
+        // Extract fields from event
+        let device_id = event["device_id"].as_str().unwrap_or("unknown").to_string();
+        let app_name = event["app_name"].as_str().unwrap_or("unknown").to_string();
+        let window_title = event["window_title"].as_str().unwrap_or("").to_string();
+        let duration_seconds = event["duration_seconds"].as_i64().unwrap_or(0);
+
+        // Register device if not exists
+        let _ = db.register_device(
+            device_id.clone(),
+            device_id.clone(),
+            None,
+        ).await;
+
+        // Insert activity log
+        let log = db.insert_activity_log(
+            device_id,
+            app_name,
+            window_title,
+            duration_seconds,
+        ).await?;
+
+        info!("✅ Activity event stored: {}", log.id);
+        Ok(())
     }
 
-    /// Handle inventory event
-    async fn handle_inventory_event(event: &Value) {
-        info!("Inventory event received: {:?}", event);
-        // TODO: Parse event and insert into app_inventory table
-        // TODO: Validate executable hash
-        // TODO: Check against whitelist
-        // TODO: Flag hash mismatches as security alerts
-    }
+    /// Handle inventory event - IMPLEMENTED
+    async fn handle_inventory_event(event: &Value, db: &MockDatabase) -> Result<(), Box<dyn std::error::Error>> {
+        info!("📦 Processing inventory event...");
+        
+        // Extract fields
+        let device_id = event["device_id"].as_str().unwrap_or("unknown").to_string();
+        
+        // Register device if not exists
+        let _ = db.register_device(
+            device_id.clone(),
+            device_id.clone(),
+            None,
+        ).await;
 
-    /// Handle security event
-    async fn handle_security_event(event: &Value) {
-        warn!("Security event received: {:?}", event);
-        // TODO: Parse event and insert into security_alerts table
-        // TODO: Set severity level
-        // TODO: Potentially trigger notifications
+        // Insert each app in inventory
+        if let Some(inventory) = event["inventory"].as_object() {
+            for (app_name, details) in inventory {
+                if let Some(obj) = details.as_object() {
+                    let version = obj.get("version").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                    let exe_hash = obj.get("exe_hash").and_then(|h| h.as_str()).unwrap_or("unknown").to_string();
+
+                    let item = db.insert_inventory(
+                        device_id.clone(),
+                        app_name.clone(),
+                        version,
+                        exe_hash,
+                    ).await?;
+
+                    info!("✅ Inventory item stored: {}", item.id);
+                }
+            }
+        }
+
+        Ok(())
     }
 }

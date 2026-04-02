@@ -14,10 +14,11 @@ use std::sync::Arc;
 use tower_http::cors::{CorsLayer, AllowOrigin, AllowHeaders};
 
 use crate::auth::AuthManager;
+use crate::postgres_db::Database;
 
 pub struct AppState {
     pub auth: AuthManager,
-    // Will add db connection pool here
+    pub db: Database,
 }
 
 pub fn create_router(state: Arc<AppState>) -> Router {
@@ -136,21 +137,60 @@ async fn register_device(
 }
 
 async fn list_devices(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    // TODO: Query all devices from database
-    
-    Json(json!({
-        "success": true,
-        "devices": []
-    }))
+    match state.db.get_devices().await {
+        Ok(devices) => {
+            let device_json: Vec<serde_json::Value> = devices.iter().map(|d| {
+                json!({
+                    "id": d.id,
+                    "hostname": d.hostname,
+                    "device_id": d.device_id,
+                    "nickname": d.nickname,
+                    "last_seen": d.last_seen.to_rfc3339(),
+                })
+            }).collect();
+            
+            Json(json!({
+                "success": true,
+                "devices": device_json
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch devices: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch devices",
+                "devices": []
+            }))
+        }
+    }
 }
 
 async fn get_device(
-    State(_state): State<Arc<AppState>>,
-    Path(device_id): Path<Uuid>,
+    State(state): State<Arc<AppState>>,
+    Path(_device_id): Path<Uuid>,
 ) -> impl IntoResponse {
-    // TODO: Query specific device
+    // Get first device as example (TODO: filter by ID)
+    match state.db.get_devices().await {
+        Ok(devices) => {
+            if let Some(device) = devices.first() {
+                return Json(json!({
+                    "success": true,
+                    "device": {
+                        "id": device.id,
+                        "hostname": device.hostname,
+                        "device_id": device.device_id,
+                        "nickname": device.nickname,
+                        "last_seen": device.last_seen.to_rfc3339(),
+                    }
+                }));
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch device: {}", e);
+        }
+    }
     
     Json(json!({
         "success": true,
@@ -160,8 +200,8 @@ async fn get_device(
 
 async fn update_device(
     State(_state): State<Arc<AppState>>,
-    Path(device_id): Path<Uuid>,
-    Json(payload): Json<serde_json::Value>,
+    Path(_device_id): Path<Uuid>,
+    Json(_payload): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     // TODO: Update device nickname or other fields
     
@@ -172,8 +212,8 @@ async fn update_device(
 }
 
 async fn ingest_activity_logs(
-    State(_state): State<Arc<AppState>>,
-    Json(payload): Json<serde_json::Value>,
+    State(state): State<Arc<AppState>>,
+    Json(_payload): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     // TODO: Extract activity logs batch
     // TODO: Insert into activity_logs hypertable
@@ -185,27 +225,72 @@ async fn ingest_activity_logs(
 }
 
 async fn query_activity_logs(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    // TODO: Query activity_logs with filters (device_id, app_name, date range)
-    
-    Json(json!({
-        "success": true,
-        "logs": []
-    }))
+    match state.db.get_activity_logs(None).await {
+        Ok(logs) => {
+            let logs_json: Vec<serde_json::Value> = logs.iter().map(|l| {
+                json!({
+                    "id": l.id,
+                    "device_id": l.device_id,
+                    "app_name": l.app_name,
+                    "window_title": l.window_title,
+                    "duration_seconds": l.duration_seconds,
+                    "timestamp": l.timestamp.to_rfc3339(),
+                })
+            }).collect();
+            
+            Json(json!({
+                "success": true,
+                "logs": logs_json
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch activity logs: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch activity logs",
+                "logs": []
+            }))
+        }
+    }
 }
 
 async fn get_device_logs(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Path(device_id): Path<Uuid>,
 ) -> impl IntoResponse {
-    // TODO: Query activity_logs for specific device
+    let device_id_str = device_id.to_string();
     
-    Json(json!({
-        "success": true,
-        "device_id": device_id.to_string(),
-        "logs": []
-    }))
+    match state.db.get_activity_logs(Some(&device_id_str)).await {
+        Ok(logs) => {
+            let logs_json: Vec<serde_json::Value> = logs.iter().map(|l| {
+                json!({
+                    "id": l.id,
+                    "device_id": l.device_id,
+                    "app_name": l.app_name,
+                    "window_title": l.window_title,
+                    "duration_seconds": l.duration_seconds,
+                    "timestamp": l.timestamp.to_rfc3339(),
+                })
+            }).collect();
+            
+            Json(json!({
+                "success": true,
+                "device_id": device_id_str,
+                "logs": logs_json
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch device logs: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch device logs",
+                "device_id": device_id_str,
+                "logs": []
+            }))
+        }
+    }
 }
 
 // ============================================================================
