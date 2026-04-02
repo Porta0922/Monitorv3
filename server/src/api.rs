@@ -69,9 +69,11 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/devices/register", post(register_device))
         .with_state(state);
 
-    // Combine routers and apply CORS
-    public_router
-        .merge(protected_router)
+    // Combine routers with /api prefix and apply CORS
+    let api_router = Router::new()
+        .nest("/api", public_router.merge(protected_router));
+
+    api_router
         .layer(cors)
 }
 
@@ -99,10 +101,10 @@ async fn register_user(
 
 async fn login_user(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<serde_json::Value>,
+    Json(_payload): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    let username = payload.get("username").and_then(|u| u.as_str());
-    let password = payload.get("password").and_then(|p| p.as_str());
+    let username = _payload.get("username").and_then(|u| u.as_str());
+    let password = _payload.get("password").and_then(|p| p.as_str());
     
     if let (Some(username), Some(password)) = (username, password) {
         // TODO: Fetch user from database
@@ -125,7 +127,7 @@ async fn login_user(
 
 async fn register_device(
     State(_state): State<Arc<AppState>>,
-    Json(payload): Json<serde_json::Value>,
+    Json(_payload): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     // TODO: Extract device_id, hostname, mac_address
     // TODO: Store in devices table

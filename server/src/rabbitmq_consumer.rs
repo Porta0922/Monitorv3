@@ -12,6 +12,9 @@ pub struct RabbitMQConsumer;
 impl RabbitMQConsumer {
     /// Start RabbitMQ consumer for monitoring events with PostgreSQL database connection
     pub async fn start_consumer(rabbitmq_url: &str, db: Database) -> Result<(), Box<dyn std::error::Error>> {
+        println!("========================================");
+        println!("🚀 INICIALIZANDO CONSUMIDOR RABBITMQ");
+        println!("========================================");
         info!("🔌 Connecting to RabbitMQ at: {}", rabbitmq_url);
         
         // Connect to RabbitMQ
@@ -22,18 +25,24 @@ impl RabbitMQConsumer {
         .await
         .map_err(|e| {
             error!("❌ Failed to connect to RabbitMQ: {}", e);
+            println!("ERROR: No se pudo conectar a RabbitMQ: {}", e);
             Box::new(e) as Box<dyn std::error::Error>
         })?;
 
+        println!("✅ Conectado a RabbitMQ exitosamente");
         info!("✅ Connected to RabbitMQ");
 
         let channel = connection.create_channel().await
             .map_err(|e| {
                 error!("❌ Failed to create channel: {}", e);
+                println!("ERROR: No se pudo crear canal RabbitMQ: {}", e);
                 Box::new(e) as Box<dyn std::error::Error>
             })?;
 
+        println!("✅ Canal RabbitMQ creado");
+
         // Declare exchange
+        println!("Declarando exchange 'monitoring' (tipo: Topic, durable: true)...");
         info!("📢 Declaring 'monitoring' exchange (Topic, Durable)");
         channel.exchange_declare(
             "monitoring",
@@ -47,25 +56,34 @@ impl RabbitMQConsumer {
         .await
         .map_err(|e| {
             error!("❌ Failed to declare exchange: {}", e);
+            println!("ERROR: No se pudo declarar exchange: {}", e);
             Box::new(e) as Box<dyn std::error::Error>
         })?;
 
+        println!("✅ Exchange 'monitoring' declarado con éxito");
         info!("✅ Exchange 'monitoring' declared successfully");
 
         // Create queues and bind them (ignoring any .env queue config, always create standard queues)
+        println!("");
+        println!("CREANDO Y VINCULANDO COLAS ESTÁNDAR...");
         info!("🏗️  Creating standard queues (ignoring .env queue configuration)...");
         Self::setup_queue(&channel, "inventory_queue", "monitoring.inventory", db.clone()).await
             .map_err(|e| {
                 error!("❌ Failed to setup inventory_queue: {}", e);
+                println!("ERROR CRÍTICO: inventory_queue falló");
                 e
             })?;
         
         Self::setup_queue(&channel, "activity_queue", "monitoring.activity", db.clone()).await
             .map_err(|e| {
                 error!("❌ Failed to setup activity_queue: {}", e);
+                println!("ERROR CRÍTICO: activity_queue falló");
                 e
             })?;
 
+        println!("");
+        println!("✅ RabbitMQ Queues initialized");
+        println!("========================================");
         info!("✅ RabbitMQ Queues initialized");
         info!("📡 RabbitMQ consumer started, listening to monitoring.* events");
 
@@ -80,10 +98,11 @@ impl RabbitMQConsumer {
         channel: &Channel,
         queue_name: &str,
         routing_key: &str,
-        db: MockDatabase,
+        db: Database,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        // Declare durable queue
-        info!("  📋 Creating queue '{}' (Durable: true)", queue_name);
+        // Declare durable queue - with explicit println for debugging
+        println!("Intentando declarar cola {}...", queue_name);
+        info!("  📋 Creating queue '{}' (Durable: true, Exclusive: false, AutoDelete: false)", queue_name);
         channel.queue_declare(
             queue_name,
             QueueDeclareOptions {
@@ -97,12 +116,15 @@ impl RabbitMQConsumer {
         .await
         .map_err(|e| {
             error!("    ❌ Failed to declare queue '{}': {}", queue_name, e);
+            println!("ERROR al declarar cola {}: {}", queue_name, e);
             Box::new(e) as Box<dyn std::error::Error>
         })?;
 
-        info!("    ✅ Queue '{}' created", queue_name);
+        println!("Cola {} declarada con éxito", queue_name);
+        info!("    ✅ Queue '{}' created successfully", queue_name);
 
-        // Bind queue to exchange
+        // Bind queue to exchange - explicit confirmation
+        println!("Vinculando cola {} a exchange 'monitoring' con routing key '{}'", queue_name, routing_key);
         info!("  🔗 Binding '{}' to exchange 'monitoring' with routing key '{}'", queue_name, routing_key);
         channel.queue_bind(
             queue_name,
@@ -113,11 +135,13 @@ impl RabbitMQConsumer {
         )
         .await
         .map_err(|e| {
-            error!("    ❌ Failed to bind queue '{}': {}", queue_name, e);
+            error!("    ❌ Failed to bind queue '{}' to exchange: {}", queue_name, e);
+            println!("ERROR al vincular cola {} a exchange: {}", queue_name, e);
             Box::new(e) as Box<dyn std::error::Error>
         })?;
 
-        info!("    ✅ Queue '{}' bound successfully", queue_name);
+        println!("Cola {} vinculada con éxito al exchange 'monitoring'", queue_name);
+        info!("    ✅ Queue '{}' bound successfully to 'monitoring' with routing key '{}'", queue_name, routing_key);
 
         // Start consuming
         let consumer = channel.basic_consume(
@@ -129,9 +153,11 @@ impl RabbitMQConsumer {
         .await
         .map_err(|e| {
             error!("    ❌ Failed to start consuming from queue '{}': {}", queue_name, e);
+            println!("ERROR al iniciar consumidor de cola {}: {}", queue_name, e);
             Box::new(e) as Box<dyn std::error::Error>
         })?;
 
+        println!("Consumidor iniciado para cola {}", queue_name);
         info!("    🎧 Consumer started for queue '{}'", queue_name);
 
         // Spawn consumer task
@@ -176,7 +202,7 @@ impl RabbitMQConsumer {
     }
 
     /// Handle activity event - IMPLEMENTED
-    async fn handle_activity_event(event: &Value, db: &MockDatabase) -> Result<(), Box<dyn std::error::Error>> {
+    async fn handle_activity_event(event: &Value, db: &Database) -> Result<(), Box<dyn std::error::Error>> {
         info!("📊 Processing activity event...");
         
         // Extract fields from event
@@ -205,7 +231,7 @@ impl RabbitMQConsumer {
     }
 
     /// Handle inventory event - IMPLEMENTED
-    async fn handle_inventory_event(event: &Value, db: &MockDatabase) -> Result<(), Box<dyn std::error::Error>> {
+    async fn handle_inventory_event(event: &Value, db: &Database) -> Result<(), Box<dyn std::error::Error>> {
         info!("📦 Processing inventory event...");
         
         // Extract fields
