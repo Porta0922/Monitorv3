@@ -22,7 +22,7 @@ export function AppShell({ currentPage, title, subtitle, actions, children, noSc
           <div className="mx-auto w-full max-w-[1680px] px-6 py-5">
             <header className="mb-6 border-b border-[#16213f] pb-4">
               <div className="mb-3 flex items-center justify-between">
-                <p className="font-display text-sm uppercase tracking-[0.18em] text-[#00d9ff]">Overview</p>
+                <p className="font-display text-sm uppercase tracking-[0.18em] text-[#00d9ff]">Activity Monitor Enterprise (AME)</p>
                 <p className="font-mono text-xs text-[#637197]">{now}</p>
               </div>
 

@@ -79,93 +79,114 @@ export function DeviceDetailPage() {
     [activity.length, inventory.length, usbEvents.length]
   );
 
+  const formatDuration = (seconds?: number) => {
+    const safeSeconds = Math.max(0, seconds || 0);
+    const minutes = Math.floor(safeSeconds / 60);
+    const remSeconds = safeSeconds % 60;
+    return `${minutes}m ${remSeconds}s`;
+  };
+
+  const shortAppName = (rawName: string) => {
+    const normalized = rawName.replace(/\\/g, '/');
+    const lastSegment = normalized.split('/').pop() || rawName;
+    return lastSegment.length > 38 ? `${lastSegment.slice(0, 35)}...` : lastSegment;
+  };
+
   const tabClass = (key: TabKey) =>
-    `rounded-lg border px-4 py-2 text-sm font-semibold transition-all ${
+    `rounded-full border px-4 py-2 text-xs font-semibold tracking-wide transition-all ${
       tab === key
         ? 'border-[#00d9ff] bg-[#00d9ff]/15 text-[#00d9ff]'
-        : 'border-[#1e2339] bg-[#131829] text-[#a0a5b2] hover:border-[#00d9ff]/40 hover:text-[#e4e6eb]'
+        : 'border-[#223462] bg-[#111a35] text-[#8ea0cf] hover:border-[#00d9ff]/50 hover:text-[#dce6ff]'
     }`;
 
   return (
     <AppShell
       currentPage="dashboard"
-      title={device ? `Consola: ${device.nickname || device.hostname}` : 'Consola de Computadora'}
+      title={device ? `Consola de Dispositivo: ${device.nickname || device.hostname}` : 'Consola de Dispositivo'}
       subtitle={deviceId || 'Sin dispositivo'}
       actions={
         <button
           onClick={() => navigate('/dashboard')}
-          className="rounded-lg border border-[#00d9ff]/40 bg-[#00d9ff]/10 px-4 py-2 text-sm font-medium text-[#00d9ff] hover:border-[#00d9ff] hover:bg-[#00d9ff]/20"
+          className="rounded-full border border-[#00d9ff]/50 bg-[#00d9ff]/10 px-4 py-2 text-xs font-semibold tracking-wide text-[#00d9ff] hover:border-[#00d9ff] hover:bg-[#00d9ff]/20"
         >
-          Volver al Nexus
+          Volver a AME
         </button>
       }
     >
       {device && (
-        <section className="cyber-card rounded-xl p-5">
-          <div className="grid grid-cols-4 gap-4 text-sm">
-            <div>
-              <p className="text-[#717579]">Hostname</p>
-              <p className="font-display text-base text-[#e4e6eb]">{device.hostname}</p>
+        <section className="rounded-2xl border border-[#1b2b56] bg-[linear-gradient(160deg,#0f1d43,#0b1329)] p-5 shadow-[0_12px_26px_rgba(0,0,0,0.32)]">
+          <div className="grid grid-cols-6 gap-4 text-sm">
+            <div className="col-span-2">
+              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Hostname</p>
+              <p className="mt-1 font-display text-base text-[#e4e6eb]">{device.hostname}</p>
             </div>
             <div>
-              <p className="text-[#717579]">Estado</p>
-              <p className={device.online ? 'text-[#00ff88]' : 'text-red-400'}>{device.online ? 'ONLINE' : 'OFFLINE'}</p>
+              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Estado</p>
+              <p className={`mt-1 font-mono text-sm ${device.online ? 'text-[#00ff88]' : 'text-red-400'}`}>
+                {device.online ? 'ONLINE' : 'OFFLINE'}
+              </p>
             </div>
             <div>
-              <p className="text-[#717579]">MAC</p>
-              <p className="font-mono text-[#a0a5b2]">{device.mac_address || 'N/A'}</p>
+              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Activo hoy</p>
+              <p className="mt-1 font-mono text-sm text-[#00d9ff]">{formatDuration(device.active_time_today_seconds)}</p>
             </div>
             <div>
-              <p className="text-[#717579]">Ultima señal</p>
-              <p className="text-[#a0a5b2]">{new Date(device.last_seen).toLocaleString()}</p>
+              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Inactivo hoy</p>
+              <p className="mt-1 font-mono text-sm text-[#ff9f1a]">{formatDuration(device.idle_time_today_seconds)}</p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">MAC</p>
+              <p className="mt-1 font-mono text-sm text-[#a7b5dc]">{device.mac_address || 'N/A'}</p>
             </div>
           </div>
         </section>
       )}
 
-      <section className="flex gap-3">
-        <button className={tabClass('activity')} onClick={() => setTab('activity')}>
-          Actividad ({tabStats.activity})
-        </button>
-        <button className={tabClass('inventory')} onClick={() => setTab('inventory')}>
-          Inventario ({tabStats.inventory})
-        </button>
-        <button className={tabClass('usb')} onClick={() => setTab('usb')}>
-          USB ({tabStats.usb})
-        </button>
-      </section>
+      <section className="flex items-center justify-between gap-3">
+        <div className="flex gap-2">
+          <button className={tabClass('activity')} onClick={() => setTab('activity')}>
+            Actividad ({tabStats.activity})
+          </button>
+          <button className={tabClass('inventory')} onClick={() => setTab('inventory')}>
+            Inventario ({tabStats.inventory})
+          </button>
+          <button className={tabClass('usb')} onClick={() => setTab('usb')}>
+            USB ({tabStats.usb})
+          </button>
+        </div>
 
-      {tab === 'activity' && (
-        <section className="flex items-center gap-2">
-          <span className="text-xs uppercase tracking-[0.2em] text-[#717579]">Ventana</span>
-          {(['1h', '24h', '7d', '30d'] as ActivityWindow[]).map((windowKey) => (
-            <button
-              key={windowKey}
-              onClick={() => setActivityWindow(windowKey)}
-              className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition-all ${
-                activityWindow === windowKey
-                  ? 'border-[#00d9ff] bg-[#00d9ff]/15 text-[#00d9ff]'
-                  : 'border-[#1e2339] bg-[#131829] text-[#a0a5b2] hover:border-[#00d9ff]/40 hover:text-[#e4e6eb]'
-              }`}
-            >
-              {windowKey}
-            </button>
-          ))}
-        </section>
-      )}
+        {tab === 'activity' && (
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Ventana</span>
+            {(['1h', '24h', '7d', '30d'] as ActivityWindow[]).map((windowKey) => (
+              <button
+                key={windowKey}
+                onClick={() => setActivityWindow(windowKey)}
+                className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold transition-all ${
+                  activityWindow === windowKey
+                    ? 'border-[#00d9ff] bg-[#00d9ff]/15 text-[#00d9ff]'
+                    : 'border-[#223462] bg-[#111a35] text-[#8ea0cf] hover:border-[#00d9ff]/50 hover:text-[#dce6ff]'
+                }`}
+              >
+                {windowKey}
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
 
       {error && <section className="rounded-xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm text-red-300">{error}</section>}
 
       {isLoading ? (
-        <section className="cyber-card rounded-xl px-6 py-10 text-center text-[#a0a5b2]">Cargando telemetria...</section>
+        <section className="rounded-2xl border border-[#1b2b56] bg-[#0b1329] px-6 py-10 text-center text-[#a0a5b2]">Cargando telemetria...</section>
       ) : (
-        <section className="cyber-card overflow-hidden rounded-xl">
+        <section className="overflow-hidden rounded-2xl border border-[#1b2b56] bg-[linear-gradient(160deg,#0f1d43,#0b1329)] shadow-[0_12px_26px_rgba(0,0,0,0.32)]">
           {tab === 'activity' && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr>
-                    <th>Timestamp</th>
+                    <th>Hora</th>
                     <th>Aplicacion</th>
                     <th>Ventana</th>
                     <th>Duracion</th>
@@ -174,15 +195,19 @@ export function DeviceDetailPage() {
                 <tbody>
                   {activity.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="text-center text-[#a0a5b2]">No hay logs de actividad.</td>
+                      <td colSpan={4} className="py-8 text-center text-[#8fa0c9]">No hay logs de actividad.</td>
                     </tr>
                   ) : (
                     activity.map((log, idx) => (
                       <tr key={`${log.timestamp}-${idx}`}>
-                        <td>{new Date(log.timestamp).toLocaleString()}</td>
-                        <td className="text-[#e4e6eb]">{log.app_name}</td>
-                        <td className="max-w-[760px] truncate text-[#a0a5b2]">{log.window_title}</td>
-                        <td className="font-mono text-[#00ff88]">{log.duration_seconds}s</td>
+                        <td className="whitespace-nowrap font-mono text-[11px] text-[#9eb0dc]">{new Date(log.timestamp).toLocaleString()}</td>
+                        <td className="max-w-[320px] truncate font-mono text-[12px] text-[#dce6ff]" title={log.app_name}>
+                          {shortAppName(log.app_name)}
+                        </td>
+                        <td className="max-w-[540px] truncate text-[12px] text-[#9eb0dc]" title={log.window_title}>
+                          {log.window_title || 'Sin titulo'}
+                        </td>
+                        <td className="whitespace-nowrap font-mono text-[11px] text-[#00ff88]">{formatDuration(log.duration_seconds)}</td>
                       </tr>
                     ))
                   )}
@@ -205,21 +230,19 @@ export function DeviceDetailPage() {
                 <tbody>
                   {inventory.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="text-center text-[#a0a5b2]">
-                        Sin datos de inventario para este equipo o endpoint no disponible.
-                      </td>
+                      <td colSpan={4} className="py-8 text-center text-[#8fa0c9]">Sin datos de inventario para este equipo.</td>
                     </tr>
                   ) : (
                     inventory.map((app, idx) => (
                       <tr key={`${app.app_name}-${idx}`}>
-                        <td className="text-[#e4e6eb]">{app.app_name}</td>
-                        <td>{app.version || 'Unknown'}</td>
+                        <td className="max-w-[360px] truncate text-[12px] text-[#dce6ff]" title={app.app_name}>{app.app_name}</td>
+                        <td className="text-[12px] text-[#9eb0dc]">{app.version || 'Unknown'}</td>
                         <td>
-                          <span className={app.verified ? 'text-[#00ff88]' : 'text-red-400'}>
+                          <span className={`inline-flex rounded-full px-2.5 py-1 font-mono text-[10px] ${app.verified ? 'border border-[#00ff88]/40 bg-[#00ff88]/10 text-[#00ff88]' : 'border border-red-500/40 bg-red-500/10 text-red-300'}`}>
                             {app.verified ? 'VERIFIED' : 'UNVERIFIED'}
                           </span>
                         </td>
-                        <td className="max-w-[560px] truncate font-mono text-xs">{app.exe_hash}</td>
+                        <td className="max-w-[440px] truncate font-mono text-[11px] text-[#91a3d2]" title={app.exe_hash}>{app.exe_hash}</td>
                       </tr>
                     ))
                   )}
@@ -233,8 +256,8 @@ export function DeviceDetailPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr>
-                    <th>Timestamp</th>
-                    <th>Nombre</th>
+                    <th>Hora</th>
+                    <th>Dispositivo</th>
                     <th>Serial</th>
                     <th>Accion</th>
                   </tr>
@@ -242,18 +265,18 @@ export function DeviceDetailPage() {
                 <tbody>
                   {usbEvents.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="text-center text-[#a0a5b2]">
-                        Sin eventos USB para este equipo o endpoint no disponible.
-                      </td>
+                      <td colSpan={4} className="py-8 text-center text-[#8fa0c9]">Sin eventos USB para este equipo.</td>
                     </tr>
                   ) : (
                     usbEvents.map((event, idx) => (
                       <tr key={`${event.timestamp}-${idx}`}>
-                        <td>{new Date(event.timestamp).toLocaleString()}</td>
-                        <td className="text-[#e4e6eb]">{event.device_name}</td>
-                        <td className="font-mono text-xs text-[#a0a5b2]">{event.serial_number}</td>
-                        <td className={event.action === 'IN' ? 'text-[#00ff88]' : 'text-red-400'}>
-                          {event.action === 'IN' ? 'CONNECTED' : 'DISCONNECTED'}
+                        <td className="whitespace-nowrap font-mono text-[11px] text-[#9eb0dc]">{new Date(event.timestamp).toLocaleString()}</td>
+                        <td className="max-w-[380px] truncate text-[12px] text-[#dce6ff]" title={event.device_name}>{event.device_name}</td>
+                        <td className="max-w-[340px] truncate font-mono text-[11px] text-[#91a3d2]" title={event.serial_number}>{event.serial_number || 'N/A'}</td>
+                        <td>
+                          <span className={`inline-flex rounded-full px-2.5 py-1 font-mono text-[10px] ${event.action === 'IN' ? 'border border-[#00ff88]/40 bg-[#00ff88]/10 text-[#00ff88]' : 'border border-red-500/40 bg-red-500/10 text-red-300'}`}>
+                            {event.action === 'IN' ? 'CONNECTED' : 'DISCONNECTED'}
+                          </span>
                         </td>
                       </tr>
                     ))

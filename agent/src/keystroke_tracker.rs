@@ -2,12 +2,11 @@
 // Enhanced keystroke and idle time tracking
 
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Utc};
 
 /// Idle detection threshold - User is idle if no activity for N seconds
-const IDLE_THRESHOLD_SECONDS: u64 = 60; // 1 minute
+const IDLE_THRESHOLD_SECONDS: u64 = 300; // 5 minutes
 
 /// Keystroke tracking statistics
 #[derive(Debug, Clone, Default)]
@@ -67,12 +66,15 @@ impl KeystrokeTracker {
 
     /// Check idle status based on last activity time
     pub async fn update_idle_status(&self) {
-        let now = Utc::now();
         let mut stats = self.stats.lock().await;
-        let last_activity = self.last_activity_time.lock().await;
-        
-        let time_since_last_activity = now.signed_duration_since(*last_activity);
-        let seconds_idle = time_since_last_activity.num_seconds() as u64;
+
+        let seconds_idle = if let Some(os_idle_seconds) = platform_idle_seconds() {
+            os_idle_seconds
+        } else {
+            let now = Utc::now();
+            let last_activity = self.last_activity_time.lock().await;
+            now.signed_duration_since(*last_activity).num_seconds().max(0) as u64
+        };
         
         if seconds_idle >= IDLE_THRESHOLD_SECONDS {
             stats.is_idle = true;
@@ -106,6 +108,32 @@ impl KeystrokeTracker {
     pub async fn is_idle(&self) -> bool {
         self.stats.lock().await.is_idle
     }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_idle_seconds() -> Option<u64> {
+    use winapi::um::sysinfoapi::GetTickCount;
+    use winapi::um::winuser::{GetLastInputInfo, LASTINPUTINFO};
+
+    unsafe {
+        let mut info = LASTINPUTINFO {
+            cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32,
+            dwTime: 0,
+        };
+
+        if GetLastInputInfo(&mut info) == 0 {
+            return None;
+        }
+
+        let now_ticks = GetTickCount();
+        let idle_ms = now_ticks.saturating_sub(info.dwTime);
+        Some((idle_ms / 1000) as u64)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn platform_idle_seconds() -> Option<u64> {
+    None
 }
 
 #[cfg(target_os = "windows")]
