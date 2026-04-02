@@ -10,6 +10,7 @@ mod process_protection;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::collections::HashSet;
 use tokio::time::{sleep, Duration, interval};
 use device_id::{load_or_create_device_identity, get_device_nickname};
 use monitoring::MonitoringLoop;
@@ -190,33 +191,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mac_address = device_identity.mac_address.clone();
     let envelope_metadata = Arc::new(EventMetadata::new());
 
-    // Publish initial inventory snapshot at startup.
-    match inventory::InventoryScanner::scan_installed_software().await {
-        Ok(apps) => {
-            let inventory_payload = build_event_envelope(
-                "inventory",
-                1,
-                &device_id_str,
-                &hostname,
-                &mac_address,
-                &auth_token,
-                envelope_metadata.as_ref(),
-                serde_json::json!({
-                    "detected_at": Utc::now().to_rfc3339(),
-                    "apps": apps.into_iter().map(|app| serde_json::json!({
-                        "app_name": app.app_name,
-                        "version": app.version,
-                        "exe_hash": app.exe_hash,
-                        "detected_at": Utc::now().to_rfc3339(),
-                    })).collect::<Vec<_>>(),
-                }),
-            );
-            publish_or_cache(publisher.as_ref(), &cache, "inventory", inventory_payload).await;
-            tracing::info!("✅ Initial inventory snapshot queued/published");
-        }
-        Err(e) => tracing::warn!("Failed to generate initial inventory report: {}", e),
-    }
-    
     // Spawn monitoring task
     let monitoring = MonitoringLoop::new();
     let publisher_clone = publisher.clone();
@@ -382,7 +356,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     
-    // Spawn software inventory scan (startup + every 12h)
+    // Spawn software inventory scan (initial snapshot + every 7 days only new apps)
     let publisher_clone = publisher.clone();
     let cache_clone = cache.clone();
     let device_id_clone = device_id_str.clone();
@@ -391,19 +365,90 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let auth_token_clone = auth_token.clone();
     let envelope_metadata_clone = envelope_metadata.clone();
     tokio::spawn(async move {
-        let mut interval = interval(Duration::from_secs(43200));
+        let mut known_inventory_fingerprints: HashSet<String> = HashSet::new();
+        let mut interval = interval(Duration::from_secs(60 * 60 * 24 * 7));
+
+        // Initial baseline snapshot when agent starts.
+        let initial_apps = match inventory::InventoryScanner::scan_installed_software().await {
+            Ok(apps) => Some(apps),
+            Err(e) => {
+                tracing::warn!("Initial inventory scan error: {}", e);
+                None
+            }
+        };
+
+        if let Some(apps) = initial_apps {
+                for app in &apps {
+                    let key = inventory::InventoryScanner::fingerprint(
+                        &app.app_name,
+                        app.version.as_deref(),
+                        &app.exe_hash,
+                    );
+                    known_inventory_fingerprints.insert(key);
+                }
+
+                let detected_at = Utc::now().to_rfc3339();
+                let inventory_payload = build_event_envelope(
+                    "inventory",
+                    1,
+                    &device_id_clone,
+                    &hostname_clone,
+                    &mac_clone,
+                    &auth_token_clone,
+                    envelope_metadata_clone.as_ref(),
+                    serde_json::json!({
+                        "detected_at": detected_at,
+                        "apps": apps.into_iter().map(|app| serde_json::json!({
+                            "app_name": app.app_name,
+                            "version": app.version,
+                            "exe_hash": app.exe_hash,
+                            "detected_at": detected_at,
+                        })).collect::<Vec<_>>(),
+                    }),
+                );
+                publish_or_cache(publisher_clone.as_ref(), &cache_clone, "inventory", inventory_payload).await;
+                tracing::info!("✅ Initial inventory snapshot published: {} apps", known_inventory_fingerprints.len());
+        }
+
         loop {
             interval.tick().await;
             
             let apps = match inventory::InventoryScanner::scan_installed_software().await {
-                Ok(apps) => apps,
+                Ok(apps) => Some(apps),
                 Err(e) => {
                     tracing::warn!("Inventory scan error: {}", e);
-                    continue;
+                    None
                 }
             };
 
-            tracing::info!("Software inventory scan complete: {} apps", apps.len());
+            let Some(apps) = apps else {
+                continue;
+            };
+
+            let mut new_apps = Vec::new();
+            for app in apps {
+                let key = inventory::InventoryScanner::fingerprint(
+                    &app.app_name,
+                    app.version.as_deref(),
+                    &app.exe_hash,
+                );
+
+                if known_inventory_fingerprints.insert(key) {
+                    new_apps.push(app);
+                }
+            }
+
+            if new_apps.is_empty() {
+                tracing::info!("Software inventory weekly scan complete: no new applications detected");
+                continue;
+            }
+
+            tracing::info!(
+                "Software inventory weekly scan complete: {} new apps detected",
+                new_apps.len()
+            );
+
+            let detected_at = Utc::now().to_rfc3339();
             let inventory_payload = build_event_envelope(
                 "inventory",
                 1,
@@ -413,12 +458,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &auth_token_clone,
                 envelope_metadata_clone.as_ref(),
                 serde_json::json!({
-                    "detected_at": Utc::now().to_rfc3339(),
-                    "apps": apps.into_iter().map(|app| serde_json::json!({
+                    "detected_at": detected_at,
+                    "apps": new_apps.into_iter().map(|app| serde_json::json!({
                         "app_name": app.app_name,
                         "version": app.version,
                         "exe_hash": app.exe_hash,
-                        "detected_at": Utc::now().to_rfc3339(),
+                        "detected_at": detected_at,
                     })).collect::<Vec<_>>(),
                 }),
             );

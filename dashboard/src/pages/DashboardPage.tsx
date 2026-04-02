@@ -1,13 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import { AppShell } from '../components/AppShell';
 import type { Device, SecurityAlert } from '../types';
 
+interface LiveDeviceItem {
+  device_id: string;
+  app: string;
+  title: string;
+  last_seen: string;
+  ago_sec: number;
+  is_live: boolean;
+  is_idle: boolean;
+  duration: string;
+}
+
 export function DashboardPage() {
   const navigate = useNavigate();
   const [devices, setDevices] = useState<Device[]>([]);
   const [alerts, setAlerts] = useState<SecurityAlert[]>([]);
+  const [liveDevices, setLiveDevices] = useState<LiveDeviceItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -22,6 +34,11 @@ export function DashboardPage() {
   const totalIdleSeconds = devices.reduce((acc, device) => acc + (device.idle_time_today_seconds || 0), 0);
   const onlineDevices = devices.filter((device) => device.online);
 
+  const nameByDeviceId = useMemo(
+    () => new Map(devices.map((d) => [d.device_id, d.nickname || d.hostname])),
+    [devices]
+  );
+
   useEffect(() => {
     loadDevices();
     const interval = setInterval(loadDevices, 30000);
@@ -31,13 +48,15 @@ export function DashboardPage() {
   const loadDevices = async () => {
     try {
       setIsLoading(true);
-      const [devicesData, alertsData] = await Promise.all([
+      const [devicesData, alertsData, liveData] = await Promise.all([
         apiClient.getDevices(),
         apiClient.getAlerts(undefined, false).catch(() => []),
+        apiClient.getLiveDevices().catch(() => []),
       ]);
 
       setDevices(devicesData);
       setAlerts(alertsData);
+      setLiveDevices(liveData as LiveDeviceItem[]);
       setError('');
     } catch (err: any) {
       setError(err.message || 'Error al cargar dispositivos');
@@ -191,23 +210,28 @@ export function DashboardPage() {
         <section className="grid grid-cols-2 gap-4 overflow-hidden">
           <article className="rounded-2xl border border-[#1a2748] bg-[linear-gradient(155deg,#0f1d43,#0b1329)] px-4 py-4 min-h-0 shadow-[0_10px_24px_rgba(0,0,0,0.32)]">
             <div className="mb-3 flex items-center justify-between">
-              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#8ea0cf]">Dispositivos en linea</p>
+              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#8ea0cf]">Live Devices</p>
               <span className="rounded-full border border-[#00ff88]/40 bg-[#00ff88]/10 px-2 py-0.5 font-mono text-[10px] text-[#00ff88]">
-                {onlineDevices.length}
+                {liveDevices.filter((d) => d.is_live).length}
               </span>
             </div>
             <div className="space-y-2 overflow-auto">
-              {onlineDevices.slice(0, 7).map((device) => (
+              {liveDevices.slice(0, 7).map((live) => (
                 <button
-                  key={device.device_id}
-                  onClick={() => navigate(`/devices/${device.device_id}`)}
+                  key={live.device_id}
+                  onClick={() => navigate(`/devices/${live.device_id}`)}
                   className="flex w-full items-center justify-between rounded-xl border border-[#21325d] bg-[#0a122a] px-3 py-2 text-left hover:border-[#00d9ff]/60"
                 >
-                  <span className="font-mono text-xs text-[#dce6ff]">{device.nickname || device.hostname}</span>
-                  <span className="font-mono text-[10px] text-[#00ff88]">{formatDuration(device.active_time_today_seconds)}</span>
+                  <div className="min-w-0">
+                    <p className="truncate font-mono text-xs text-[#dce6ff]">{nameByDeviceId.get(live.device_id) || live.device_id.slice(0, 8)}</p>
+                    <p className="truncate font-mono text-[10px] text-[#8ea0cf]">{live.app}</p>
+                  </div>
+                  <span className={`rounded-full px-2 py-1 font-mono text-[10px] ${live.is_live ? 'text-[#00ff88]' : 'text-[#ff9f1a]'}`}>
+                    {live.is_live ? 'LIVE' : `${live.ago_sec}s`}
+                  </span>
                 </button>
               ))}
-              {onlineDevices.length === 0 && <p className="font-mono text-xs text-[#5f6e95]">No hay dispositivos online.</p>}
+              {liveDevices.length === 0 && <p className="font-mono text-xs text-[#5f6e95]">No hay telemetria en vivo.</p>}
             </div>
           </article>
 

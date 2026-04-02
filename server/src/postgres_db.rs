@@ -2,7 +2,7 @@
 use sqlx::{PgPool, Postgres, QueryBuilder, postgres::PgPoolOptions};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActivityLog {
@@ -41,6 +41,15 @@ pub struct DeviceTimeTotals {
     pub device_id: Uuid,
     pub active_seconds: i64,
     pub idle_seconds: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiveDeviceActivity {
+    pub device_id: Uuid,
+    pub app_name: String,
+    pub window_title: String,
+    pub duration_seconds: i64,
+    pub timestamp: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -397,6 +406,158 @@ impl Database {
             .collect())
     }
 
+    pub async fn get_device_history_for_date(
+        &self,
+        device_id: Uuid,
+        date: NaiveDate,
+    ) -> Result<Vec<(String, String, i64, i64)>, sqlx::Error> {
+        sqlx::query_as::<_, (String, String, i64, i64)>(
+            "SELECT app_name, window_title, COALESCE(SUM(duration_seconds), 0)::BIGINT, COUNT(*)::BIGINT
+             FROM activity_logs
+             WHERE device_id = $1 AND DATE(timestamp) = $2
+             GROUP BY app_name, window_title
+             ORDER BY 3 DESC"
+        )
+        .bind(device_id)
+        .bind(date)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    pub async fn get_device_hourly_for_date(
+        &self,
+        device_id: Uuid,
+        date: NaiveDate,
+    ) -> Result<Vec<(i32, i64, i64)>, sqlx::Error> {
+        sqlx::query_as::<_, (i32, i64, i64)>(
+            "SELECT EXTRACT(HOUR FROM timestamp)::INT,
+                    COALESCE(SUM(CASE WHEN LOWER(app_name) LIKE '%idle%' OR LOWER(window_title) LIKE '%idle%' THEN 0 ELSE duration_seconds END), 0)::BIGINT,
+                    COALESCE(SUM(CASE WHEN LOWER(app_name) LIKE '%idle%' OR LOWER(window_title) LIKE '%idle%' THEN duration_seconds ELSE 0 END), 0)::BIGINT
+             FROM activity_logs
+             WHERE device_id = $1 AND DATE(timestamp) = $2
+             GROUP BY 1
+             ORDER BY 1"
+        )
+        .bind(device_id)
+        .bind(date)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    pub async fn get_available_dates(
+        &self,
+        device_id: Option<Uuid>,
+        limit: i64,
+    ) -> Result<Vec<NaiveDate>, sqlx::Error> {
+        if let Some(did) = device_id {
+            sqlx::query_scalar::<_, NaiveDate>(
+                "SELECT DISTINCT DATE(timestamp)
+                 FROM activity_logs
+                 WHERE device_id = $1
+                 ORDER BY 1 DESC
+                 LIMIT $2"
+            )
+            .bind(did)
+            .bind(limit.max(1))
+            .fetch_all(&self.pool)
+            .await
+        } else {
+            sqlx::query_scalar::<_, NaiveDate>(
+                "SELECT DISTINCT DATE(timestamp)
+                 FROM activity_logs
+                 ORDER BY 1 DESC
+                 LIMIT $1"
+            )
+            .bind(limit.max(1))
+            .fetch_all(&self.pool)
+            .await
+        }
+    }
+
+    pub async fn get_active_vs_idle_since(
+        &self,
+        since: DateTime<Utc>,
+    ) -> Result<Vec<(Uuid, i64, i64)>, sqlx::Error> {
+        sqlx::query_as::<_, (Uuid, i64, i64)>(
+            "SELECT device_id,
+                    COALESCE(SUM(active_seconds), 0)::BIGINT,
+                    COALESCE(SUM(idle_seconds), 0)::BIGINT
+             FROM input_activity_metrics
+             WHERE timestamp >= $1
+             GROUP BY device_id
+             ORDER BY 2 DESC"
+        )
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    pub async fn get_activity_logs_for_export(
+        &self,
+        device_id: Option<Uuid>,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<Vec<ActivityLog>, sqlx::Error> {
+        let rows = if let Some(did) = device_id {
+            sqlx::query_as::<_, (Uuid, Uuid, String, String, i64, DateTime<Utc>)>(
+                "SELECT id, device_id, app_name, window_title, duration_seconds, timestamp
+                 FROM activity_logs
+                 WHERE device_id = $1 AND DATE(timestamp) BETWEEN $2 AND $3
+                 ORDER BY timestamp DESC"
+            )
+            .bind(did)
+            .bind(from)
+            .bind(to)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as::<_, (Uuid, Uuid, String, String, i64, DateTime<Utc>)>(
+                "SELECT id, device_id, app_name, window_title, duration_seconds, timestamp
+                 FROM activity_logs
+                 WHERE DATE(timestamp) BETWEEN $1 AND $2
+                 ORDER BY timestamp DESC"
+            )
+            .bind(from)
+            .bind(to)
+            .fetch_all(&self.pool)
+            .await?
+        };
+
+        Ok(rows
+            .into_iter()
+            .map(|(id, device_id, app_name, window_title, duration_seconds, timestamp)| ActivityLog {
+                id,
+                device_id,
+                app_name,
+                window_title,
+                duration_seconds,
+                timestamp,
+            })
+            .collect())
+    }
+
+    pub async fn get_live_devices_activity(&self) -> Result<Vec<LiveDeviceActivity>, sqlx::Error> {
+        let rows = sqlx::query_as::<_, (Uuid, String, String, i64, DateTime<Utc>)>(
+            "SELECT DISTINCT ON (device_id)
+                    device_id, app_name, window_title, duration_seconds, timestamp
+             FROM activity_logs
+             ORDER BY device_id, timestamp DESC"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(device_id, app_name, window_title, duration_seconds, timestamp)| LiveDeviceActivity {
+                device_id,
+                app_name,
+                window_title,
+                duration_seconds,
+                timestamp,
+            })
+            .collect())
+    }
+
     // Inventory Methods
     pub async fn insert_inventory(
         &self,
@@ -405,16 +566,23 @@ impl Database {
         version: String,
         exe_hash: String,
     ) -> Result<InventoryItem, sqlx::Error> {
-        let id = Uuid::new_v4();
         let timestamp = Utc::now();
 
-        sqlx::query(
+        let insert_result = sqlx::query(
             r#"
             INSERT INTO inventory (id, device_id, app_name, version, exe_hash, timestamp)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            SELECT $1, $2, $3, $4, $5, $6
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM inventory
+                WHERE device_id = $2
+                  AND app_name = $3
+                  AND COALESCE(version, '') = COALESCE($4, '')
+                  AND COALESCE(exe_hash, '') = COALESCE($5, '')
+            )
             "#,
         )
-        .bind(id)
+        .bind(Uuid::new_v4())
         .bind(&device_id)
         .bind(&app_name)
         .bind(&version)
@@ -423,10 +591,35 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        tracing::info!("📦 Saved inventory: {} | {} v{}", device_id, app_name, version);
+        let row = sqlx::query_as::<_, (String, String, String, String, String, DateTime<Utc>)>(
+            r#"
+            SELECT id::text, device_id, app_name, COALESCE(version, ''), COALESCE(exe_hash, ''), timestamp
+            FROM inventory
+            WHERE device_id = $1
+              AND app_name = $2
+              AND COALESCE(version, '') = COALESCE($3, '')
+              AND COALESCE(exe_hash, '') = COALESCE($4, '')
+            ORDER BY timestamp DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(&device_id)
+        .bind(&app_name)
+        .bind(&version)
+        .bind(&exe_hash)
+        .fetch_one(&self.pool)
+        .await?;
+
+        if insert_result.rows_affected() > 0 {
+            tracing::info!("📦 Saved inventory: {} | {} v{}", device_id, app_name, version);
+        } else {
+            tracing::debug!("📦 Skipped duplicate inventory item: {} | {} v{}", device_id, app_name, version);
+        }
+
+        let (id, device_id, app_name, version, exe_hash, timestamp) = row;
 
         Ok(InventoryItem {
-            id: id.to_string(),
+            id,
             device_id,
             app_name,
             version,
@@ -438,14 +631,21 @@ impl Database {
     pub async fn get_inventory(&self, device_id: Option<&str>) -> Result<Vec<InventoryItem>, sqlx::Error> {
         let items = if let Some(did) = device_id {
             sqlx::query_as::<_, (String, String, String, String, String, DateTime<Utc>)>(
-                "SELECT id::text, device_id, app_name, version, exe_hash, timestamp FROM inventory WHERE device_id = $1 ORDER BY timestamp DESC"
+                "SELECT DISTINCT ON (app_name, COALESCE(version, ''), COALESCE(exe_hash, ''))
+                        id::text, device_id, app_name, COALESCE(version, ''), COALESCE(exe_hash, ''), timestamp
+                 FROM inventory
+                 WHERE device_id = $1
+                 ORDER BY app_name, COALESCE(version, ''), COALESCE(exe_hash, ''), timestamp DESC"
             )
             .bind(did)
             .fetch_all(&self.pool)
             .await?
         } else {
             sqlx::query_as::<_, (String, String, String, String, String, DateTime<Utc>)>(
-                "SELECT id::text, device_id, app_name, version, exe_hash, timestamp FROM inventory ORDER BY timestamp DESC"
+                "SELECT DISTINCT ON (device_id, app_name, COALESCE(version, ''), COALESCE(exe_hash, ''))
+                        id::text, device_id, app_name, COALESCE(version, ''), COALESCE(exe_hash, ''), timestamp
+                 FROM inventory
+                 ORDER BY device_id, app_name, COALESCE(version, ''), COALESCE(exe_hash, ''), timestamp DESC"
             )
             .fetch_all(&self.pool)
             .await?

@@ -5,7 +5,7 @@ use axum::{
     Json,
     extract::{Path, Query, State},
     middleware::Next,
-    http::Method,
+    http::{Method, header},
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
@@ -52,6 +52,12 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/inventory/apps/:device_id", get(list_device_apps))
         .route("/usb", get(list_usb_events))
         .route("/usb/:device_id", get(list_device_usb_events))
+        .route("/history", get(get_history))
+        .route("/hourly", get(get_hourly))
+        .route("/available_dates", get(get_available_dates))
+        .route("/active_vs_idle", get(get_active_vs_idle))
+        .route("/live_devices", get(get_live_devices))
+        .route("/export/csv", get(export_csv))
         
         // NEW: Input Heatmaps
         .route("/heatmaps/upload", post(upload_heatmap))
@@ -377,6 +383,47 @@ struct ListLimitQuery {
     limit: Option<i64>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct DeviceDateQuery {
+    device_id: Option<String>,
+    date: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ActiveIdleQuery {
+    days: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ExportCsvQuery {
+    device_id: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
+}
+
+fn format_duration(seconds: i64) -> String {
+    let safe_seconds = seconds.max(0);
+    let hours = safe_seconds / 3600;
+    let minutes = (safe_seconds % 3600) / 60;
+    let rem_seconds = safe_seconds % 60;
+    if hours > 0 {
+        format!("{}h {:02}m", hours, minutes)
+    } else if minutes > 0 {
+        format!("{}m {:02}s", minutes, rem_seconds)
+    } else {
+        format!("{}s", rem_seconds)
+    }
+}
+
+fn parse_iso_date(value: Option<&str>) -> Option<chrono::NaiveDate> {
+    value.and_then(|v| chrono::NaiveDate::parse_from_str(v, "%Y-%m-%d").ok())
+}
+
+fn csv_escape(value: &str) -> String {
+    let escaped = value.replace('"', "\"\"");
+    format!("\"{}\"", escaped)
+}
+
 fn parse_time_bounds(filters: &ActivityLogFilters) -> (Option<chrono::DateTime<Utc>>, Option<chrono::DateTime<Utc>>) {
     let from = filters
         .from
@@ -554,6 +601,287 @@ async fn list_device_usb_events(
                 "device_id": device_id_str,
                 "events": []
             }))
+        }
+    }
+}
+
+async fn get_history(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<DeviceDateQuery>,
+) -> impl IntoResponse {
+    let Some(device_id_raw) = query.device_id.as_deref() else {
+        return Json(json!({
+            "success": false,
+            "error": "device_id is required",
+            "history": []
+        }));
+    };
+
+    let Ok(device_id) = Uuid::parse_str(device_id_raw) else {
+        return Json(json!({
+            "success": false,
+            "error": "invalid device_id",
+            "history": []
+        }));
+    };
+
+    let selected_date = parse_iso_date(query.date.as_deref()).unwrap_or_else(|| Utc::now().date_naive());
+
+    match state.db.get_device_history_for_date(device_id, selected_date).await {
+        Ok(rows) => {
+            let history: Vec<serde_json::Value> = rows
+                .into_iter()
+                .map(|(app_name, window_title, seconds, intervals)| {
+                    let is_idle = app_name.to_lowercase().contains("idle")
+                        || window_title.to_lowercase().contains("idle");
+                    json!({
+                        "app": app_name,
+                        "title": window_title,
+                        "seconds": seconds,
+                        "duration": format_duration(seconds),
+                        "intervals": intervals,
+                        "is_idle": is_idle,
+                    })
+                })
+                .collect();
+
+            Json(json!({
+                "success": true,
+                "device_id": device_id,
+                "date": selected_date.to_string(),
+                "history": history,
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch history: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch history",
+                "history": []
+            }))
+        }
+    }
+}
+
+async fn get_hourly(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<DeviceDateQuery>,
+) -> impl IntoResponse {
+    let Some(device_id_raw) = query.device_id.as_deref() else {
+        return Json(json!({
+            "success": false,
+            "error": "device_id is required",
+            "hourly": []
+        }));
+    };
+
+    let Ok(device_id) = Uuid::parse_str(device_id_raw) else {
+        return Json(json!({
+            "success": false,
+            "error": "invalid device_id",
+            "hourly": []
+        }));
+    };
+
+    let selected_date = parse_iso_date(query.date.as_deref()).unwrap_or_else(|| Utc::now().date_naive());
+
+    match state.db.get_device_hourly_for_date(device_id, selected_date).await {
+        Ok(rows) => {
+            let mut by_hour = std::collections::HashMap::new();
+            for (hour, active_seconds, idle_seconds) in rows {
+                by_hour.insert(hour, (active_seconds, idle_seconds));
+            }
+
+            let hourly: Vec<serde_json::Value> = (0..24)
+                .map(|hour| {
+                    let (active_seconds, idle_seconds) = by_hour.get(&hour).copied().unwrap_or((0, 0));
+                    json!({
+                        "hour": hour,
+                        "label": format!("{:02}:00", hour),
+                        "active_seconds": active_seconds,
+                        "idle_seconds": idle_seconds,
+                    })
+                })
+                .collect();
+
+            Json(json!({
+                "success": true,
+                "device_id": device_id,
+                "date": selected_date.to_string(),
+                "hourly": hourly,
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch hourly data: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch hourly data",
+                "hourly": []
+            }))
+        }
+    }
+}
+
+async fn get_available_dates(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<DeviceDateQuery>,
+) -> impl IntoResponse {
+    let device_uuid = query
+        .device_id
+        .as_deref()
+        .and_then(|value| Uuid::parse_str(value).ok());
+
+    match state.db.get_available_dates(device_uuid, 90).await {
+        Ok(dates) => {
+            let items: Vec<String> = dates.into_iter().map(|d| d.to_string()).collect();
+            Json(json!({
+                "success": true,
+                "dates": items,
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch available dates: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch available dates",
+                "dates": []
+            }))
+        }
+    }
+}
+
+async fn get_active_vs_idle(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ActiveIdleQuery>,
+) -> impl IntoResponse {
+    let days = query.days.unwrap_or(7).clamp(1, 90);
+    let since = Utc::now() - Duration::days(days);
+
+    match state.db.get_active_vs_idle_since(since).await {
+        Ok(rows) => {
+            let data: Vec<serde_json::Value> = rows
+                .into_iter()
+                .map(|(device_id, active_seconds, idle_seconds)| {
+                    let total = active_seconds + idle_seconds;
+                    let active_pct = if total > 0 {
+                        (active_seconds as f64 / total as f64) * 100.0
+                    } else {
+                        0.0
+                    };
+
+                    json!({
+                        "device_id": device_id,
+                        "active_seconds": active_seconds,
+                        "idle_seconds": idle_seconds,
+                        "active": format_duration(active_seconds),
+                        "idle": format_duration(idle_seconds),
+                        "active_pct": (active_pct * 10.0).round() / 10.0,
+                    })
+                })
+                .collect();
+
+            Json(json!({
+                "success": true,
+                "days": days,
+                "data": data,
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch active_vs_idle: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch active_vs_idle",
+                "data": []
+            }))
+        }
+    }
+}
+
+async fn get_live_devices(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    match state.db.get_live_devices_activity().await {
+        Ok(rows) => {
+            let now = Utc::now();
+            let data: Vec<serde_json::Value> = rows
+                .into_iter()
+                .map(|row| {
+                    let ago_sec = (now - row.timestamp).num_seconds().max(0);
+                    json!({
+                        "device_id": row.device_id,
+                        "app": row.app_name,
+                        "title": row.window_title,
+                        "last_seen": row.timestamp.to_rfc3339(),
+                        "ago_sec": ago_sec,
+                        "is_live": ago_sec < 180,
+                        "is_idle": row.app_name.to_lowercase().contains("idle") || row.window_title.to_lowercase().contains("idle"),
+                        "duration": format_duration(row.duration_seconds),
+                    })
+                })
+                .collect();
+
+            Json(json!({
+                "success": true,
+                "devices": data,
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch live devices: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch live devices",
+                "devices": []
+            }))
+        }
+    }
+}
+
+async fn export_csv(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ExportCsvQuery>,
+) -> impl IntoResponse {
+    let today = Utc::now().date_naive();
+    let from = parse_iso_date(query.from.as_deref()).unwrap_or(today - chrono::Days::new(7));
+    let to = parse_iso_date(query.to.as_deref()).unwrap_or(today);
+    let device_uuid = query
+        .device_id
+        .as_deref()
+        .and_then(|value| Uuid::parse_str(value).ok());
+
+    match state.db.get_activity_logs_for_export(device_uuid, from, to).await {
+        Ok(rows) => {
+            let mut csv = String::from("timestamp,device_id,app_name,window_title,duration_seconds\n");
+            for row in rows {
+                csv.push_str(&format!(
+                    "{},{},{},{},{}\n",
+                    csv_escape(&row.timestamp.to_rfc3339()),
+                    csv_escape(&row.device_id.to_string()),
+                    csv_escape(&row.app_name),
+                    csv_escape(&row.window_title),
+                    row.duration_seconds,
+                ));
+            }
+
+            let filename = format!("activity_{}_{}.csv", from, to);
+            (
+                [
+                    (header::CONTENT_TYPE, "text/csv; charset=utf-8"),
+                    (
+                        header::CONTENT_DISPOSITION,
+                        Box::leak(format!("attachment; filename={}", filename).into_boxed_str()),
+                    ),
+                ],
+                csv,
+            )
+                .into_response()
+        }
+        Err(e) => {
+            tracing::error!("Failed to export csv: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to export csv"
+            }))
+            .into_response()
         }
     }
 }

@@ -60,9 +60,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_for_consumer = db.clone();
     
     task::spawn(async move {
-        match rabbitmq_consumer::RabbitMQConsumer::start_consumer(&rabbitmq_url_clone, db_for_consumer).await {
-            Ok(_) => tracing::info!("RabbitMQ consumer started"),
-            Err(e) => tracing::warn!("Failed to start RabbitMQ consumer: {}", e),
+        let mut retry_delay_secs = 5u64;
+        loop {
+            let run_result = rabbitmq_consumer::RabbitMQConsumer::start_consumer(
+                &rabbitmq_url_clone,
+                db_for_consumer.clone(),
+            )
+            .await
+            .map_err(|e| e.to_string());
+
+            match run_result {
+                Ok(_) => {
+                    tracing::info!("RabbitMQ consumer stopped gracefully");
+                    break;
+                }
+                Err(err_msg) => {
+                    tracing::warn!(
+                        "Failed to start/keep RabbitMQ consumer: {}. Retrying in {}s",
+                        err_msg,
+                        retry_delay_secs
+                    );
+                    tokio::time::sleep(tokio::time::Duration::from_secs(retry_delay_secs)).await;
+                    retry_delay_secs = (retry_delay_secs * 2).min(60);
+                }
+            }
         }
     });
     

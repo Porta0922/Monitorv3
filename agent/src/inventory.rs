@@ -1,6 +1,7 @@
 // Software inventory scanner
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::collections::HashSet;
 use chrono::{DateTime, Utc};
 use crate::monitoring;
 
@@ -16,6 +17,41 @@ pub struct InstalledApp {
 pub struct InventoryScanner;
 
 impl InventoryScanner {
+    pub fn fingerprint(app_name: &str, version: Option<&str>, exe_hash: &str) -> String {
+        format!(
+            "{}|{}|{}",
+            app_name.trim().to_lowercase(),
+            version.unwrap_or("unknown").trim().to_lowercase(),
+            exe_hash.trim().to_lowercase(),
+        )
+    }
+
+    fn is_noise_or_system_app(app_name: &str) -> bool {
+        let normalized = app_name.trim().to_lowercase();
+
+        if normalized.is_empty() {
+            return true;
+        }
+
+        let blocked_keywords = [
+            "windows sdk",
+            "software development kit",
+            "development libraries",
+            "targeting pack",
+            "windows driver package",
+            "microsoft visual c++",
+            "redistributable",
+            "security update",
+            "update for",
+            "hotfix",
+            "debugging tools",
+            "x64 remote",
+            "x86 remote",
+        ];
+
+        blocked_keywords.iter().any(|keyword| normalized.contains(keyword))
+    }
+
     /// Scan system for installed software
     pub async fn scan_installed_software() -> Result<Vec<InstalledApp>, Box<dyn std::error::Error>> {
         #[cfg(target_os = "windows")]
@@ -52,6 +88,7 @@ impl InventoryScanner {
 impl InventoryScanner {
     async fn scan_windows_software() -> Result<Vec<InstalledApp>, Box<dyn std::error::Error>> {
         let mut apps = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
         
         // Common program paths
         let program_paths = vec![
@@ -78,7 +115,12 @@ impl InventoryScanner {
                                 exe_hash: hash,
                                 installed_date: None,
                             };
-                            apps.push(app);
+                            if !Self::is_noise_or_system_app(&app.app_name) {
+                                let key = Self::fingerprint(&app.app_name, app.version.as_deref(), &app.exe_hash);
+                                if seen.insert(key) {
+                                    apps.push(app);
+                                }
+                            }
                         }
                     }
                 }
@@ -86,11 +128,16 @@ impl InventoryScanner {
         }
         
         // Also scan Windows registry for installed programs
-        apps.extend(Self::scan_registry_uninstall()?);
-        
-        // Remove duplicates
-        apps.sort_by(|a, b| a.app_name.cmp(&b.app_name));
-        apps.dedup_by(|a, b| a.app_name == b.app_name);
+        for app in Self::scan_registry_uninstall()? {
+            if Self::is_noise_or_system_app(&app.app_name) {
+                continue;
+            }
+
+            let key = Self::fingerprint(&app.app_name, app.version.as_deref(), &app.exe_hash);
+            if seen.insert(key) {
+                apps.push(app);
+            }
+        }
         
         Ok(apps)
     }

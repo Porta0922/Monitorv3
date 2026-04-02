@@ -2,30 +2,44 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import { AppShell } from '../components/AppShell';
-import type { ActivityLog, AppInfo, Device, USBEvent } from '../types';
+import type { AppInfo, Device, USBEvent } from '../types';
 
 type TabKey = 'activity' | 'inventory' | 'usb';
-type ActivityWindow = '1h' | '24h' | '7d' | '30d';
 
-const activityWindowToHours: Record<ActivityWindow, number> = {
-  '1h': 1,
-  '24h': 24,
-  '7d': 24 * 7,
-  '30d': 24 * 30,
-};
+interface HistoryItem {
+  app: string;
+  title: string;
+  seconds: number;
+  duration: string;
+  intervals: number;
+  is_idle: boolean;
+}
+
+interface HourlyItem {
+  hour: number;
+  label: string;
+  active_seconds: number;
+  idle_seconds: number;
+}
 
 export function DeviceDetailPage() {
   const { deviceId } = useParams<{ deviceId: string }>();
   const navigate = useNavigate();
 
   const [device, setDevice] = useState<Device | null>(null);
-  const [activity, setActivity] = useState<ActivityLog[]>([]);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [hourly, setHourly] = useState<HourlyItem[]>([]);
+  const [availableDates, setAvailableDates] = useState<string[]>([]);
+  const [selectedDate, setSelectedDate] = useState('');
+
   const [inventory, setInventory] = useState<AppInfo[]>([]);
   const [usbEvents, setUsbEvents] = useState<USBEvent[]>([]);
   const [tab, setTab] = useState<TabKey>('activity');
-  const [activityWindow, setActivityWindow] = useState<ActivityWindow>('24h');
   const [isLoading, setIsLoading] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState('');
+
+  const dateToday = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
   useEffect(() => {
     if (!deviceId) return;
@@ -35,31 +49,31 @@ export function DeviceDetailPage() {
       setError('');
 
       try {
-        const [devices, logs] = await Promise.all([
+        const [devices, apps, usb, dates] = await Promise.all([
           apiClient.getDevices(),
-          apiClient.getActivityLogs(deviceId, {
-            limit: 500,
-            hours: activityWindowToHours[activityWindow],
-          }),
+          apiClient.getApps(deviceId).catch(() => []),
+          apiClient.getUsbHistory(deviceId, 250).catch(() => []),
+          apiClient.getAvailableDates(deviceId).catch(() => []),
         ]);
 
         const selected = devices.find((d) => d.device_id === deviceId) || null;
         setDevice(selected);
-        setActivity(logs);
+        setInventory(apps);
+        setUsbEvents(usb);
+        setAvailableDates(dates);
 
-        try {
-          const apps = await apiClient.getApps(deviceId);
-          setInventory(apps);
-        } catch {
-          setInventory([]);
+        const resolvedDate = selectedDate || dates[0] || dateToday;
+        if (!selectedDate) {
+          setSelectedDate(resolvedDate);
         }
 
-        try {
-          const usb = await apiClient.getUsbHistory(deviceId, 250);
-          setUsbEvents(usb);
-        } catch {
-          setUsbEvents([]);
-        }
+        const [historyData, hourlyData] = await Promise.all([
+          apiClient.getHistory(deviceId, resolvedDate).catch(() => []),
+          apiClient.getHourly(deviceId, resolvedDate).catch(() => []),
+        ]);
+
+        setHistory(historyData as HistoryItem[]);
+        setHourly(hourlyData as HourlyItem[]);
       } catch (err: any) {
         setError(err?.message || 'No fue posible cargar la consola de dispositivo.');
       } finally {
@@ -68,15 +82,15 @@ export function DeviceDetailPage() {
     };
 
     load();
-  }, [deviceId, activityWindow]);
+  }, [deviceId, selectedDate, dateToday]);
 
   const tabStats = useMemo(
     () => ({
-      activity: activity.length,
+      activity: history.length,
       inventory: inventory.length,
       usb: usbEvents.length,
     }),
-    [activity.length, inventory.length, usbEvents.length]
+    [history.length, inventory.length, usbEvents.length]
   );
 
   const formatDuration = (seconds?: number) => {
@@ -98,6 +112,33 @@ export function DeviceDetailPage() {
         ? 'border-[#00d9ff] bg-[#00d9ff]/15 text-[#00d9ff]'
         : 'border-[#223462] bg-[#111a35] text-[#8ea0cf] hover:border-[#00d9ff]/50 hover:text-[#dce6ff]'
     }`;
+
+  const maxHourlyValue = Math.max(1, ...hourly.map((item) => item.active_seconds + item.idle_seconds));
+
+  const handleExportCsv = async () => {
+    if (!deviceId) return;
+    setIsExporting(true);
+    try {
+      const blob = await apiClient.exportCsv({
+        deviceId,
+        from: selectedDate || dateToday,
+        to: selectedDate || dateToday,
+      });
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ame_${deviceId.slice(0, 8)}_${selectedDate || dateToday}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      setError('No fue posible exportar CSV.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   return (
     <AppShell
@@ -157,23 +198,49 @@ export function DeviceDetailPage() {
 
         {tab === 'activity' && (
           <div className="flex items-center gap-2">
-            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Ventana</span>
-            {(['1h', '24h', '7d', '30d'] as ActivityWindow[]).map((windowKey) => (
-              <button
-                key={windowKey}
-                onClick={() => setActivityWindow(windowKey)}
-                className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold transition-all ${
-                  activityWindow === windowKey
-                    ? 'border-[#00d9ff] bg-[#00d9ff]/15 text-[#00d9ff]'
-                    : 'border-[#223462] bg-[#111a35] text-[#8ea0cf] hover:border-[#00d9ff]/50 hover:text-[#dce6ff]'
-                }`}
-              >
-                {windowKey}
-              </button>
-            ))}
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Fecha</span>
+            <select
+              value={selectedDate}
+              onChange={(event) => setSelectedDate(event.target.value)}
+              className="rounded-full border border-[#223462] bg-[#111a35] px-3 py-1.5 text-[11px] text-[#dce6ff]"
+            >
+              {[...(availableDates.length ? availableDates : [dateToday])].map((dateValue) => (
+                <option key={dateValue} value={dateValue}>{dateValue}</option>
+              ))}
+            </select>
+            <button
+              onClick={handleExportCsv}
+              disabled={isExporting}
+              className="rounded-full border border-[#00ff88]/40 bg-[#00ff88]/10 px-3 py-1.5 font-mono text-[11px] text-[#00ff88] hover:border-[#00ff88] disabled:opacity-60"
+            >
+              {isExporting ? 'Exportando...' : 'Export CSV'}
+            </button>
           </div>
         )}
       </section>
+
+      {tab === 'activity' && !isLoading && (
+        <section className="rounded-2xl border border-[#1b2b56] bg-[linear-gradient(160deg,#0f1d43,#0b1329)] p-4 shadow-[0_12px_26px_rgba(0,0,0,0.32)]">
+          <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.18em] text-[#8ea0cf]">Actividad por Hora</p>
+          <div className="flex h-32 items-end gap-1 overflow-hidden rounded-xl border border-[#20315a] bg-[#0a122a] p-2">
+            {hourly.map((item) => {
+              const total = item.active_seconds + item.idle_seconds;
+              const activePct = total > 0 ? Math.round((item.active_seconds / maxHourlyValue) * 100) : 0;
+              const idlePct = total > 0 ? Math.round((item.idle_seconds / maxHourlyValue) * 100) : 0;
+
+              return (
+                <div key={item.hour} className="flex min-w-[22px] flex-1 flex-col items-center justify-end gap-1">
+                  <div className="relative flex h-20 w-3 flex-col justify-end overflow-hidden rounded-full bg-[#1b2a4f]">
+                    <div className="w-full bg-[#ff9f1a]" style={{ height: `${idlePct}%` }} />
+                    <div className="w-full bg-[#00d9ff]" style={{ height: `${activePct}%` }} />
+                  </div>
+                  <span className="font-mono text-[9px] text-[#7c90c1]">{item.hour}</span>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {error && <section className="rounded-xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm text-red-300">{error}</section>}
 
@@ -186,28 +253,34 @@ export function DeviceDetailPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr>
-                    <th>Hora</th>
                     <th>Aplicacion</th>
                     <th>Ventana</th>
                     <th>Duracion</th>
+                    <th>Intervalos</th>
+                    <th>Estado</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {activity.length === 0 ? (
+                  {history.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="py-8 text-center text-[#8fa0c9]">No hay logs de actividad.</td>
+                      <td colSpan={5} className="py-8 text-center text-[#8fa0c9]">No hay actividad para esta fecha.</td>
                     </tr>
                   ) : (
-                    activity.map((log, idx) => (
-                      <tr key={`${log.timestamp}-${idx}`}>
-                        <td className="whitespace-nowrap font-mono text-[11px] text-[#9eb0dc]">{new Date(log.timestamp).toLocaleString()}</td>
-                        <td className="max-w-[320px] truncate font-mono text-[12px] text-[#dce6ff]" title={log.app_name}>
-                          {shortAppName(log.app_name)}
+                    history.map((row, idx) => (
+                      <tr key={`${row.app}-${idx}`}>
+                        <td className="max-w-[320px] truncate font-mono text-[12px] text-[#dce6ff]" title={row.app}>
+                          {shortAppName(row.app)}
                         </td>
-                        <td className="max-w-[540px] truncate text-[12px] text-[#9eb0dc]" title={log.window_title}>
-                          {log.window_title || 'Sin titulo'}
+                        <td className="max-w-[540px] truncate text-[12px] text-[#9eb0dc]" title={row.title}>
+                          {row.title || 'Sin titulo'}
                         </td>
-                        <td className="whitespace-nowrap font-mono text-[11px] text-[#00ff88]">{formatDuration(log.duration_seconds)}</td>
+                        <td className="whitespace-nowrap font-mono text-[11px] text-[#00ff88]">{row.duration}</td>
+                        <td className="whitespace-nowrap font-mono text-[11px] text-[#9eb0dc]">{row.intervals}</td>
+                        <td>
+                          <span className={`inline-flex rounded-full px-2.5 py-1 font-mono text-[10px] ${row.is_idle ? 'border border-[#ff9f1a]/40 bg-[#ff9f1a]/10 text-[#ff9f1a]' : 'border border-[#00d9ff]/40 bg-[#00d9ff]/10 text-[#00d9ff]'}`}>
+                            {row.is_idle ? 'IDLE' : 'ACTIVE'}
+                          </span>
+                        </td>
                       </tr>
                     ))
                   )}

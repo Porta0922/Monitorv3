@@ -203,6 +203,60 @@ class ApiClient {
     return response.data.data || [];
   }
 
+  // Analytics (V1 parity)
+  async getHistory(deviceId: string, date?: string): Promise<any[]> {
+    const response = await this.client.get<{ success: boolean; history: any[] }>('/history', {
+      params: {
+        device_id: deviceId,
+        ...(date ? { date } : {}),
+      },
+    });
+    return response.data.history || [];
+  }
+
+  async getHourly(deviceId: string, date?: string): Promise<any[]> {
+    const response = await this.client.get<{ success: boolean; hourly: any[] }>('/hourly', {
+      params: {
+        device_id: deviceId,
+        ...(date ? { date } : {}),
+      },
+    });
+    return response.data.hourly || [];
+  }
+
+  async getAvailableDates(deviceId?: string): Promise<string[]> {
+    const response = await this.client.get<{ success: boolean; dates: string[] }>('/available_dates', {
+      params: {
+        ...(deviceId ? { device_id: deviceId } : {}),
+      },
+    });
+    return response.data.dates || [];
+  }
+
+  async getActiveVsIdle(days = 7): Promise<any[]> {
+    const response = await this.client.get<{ success: boolean; data: any[] }>('/active_vs_idle', {
+      params: { days },
+    });
+    return response.data.data || [];
+  }
+
+  async getLiveDevices(): Promise<any[]> {
+    const response = await this.client.get<{ success: boolean; devices: any[] }>('/live_devices');
+    return response.data.devices || [];
+  }
+
+  async exportCsv(params?: { deviceId?: string; from?: string; to?: string }): Promise<Blob> {
+    const response = await this.client.get('/export/csv', {
+      params: {
+        ...(params?.deviceId ? { device_id: params.deviceId } : {}),
+        ...(params?.from ? { from: params.from } : {}),
+        ...(params?.to ? { to: params.to } : {}),
+      },
+      responseType: 'blob',
+    });
+    return response.data as Blob;
+  }
+
   // Health
   async getHealth(): Promise<{ status: string; version: string }> {
     const response = await this.client.get('/health');

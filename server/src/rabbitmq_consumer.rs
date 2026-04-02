@@ -10,6 +10,31 @@ use crate::postgres_db::Database;
 pub struct RabbitMQConsumer;
 
 impl RabbitMQConsumer {
+    fn should_skip_inventory_app(app_name: &str) -> bool {
+        let normalized = app_name.trim().to_lowercase();
+        if normalized.is_empty() {
+            return true;
+        }
+
+        let blocked_keywords = [
+            "windows sdk",
+            "software development kit",
+            "development libraries",
+            "targeting pack",
+            "windows driver package",
+            "microsoft visual c++",
+            "redistributable",
+            "security update",
+            "update for",
+            "hotfix",
+            "debugging tools",
+            "x64 remote",
+            "x86 remote",
+        ];
+
+        blocked_keywords.iter().any(|keyword| normalized.contains(keyword))
+    }
+
     /// Start RabbitMQ consumer for monitoring events with PostgreSQL database connection
     pub async fn start_consumer(rabbitmq_url: &str, db: Database) -> Result<(), Box<dyn std::error::Error>> {
         println!("========================================");
@@ -308,6 +333,9 @@ impl RabbitMQConsumer {
         if let Some(apps) = payload["apps"].as_array() {
             for app in apps {
                 let app_name = app["app_name"].as_str().unwrap_or("unknown").to_string();
+                if Self::should_skip_inventory_app(&app_name) {
+                    continue;
+                }
                 let version = app["version"].as_str().unwrap_or("unknown").to_string();
                 let exe_hash = app["exe_hash"].as_str().unwrap_or("unknown").to_string();
 
@@ -326,6 +354,9 @@ impl RabbitMQConsumer {
         // Backward compatibility format
         if let Some(inventory) = event["inventory"].as_object() {
             for (app_name, details) in inventory {
+                if Self::should_skip_inventory_app(app_name) {
+                    continue;
+                }
                 if let Some(obj) = details.as_object() {
                     let version = obj.get("version").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
                     let exe_hash = obj.get("exe_hash").and_then(|h| h.as_str()).unwrap_or("unknown").to_string();
