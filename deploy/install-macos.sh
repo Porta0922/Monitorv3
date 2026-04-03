@@ -9,6 +9,8 @@ AGENT_PATH="/usr/local/bin/$AGENT_NAME"
 CONFIG_DIR="/etc/activity-monitor"
 LOG_DIR="/var/log/activity-monitor"
 DATA_DIR="/var/lib/activity-monitor"
+ENV_FILE="$CONFIG_DIR/.env"
+NICKNAME_FILE="$DATA_DIR/device_nickname.txt"
 
 echo "========================================"
 echo "ActivityMonitor Enterprise v3 Installer"
@@ -21,9 +23,42 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
+# Ask for device nickname
+read -p "Enter device nickname (or press Enter for hostname): " DEVICE_NICKNAME
+if [ -z "$DEVICE_NICKNAME" ]; then
+    DEVICE_NICKNAME=$(hostname)
+    echo "Using hostname: $DEVICE_NICKNAME"
+fi
+
+# Ask for optional auth token (used by current agent)
+read -p "Enter agent auth token (or press Enter for default dev-agent-token): " AGENT_AUTH_TOKEN
+if [ -z "$AGENT_AUTH_TOKEN" ]; then
+    AGENT_AUTH_TOKEN="dev-agent-token"
+fi
+
+AGENT_OFFLINE_CACHE_KEY="replace-with-32-byte-cache-key!!"
+
 # Create directories
 echo "[*] Creating directories..."
 mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR"
+
+# Create .env file if it doesn't exist
+if [ ! -f "$ENV_FILE" ]; then
+    echo "[*] Creating configuration file..."
+    cat > "$ENV_FILE" << ENVEOF
+# ActivityMonitor Agent Configuration
+AGENT_AUTH_TOKEN=$AGENT_AUTH_TOKEN
+AGENT_OFFLINE_CACHE_KEY=$AGENT_OFFLINE_CACHE_KEY
+ENVEOF
+    chmod 600 "$ENV_FILE"
+    echo "[+] Created configuration: $ENV_FILE"
+else
+    echo "[!] Configuration file already exists"
+fi
+
+# Current agent reads nickname from file, not environment variables
+echo "$DEVICE_NICKNAME" > "$NICKNAME_FILE"
+echo "[+] Saved nickname to: $NICKNAME_FILE"
 
 # Check if agent binary exists
 if [ ! -f "$AGENT_PATH" ]; then
@@ -35,7 +70,7 @@ echo "[+] Found agent binary: $AGENT_PATH"
 
 # Create launchd plist
 echo "[*] Creating launchd plist..."
-cat > "$PLIST_PATH" << 'EOF'
+cat > "$PLIST_PATH" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -77,6 +112,14 @@ cat > "$PLIST_PATH" << 'EOF'
     
     <key>ThrottleInterval</key>
     <integer>10</integer>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>AGENT_AUTH_TOKEN</key>
+        <string>$AGENT_AUTH_TOKEN</string>
+        <key>AGENT_OFFLINE_CACHE_KEY</key>
+        <string>$AGENT_OFFLINE_CACHE_KEY</string>
+    </dict>
 </dict>
 </plist>
 EOF

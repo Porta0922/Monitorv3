@@ -21,17 +21,18 @@ set NSSM_PATH=%~dp0\nssm.exe
 set CONFIG_DIR=%PROGRAMDATA%\ActivityMonitor
 set LOG_DIR=%PROGRAMDATA%\ActivityMonitor\logs
 set ENV_FILE=%CONFIG_DIR%\.env
+set AGENT_AUTH_TOKEN=dev-agent-token
+set AGENT_OFFLINE_CACHE_KEY=replace-with-32-byte-cache-key!!
 
 echo ========================================
 echo ActivityMonitor Enterprise v3 Installer
 echo ========================================
 echo.
 
-REM Ask for device nickname
-set /p DEVICE_NICKNAME="Enter device nickname (or press Enter for auto): "
-if "!DEVICE_NICKNAME!"=="" (
-    for /f "tokens=*" %%A in ('hostname') do set DEVICE_NICKNAME=%%A
-    echo Using hostname: !DEVICE_NICKNAME!
+REM Ask for optional auth token (used by current agent)
+set /p INPUT_AUTH_TOKEN="Enter agent auth token (or press Enter for default dev-agent-token): "
+if not "!INPUT_AUTH_TOKEN!"=="" (
+    set AGENT_AUTH_TOKEN=!INPUT_AUTH_TOKEN!
 )
 
 REM Create config directory
@@ -39,14 +40,13 @@ if not exist "%CONFIG_DIR%" mkdir "%CONFIG_DIR%"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 echo [+] Created config directory: %CONFIG_DIR%
 
-REM Create .env file with device nickname
+REM Create .env file with variables used by current agent
 if not exist "%ENV_FILE%" (
     echo Creating configuration file...
     (
         echo # ActivityMonitor Agent Configuration
-        echo DEVICE_NICKNAME=!DEVICE_NICKNAME!
-        echo SERVER_URL=http://localhost:3000
-        echo RABBITMQ_URL=amqp://guest:guest@localhost:5672/%%2F
+        echo AGENT_AUTH_TOKEN=!AGENT_AUTH_TOKEN!
+        echo AGENT_OFFLINE_CACHE_KEY=!AGENT_OFFLINE_CACHE_KEY!
     ) > "%ENV_FILE%"
     echo [+] Created configuration: %ENV_FILE%
 ) else (
@@ -93,7 +93,7 @@ echo [*] Installing service...
 %NSSM_PATH% set %SERVICE_NAME% AppRotateBytes 10485760
 
 REM Set environment variables for service
-%NSSM_PATH% set %SERVICE_NAME% AppEnvironmentExtra "DEVICE_NICKNAME=!DEVICE_NICKNAME!"
+%NSSM_PATH% set %SERVICE_NAME% AppEnvironmentExtra "AGENT_AUTH_TOKEN=!AGENT_AUTH_TOKEN!" "AGENT_OFFLINE_CACHE_KEY=!AGENT_OFFLINE_CACHE_KEY!"
 
 REM Start service
 echo [*] Starting service...
@@ -110,7 +110,7 @@ echo.
 echo ========================================
 echo Installation Complete
 echo ========================================
-echo Device Nickname: !DEVICE_NICKNAME!
+echo Agent auth token configured
 echo Service Name: %SERVICE_NAME%
 echo Binary Path: %AGENT_PATH%
 echo Config Dir: %CONFIG_DIR%
@@ -119,7 +119,7 @@ echo.
 echo To manage the service:
 echo   Start:   net start ActivityMonitor
 echo   Stop:    net stop ActivityMonitor
-echo   Change nickname: Edit %ENV_FILE%
+echo   Update token/key: Edit %ENV_FILE% and reinstall service
 echo   Uninstall: nssm remove ActivityMonitor confirm
 echo.
 pause

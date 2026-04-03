@@ -5,12 +5,13 @@
 set -e
 
 AGENT_NAME="activity-monitor-agent"
-SERVICE_NAME="activity-monitor"
+SERVICE_NAME="activity-monitor-agent"
 AGENT_PATH="/opt/activity-monitor/bin/$AGENT_NAME"
 CONFIG_DIR="/etc/activity-monitor"
 LOG_DIR="/var/log/activity-monitor"
 DATA_DIR="/var/lib/activity-monitor"
 ENV_FILE="$CONFIG_DIR/.env"
+NICKNAME_FILE="$DATA_DIR/device_nickname.txt"
 
 echo "========================================"
 echo "ActivityMonitor Enterprise v3 Installer"
@@ -28,6 +29,12 @@ read -p "Enter device nickname (or press Enter for hostname): " DEVICE_NICKNAME
 if [ -z "$DEVICE_NICKNAME" ]; then
     DEVICE_NICKNAME=$(hostname)
     echo "Using hostname: $DEVICE_NICKNAME"
+fi
+
+# Ask for optional auth token (used by current agent)
+read -p "Enter agent auth token (or press Enter for default dev-agent-token): " AGENT_AUTH_TOKEN
+if [ -z "$AGENT_AUTH_TOKEN" ]; then
+    AGENT_AUTH_TOKEN="dev-agent-token"
 fi
 
 # Create directories
@@ -48,15 +55,18 @@ if [ ! -f "$ENV_FILE" ]; then
     echo "[*] Creating configuration file..."
     cat > "$ENV_FILE" << ENVEOF
 # ActivityMonitor Agent Configuration
-DEVICE_NICKNAME=$DEVICE_NICKNAME
-SERVER_URL=http://localhost:3000
-RABBITMQ_URL=amqp://guest:guest@localhost:5672/%2F
+AGENT_AUTH_TOKEN=$AGENT_AUTH_TOKEN
+AGENT_OFFLINE_CACHE_KEY=replace-with-32-byte-cache-key!!
 ENVEOF
     chmod 600 "$ENV_FILE"
     echo "[+] Created configuration: $ENV_FILE"
 else
     echo "[!] Configuration file already exists"
 fi
+
+# Current agent reads nickname from file, not environment variables
+echo "$DEVICE_NICKNAME" > "$NICKNAME_FILE"
+echo "[+] Saved nickname to: $NICKNAME_FILE"
 
 # Create systemd service unit
 echo "[*] Creating systemd service unit..."
@@ -91,6 +101,7 @@ MemoryLimit=256M
 CPUQuota=50%
 
 # Start command
+EnvironmentFile=-$ENV_FILE
 ExecStart=$AGENT_PATH
 
 [Install]
@@ -107,6 +118,7 @@ fi
 chown -R activity-monitor:activity-monitor "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR"
 chmod 750 "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR"
 chmod 755 "$AGENT_PATH"
+chmod 640 "$NICKNAME_FILE"
 
 # Reload systemd
 echo "[*] Reloading systemd daemon..."
