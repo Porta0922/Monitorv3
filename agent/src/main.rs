@@ -11,6 +11,7 @@ mod process_protection;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::collections::HashSet;
+use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration, interval};
 use device_id::{load_or_create_device_identity, get_device_nickname};
 use monitoring::MonitoringLoop;
@@ -20,6 +21,8 @@ use keystroke_tracker::KeystrokeTracker;
 use process_protection::ProcessProtection;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
+
+type SharedPublisher = Arc<RwLock<Option<Arc<rabbitmq_publisher::RabbitMQPublisher>>>>;
 
 struct EventMetadata {
     boot_id: String,
@@ -69,12 +72,14 @@ fn build_event_envelope(
 }
 
 async fn publish_or_cache(
-    publisher: Option<&Arc<rabbitmq_publisher::RabbitMQPublisher>>,
+    publisher: &SharedPublisher,
     cache: &Arc<offline_cache::OfflineCache>,
     routing_event_type: &str,
     payload: serde_json::Value,
 ) {
-    if let Some(pub_) = publisher {
+    let publisher_snapshot = { publisher.read().await.clone() };
+
+    if let Some(pub_) = publisher_snapshot {
         let publish_error = match pub_.publish_event(routing_event_type, payload.clone()).await {
             Ok(_) => None,
             Err(err) => Some(err.to_string()),
@@ -172,9 +177,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     
     // Initialize RabbitMQ publisher
-    let rabbitmq_url = "amqp://guest:guest@localhost:5672/%2F".to_string();
-    
-    let publisher = match rabbitmq_publisher::RabbitMQPublisher::connect(&rabbitmq_url).await {
+    let rabbitmq_url = std::env::var("RABBITMQ_URL")
+        .unwrap_or_else(|_| "amqp://guest:guest@localhost:5672/%2F".to_string());
+    tracing::info!("🔌 RabbitMQ URL configured for agent: {}", rabbitmq_url);
+
+    let initial_publisher = match rabbitmq_publisher::RabbitMQPublisher::connect(&rabbitmq_url).await {
         Ok(conn) => {
             tracing::info!("✅ RabbitMQ connected");
             Some(Arc::new(conn))
@@ -184,6 +191,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             None
         }
     };
+
+    let publisher: SharedPublisher = Arc::new(RwLock::new(initial_publisher));
+
+    // Keep trying to establish publisher if startup happened while RabbitMQ was unavailable.
+    let publisher_reconnect = publisher.clone();
+    let rabbitmq_url_reconnect = rabbitmq_url.clone();
+    tokio::spawn(async move {
+        let mut reconnect_interval = interval(Duration::from_secs(10));
+        loop {
+            reconnect_interval.tick().await;
+
+            let needs_connect = {
+                let state = publisher_reconnect.read().await;
+                state.is_none()
+            };
+
+            if !needs_connect {
+                continue;
+            }
+
+            let reconnect_result = rabbitmq_publisher::RabbitMQPublisher::connect(&rabbitmq_url_reconnect)
+                .await
+                .map(Arc::new)
+                .map_err(|e| e.to_string());
+
+            match reconnect_result {
+                Ok(conn) => {
+                    let mut state = publisher_reconnect.write().await;
+                    if state.is_none() {
+                        *state = Some(conn);
+                        tracing::info!("✅ RabbitMQ reconnected after offline startup");
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("RabbitMQ still unavailable during reconnect attempt: {}", e);
+                }
+            }
+        }
+    });
 
     let auth_token = std::env::var("AGENT_AUTH_TOKEN").unwrap_or_else(|_| "dev-agent-token".to_string());
     let device_id_str = device_identity.device_id.to_string();
@@ -233,12 +279,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }),
                         );
 
-                        publish_or_cache(
-                            publisher_clone.as_ref(),
-                            &cache_clone,
-                            "activity",
-                            activity_payload,
-                        ).await;
+                        publish_or_cache(&publisher_clone, &cache_clone, "activity", activity_payload).await;
 
                         last_window = Some((current.app_name, current.window_title, current.timestamp));
                     }
@@ -284,7 +325,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }),
             );
 
-            publish_or_cache(publisher_clone.as_ref(), &cache_clone, "heartbeat", heartbeat).await;
+            publish_or_cache(&publisher_clone, &cache_clone, "heartbeat", heartbeat).await;
 
             // Explicit idle/active transitions
             if last_idle_state != Some(is_idle) {
@@ -301,7 +342,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "changed_at": Utc::now().to_rfc3339(),
                     }),
                 );
-                publish_or_cache(publisher_clone.as_ref(), &cache_clone, "heartbeat", transition).await;
+                publish_or_cache(&publisher_clone, &cache_clone, "heartbeat", transition).await;
                 last_idle_state = Some(is_idle);
             }
         }
@@ -346,7 +387,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }),
                         );
 
-                        publish_or_cache(publisher_clone.as_ref(), &cache_clone, "usb", usb_payload).await;
+                        publish_or_cache(&publisher_clone, &cache_clone, "usb", usb_payload).await;
                     }
                 }
                 Err(e) => {
@@ -406,7 +447,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         })).collect::<Vec<_>>(),
                     }),
                 );
-                publish_or_cache(publisher_clone.as_ref(), &cache_clone, "inventory", inventory_payload).await;
+                publish_or_cache(&publisher_clone, &cache_clone, "inventory", inventory_payload).await;
                 tracing::info!("✅ Initial inventory snapshot published: {} apps", known_inventory_fingerprints.len());
         }
 
@@ -467,7 +508,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     })).collect::<Vec<_>>(),
                 }),
             );
-            publish_or_cache(publisher_clone.as_ref(), &cache_clone, "inventory", inventory_payload).await;
+            publish_or_cache(&publisher_clone, &cache_clone, "inventory", inventory_payload).await;
         }
     });
     
@@ -508,7 +549,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }),
                     );
 
-                    publish_or_cache(publisher_clone.as_ref(), &cache_clone, "input_heatmaps", event).await;
+                    publish_or_cache(&publisher_clone, &cache_clone, "input_heatmaps", event).await;
                 }
             }
         }
@@ -548,7 +589,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }),
             );
 
-            publish_or_cache(publisher_clone.as_ref(), &cache_clone, "heartbeat", summary_payload).await;
+            publish_or_cache(&publisher_clone, &cache_clone, "heartbeat", summary_payload).await;
         }
     });
 
@@ -560,7 +601,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             retry_interval.tick().await;
 
-            let Some(pub_) = publisher_clone.as_ref() else {
+            let publisher_snapshot = { publisher_clone.read().await.clone() };
+            let Some(pub_) = publisher_snapshot else {
                 continue;
             };
 
