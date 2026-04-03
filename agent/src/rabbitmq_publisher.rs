@@ -2,59 +2,86 @@
 use lapin::{Connection, ConnectionProperties, Channel};
 use lapin::options::BasicPublishOptions;
 use lapin::BasicProperties;
+use std::io;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 use serde_json::json;
 
 use crate::usb_detection::UsbEvent;
 
 pub struct RabbitMQPublisher {
-    channel: Channel,
+    rabbitmq_url: String,
+    state: Mutex<PublisherState>,
+}
+
+struct PublisherState {
+    connection: Option<Connection>,
+    channel: Option<Channel>,
 }
 
 impl RabbitMQPublisher {
     /// Connect to RabbitMQ and initialize exchanges
     pub async fn connect(rabbitmq_url: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let publisher = Self {
+            rabbitmq_url: rabbitmq_url.to_string(),
+            state: Mutex::new(PublisherState {
+                connection: None,
+                channel: None,
+            }),
+        };
+
+        {
+            let mut state = publisher.state.lock().await;
+            Self::connect_locked(&publisher.rabbitmq_url, &mut state).await?;
+        }
+
+        Ok(publisher)
+    }
+
+    async fn connect_locked(
+        rabbitmq_url: &str,
+        state: &mut PublisherState,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("🔌 Agent connecting to RabbitMQ at: {}", rabbitmq_url);
-        
-        // Connect to RabbitMQ
-        let connection = Connection::connect(
-            rabbitmq_url,
-            ConnectionProperties::default(),
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!("❌ Agent failed to connect to RabbitMQ: {}", e);
-            Box::new(e) as Box<dyn std::error::Error>
-        })?;
 
-        tracing::info!("✅ Agent connected to RabbitMQ");
-
-        let channel = connection.create_channel().await
+        let connection = Connection::connect(rabbitmq_url, ConnectionProperties::default())
+            .await
             .map_err(|e| {
-                tracing::error!("❌ Agent failed to create channel: {}", e);
+                tracing::error!("❌ Agent failed to connect to RabbitMQ: {}", e);
                 Box::new(e) as Box<dyn std::error::Error>
             })?;
 
-        // Declare topic exchange for monitoring events
-        tracing::info!("📢 Agent declaring 'monitoring' exchange (Topic, Durable)");
-        channel.exchange_declare(
-            "monitoring",
-            lapin::ExchangeKind::Topic,
-            lapin::options::ExchangeDeclareOptions {
-                durable: true,
-                ..Default::default()
-            },
-            Default::default(),
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!("❌ Agent failed to declare exchange: {}", e);
+        let channel = connection.create_channel().await.map_err(|e| {
+            tracing::error!("❌ Agent failed to create channel: {}", e);
             Box::new(e) as Box<dyn std::error::Error>
         })?;
 
-        tracing::info!("✅ Agent 'monitoring' exchange declared successfully");
+        tracing::info!("📢 Agent declaring 'monitoring' exchange (Topic, Durable)");
+        channel
+            .exchange_declare(
+                "monitoring",
+                lapin::ExchangeKind::Topic,
+                lapin::options::ExchangeDeclareOptions {
+                    durable: true,
+                    ..Default::default()
+                },
+                Default::default(),
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!("❌ Agent failed to declare exchange: {}", e);
+                Box::new(e) as Box<dyn std::error::Error>
+            })?;
 
-        Ok(Self { channel })
+        state.connection = Some(connection);
+        state.channel = Some(channel);
+
+        tracing::info!("✅ Agent RabbitMQ connection/channel ready");
+        Ok(())
+    }
+
+    fn boxed_error(message: String) -> Box<dyn std::error::Error> {
+        Box::new(io::Error::new(io::ErrorKind::Other, message))
     }
 
     /// Publish activity event
@@ -148,38 +175,102 @@ impl RabbitMQPublisher {
 
         tracing::info!("📤 Publishing event: {} (routing_key: {})", event_type, routing_key);
 
-        self.channel.basic_publish(
-            "monitoring",
-            &routing_key,
-            BasicPublishOptions::default(),
-            &body,
-            BasicProperties::default()
-                .with_content_type("application/json".into())
-                .with_delivery_mode(2u8), // Persistent
-        )
-        .await?
-        .await?;
+        let mut last_error: Option<String> = None;
 
-        tracing::info!("✅ Event published successfully: {} ({} bytes)", routing_key, body.len());
-        Ok(())
+        for attempt in 1..=2 {
+            {
+                let mut state = self.state.lock().await;
+                if state.channel.is_none() {
+                    Self::connect_locked(&self.rabbitmq_url, &mut state).await?;
+                }
+            }
+
+            let channel = {
+                let state = self.state.lock().await;
+                state.channel.clone().ok_or_else(|| {
+                    Self::boxed_error("RabbitMQ channel unavailable after reconnect".to_string())
+                })?
+            };
+
+            let publish_result = async {
+                channel
+                    .basic_publish(
+                        "monitoring",
+                        &routing_key,
+                        BasicPublishOptions::default(),
+                        &body,
+                        BasicProperties::default()
+                            .with_content_type("application/json".into())
+                            .with_delivery_mode(2u8),
+                    )
+                    .await?
+                    .await?;
+                Ok::<(), lapin::Error>(())
+            }
+            .await;
+
+            match publish_result {
+                Ok(_) => {
+                    tracing::info!("✅ Event published successfully: {} ({} bytes)", routing_key, body.len());
+                    return Ok(());
+                }
+                Err(e) => {
+                    let err_msg = e.to_string();
+                    tracing::warn!(
+                        "Publish attempt {} failed for {}: {}",
+                        attempt,
+                        routing_key,
+                        err_msg
+                    );
+                    last_error = Some(err_msg);
+
+                    let mut state = self.state.lock().await;
+                    state.channel = None;
+                    state.connection = None;
+                }
+            }
+        }
+
+        Err(Self::boxed_error(format!(
+            "Publish failed after reconnect retry for {}: {}",
+            routing_key,
+            last_error.unwrap_or_else(|| "unknown error".to_string())
+        )))
     }
 
     /// Health check connection
     pub async fn health_check(&self) -> Result<bool, Box<dyn std::error::Error>> {
-        // Try to declare exchange (lightweight operation)
-        self.channel.exchange_declare(
-            "monitoring",
-            lapin::ExchangeKind::Topic,
-            lapin::options::ExchangeDeclareOptions {
-                durable: true,
-                passive: true,  // Don't create, just check
-                ..Default::default()
-            },
-            Default::default(),
-        )
-        .await
-        .map(|_| true)
-        .map_err(|e| e.into())
+        let mut state = self.state.lock().await;
+        if state.channel.is_none() {
+            if Self::connect_locked(&self.rabbitmq_url, &mut state).await.is_err() {
+                return Ok(false);
+            }
+        }
+
+        let Some(channel) = state.channel.clone() else {
+            return Ok(false);
+        };
+
+        match channel
+            .exchange_declare(
+                "monitoring",
+                lapin::ExchangeKind::Topic,
+                lapin::options::ExchangeDeclareOptions {
+                    durable: true,
+                    passive: true,
+                    ..Default::default()
+                },
+                Default::default(),
+            )
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(_) => {
+                state.channel = None;
+                state.connection = None;
+                Ok(false)
+            }
+        }
     }
 }
 
