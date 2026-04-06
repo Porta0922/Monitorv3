@@ -5,6 +5,10 @@ import type { Device, ActivityLog, AppInfo, USBEvent, WifiEvent, SecurityAlert, 
 
 const BASE_URL = 'http://localhost:3000/api';
 
+function getClientUtcOffsetMinutes(): number {
+  return -new Date().getTimezoneOffset();
+}
+
 class ApiClient {
   private client: AxiosInstance;
   private token: string | null = null;
@@ -226,6 +230,7 @@ class ApiClient {
       params: {
         device_id: deviceId,
         ...(date ? { date } : {}),
+        tz_offset_minutes: getClientUtcOffsetMinutes(),
       },
     });
     return response.data.history || [];
@@ -236,6 +241,7 @@ class ApiClient {
       params: {
         device_id: deviceId,
         ...(date ? { date } : {}),
+        tz_offset_minutes: getClientUtcOffsetMinutes(),
       },
     });
     return response.data.hourly || [];
@@ -245,6 +251,7 @@ class ApiClient {
     const response = await this.client.get<{ success: boolean; dates: string[] }>('/available_dates', {
       params: {
         ...(deviceId ? { device_id: deviceId } : {}),
+        tz_offset_minutes: getClientUtcOffsetMinutes(),
       },
     });
     return response.data.dates || [];
@@ -257,9 +264,26 @@ class ApiClient {
     return response.data.data || [];
   }
 
-  async getLiveDevices(): Promise<any[]> {
-    const response = await this.client.get<{ success: boolean; devices: any[] }>('/live_devices');
+  async getLiveDevices(options: { liveOnly?: boolean; limit?: number } = {}): Promise<any[]> {
+    const response = await this.client.get<{ success: boolean; devices: any[] }>('/live_devices', {
+      params: {
+        ...(typeof options.liveOnly === 'boolean' ? { live_only: options.liveOnly } : {}),
+        ...(options.limit ? { limit: options.limit } : {}),
+      },
+    });
     return response.data.devices || [];
+  }
+
+  async getMetricsSummary(): Promise<any> {
+    const response = await this.client.get<{ success: boolean; metrics: any }>('/metrics/summary');
+    return response.data;
+  }
+
+  async getAuditEvents(limit = 100): Promise<any[]> {
+    const response = await this.client.get<{ success: boolean; events: any[] }>('/audit', {
+      params: { limit },
+    });
+    return response.data.events || [];
   }
 
   async exportCsv(params?: { deviceId?: string; from?: string; to?: string }): Promise<Blob> {
@@ -268,6 +292,7 @@ class ApiClient {
         ...(params?.deviceId ? { device_id: params.deviceId } : {}),
         ...(params?.from ? { from: params.from } : {}),
         ...(params?.to ? { to: params.to } : {}),
+        tz_offset_minutes: getClientUtcOffsetMinutes(),
       },
       responseType: 'blob',
     });

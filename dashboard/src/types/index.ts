@@ -7,6 +7,8 @@ export interface Device {
   mac_address: string;
   last_seen: string;
   online: boolean;
+  stale?: boolean;
+  status?: 'online' | 'offline';
   created_at: string;
   active_time_today_seconds?: number;
   idle_time_today_seconds?: number;

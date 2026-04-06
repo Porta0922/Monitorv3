@@ -10,6 +10,7 @@ interface LiveDeviceItem {
   last_seen: string;
   ago_sec: number;
   is_live: boolean;
+  is_stale?: boolean;
   is_idle: boolean;
   duration: string;
 }
@@ -18,6 +19,8 @@ export function ActivityPage() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [liveDevices, setLiveDevices] = useState<LiveDeviceItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
 
   useEffect(() => {
     loadLiveSnapshot();
@@ -45,16 +48,23 @@ export function ActivityPage() {
     );
   }, [liveDevices]);
 
+  const getNodeName = (deviceId: string) => {
+    return nameByDeviceId.get(deviceId) || `${deviceId.slice(0, 8)}...`;
+  };
+
   const loadLiveSnapshot = async () => {
     try {
       setIsLoading(true);
       const [devicesData, liveData] = await Promise.all([
         apiClient.getDevices(),
-        apiClient.getLiveDevices().catch(() => []),
+        apiClient.getLiveDevices({ limit: 100 }).catch(() => []),
       ]);
       setDevices(devicesData);
       setLiveDevices(liveData as LiveDeviceItem[]);
+      setLastUpdatedAt(new Date().toISOString());
+      setError('');
     } catch (err) {
+      setError('No se pudo cargar la telemetria en vivo. Revisa conexion API y servicio server.');
       console.error('Error loading live snapshot:', err);
     } finally {
       setIsLoading(false);
@@ -77,13 +87,26 @@ export function ActivityPage() {
     >
       <section className="rounded-xl border border-[#1e2339] bg-gradient-to-br from-[#131829] to-[#0a0e27] shadow-2xl overflow-hidden">
         <div className="border-b border-[#1e2339] bg-[#0a0e27] px-6 py-4">
-          <h2 className="text-lg font-semibold text-[#e4e6eb]">Estado actual por nodo ({currentByDevice.length})</h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-lg font-semibold text-[#e4e6eb]">Estado actual por nodo ({currentByDevice.length})</h2>
+            <span className="font-mono text-[11px] text-[#8ea0cf]">
+              {lastUpdatedAt ? `Actualizado: ${new Date(lastUpdatedAt).toLocaleTimeString()}` : 'Sin actualizacion aun'}
+            </span>
+          </div>
         </div>
+
+        {error && (
+          <div className="mx-6 mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3">
+            <p className="font-mono text-xs text-red-300">{error}</p>
+          </div>
+        )}
 
         {isLoading ? (
           <div className="px-6 py-10 text-center text-[#a0a5b2]">Cargando estado en vivo...</div>
         ) : currentByDevice.length === 0 ? (
-          <div className="px-6 py-10 text-center text-[#a0a5b2]">No hay telemetria en vivo.</div>
+          <div className="px-6 py-10 text-center text-[#a0a5b2]">
+            No hay telemetria en vivo. Verifica que el agente este ejecutandose y el nodo tenga actividad reciente.
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -100,11 +123,11 @@ export function ActivityPage() {
                 {currentByDevice.map((live) => (
                   <tr key={live.device_id} className="border-b border-[#1e2339] hover:bg-[#131829]">
                     <td className="px-6 py-3 font-mono text-xs text-[#a0a5b2]">
-                      {nameByDeviceId.get(live.device_id) || `${live.device_id.slice(0, 8)}...`}
+                      {getNodeName(live.device_id)}
                     </td>
                     <td className="px-6 py-3">
-                      <span className={`rounded-full px-2 py-1 font-mono text-[10px] ${live.is_idle ? 'text-[#ff9f1a]' : 'text-[#00ff88]'}`}>
-                        {live.is_idle ? 'IDLE' : 'ACTIVE'}
+                      <span className={`rounded-full px-2 py-1 font-mono text-[10px] ${live.is_stale ? 'text-red-400' : (live.is_idle ? 'text-[#ff9f1a]' : 'text-[#00ff88]')}`}>
+                        {live.is_stale ? 'STALE' : (live.is_idle ? 'IDLE' : 'ACTIVE')}
                       </span>
                     </td>
                     <td className="px-6 py-3 font-medium text-[#e4e6eb]">{live.app || '-'}</td>

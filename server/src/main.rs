@@ -1,5 +1,6 @@
 mod api;
 mod auth;
+mod config;
 mod db;
 mod rabbitmq_consumer;
 mod whitelist;
@@ -11,6 +12,7 @@ use dotenv::dotenv;
 
 use api::{AppState, create_router};
 use auth::AuthManager;
+use config::RuntimeConfig;
 use postgres_db::Database;
 
 #[tokio::main]
@@ -26,6 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev-secret-change-in-production".to_string());
     let rabbitmq_url = std::env::var("RABBITMQ_URL").unwrap_or_else(|_| "amqp://guest:guest@localhost:5672/".to_string());
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://postgres:postgres@localhost:5432/activitymonitor".to_string());
+    let runtime_config = RuntimeConfig::from_env();
     
     tracing::info!("ActivityMonitor Server v0.1.0 starting...");
     tracing::info!("Server: {}:{}", server_host, server_port);
@@ -50,6 +53,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app_state = Arc::new(AppState {
         auth: auth_manager,
         db: db.clone(),
+        config: runtime_config.clone(),
+        rabbitmq_url: rabbitmq_url.clone(),
     });
     
     // Build router
@@ -65,6 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let run_result = rabbitmq_consumer::RabbitMQConsumer::start_consumer(
                 &rabbitmq_url_clone,
                 db_for_consumer.clone(),
+                runtime_config.clone(),
             )
             .await
             .map_err(|e| e.to_string());

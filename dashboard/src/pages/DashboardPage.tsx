@@ -11,6 +11,7 @@ interface LiveDeviceItem {
   last_seen: string;
   ago_sec: number;
   is_live: boolean;
+  is_stale?: boolean;
   is_idle: boolean;
   duration: string;
 }
@@ -38,6 +39,10 @@ export function DashboardPage() {
     () => new Map(devices.map((d) => [d.device_id, d.nickname || d.hostname])),
     [devices]
   );
+
+  const getNodeName = (device: Device) => {
+    return device.nickname || device.hostname || `${device.device_id.slice(0, 8)}...`;
+  };
 
   useEffect(() => {
     loadDevices();
@@ -164,21 +169,28 @@ export function DashboardPage() {
                     <tr key={device.device_id}>
                       <td>
                         <div className="flex flex-col">
-                          <span className="font-display text-sm text-[#dce6ff]">{device.nickname || device.hostname}</span>
+                          <span className="font-display text-sm text-[#dce6ff]">{getNodeName(device)}</span>
                           <span className="font-mono text-[10px] text-[#7387bc]">{device.hostname}</span>
                         </div>
                       </td>
                       <td className="font-mono text-[10px] text-[#8ea0cf]">{device.device_id.slice(0, 8)}...{device.device_id.slice(-4)}</td>
                       <td>
-                        <span
-                          className={`inline-flex rounded-full px-2.5 py-1 font-mono text-[10px] ${
-                            device.online
-                              ? 'border border-[#00ff88]/40 bg-[#00ff88]/10 text-[#00ff88]'
-                              : 'border border-red-500/40 bg-red-500/10 text-red-300'
-                          }`}
-                        >
-                          {device.online ? 'ONLINE' : 'OFFLINE'}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-1 font-mono text-[10px] ${
+                              device.online
+                                ? 'border border-[#00ff88]/40 bg-[#00ff88]/10 text-[#00ff88]'
+                                : 'border border-red-500/40 bg-red-500/10 text-red-300'
+                            }`}
+                          >
+                            {device.online ? 'ONLINE' : 'OFFLINE'}
+                          </span>
+                          {device.stale && (
+                            <span className="inline-flex rounded-full border border-red-500/40 bg-red-500/10 px-2.5 py-1 font-mono text-[10px] text-red-300">
+                              STALE
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="font-mono text-[11px] text-[#00d9ff]">{formatDuration(device.active_time_today_seconds)}</td>
                       <td className="font-mono text-[11px] text-[#ff9f1a]">{formatDuration(device.idle_time_today_seconds)}</td>
@@ -223,11 +235,11 @@ export function DashboardPage() {
                   className="flex w-full items-center justify-between rounded-xl border border-[#21325d] bg-[#0a122a] px-3 py-2 text-left hover:border-[#00d9ff]/60"
                 >
                   <div className="min-w-0">
-                    <p className="truncate font-mono text-xs text-[#dce6ff]">{nameByDeviceId.get(live.device_id) || live.device_id.slice(0, 8)}</p>
+                    <p className="truncate font-mono text-xs text-[#dce6ff]">{nameByDeviceId.get(live.device_id) || `${live.device_id.slice(0, 8)}...`}</p>
                     <p className="truncate font-mono text-[10px] text-[#8ea0cf]">{live.app}</p>
                   </div>
-                  <span className={`rounded-full px-2 py-1 font-mono text-[10px] ${live.is_live ? 'text-[#00ff88]' : 'text-[#ff9f1a]'}`}>
-                    {live.is_live ? 'LIVE' : `${live.ago_sec}s`}
+                  <span className={`rounded-full px-2 py-1 font-mono text-[10px] ${live.is_stale ? 'text-red-400' : (live.is_live ? 'text-[#00ff88]' : 'text-[#ff9f1a]')}`}>
+                    {live.is_stale ? 'STALE' : (live.is_live ? 'LIVE' : `${live.ago_sec}s`)}
                   </span>
                 </button>
               ))}

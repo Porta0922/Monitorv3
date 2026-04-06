@@ -22,6 +22,7 @@ export function useActivityStream() {
   useEffect(() => {
     let eventSource: EventSource | null = null;
     let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+    let retryAttempt = 0;
 
     const connect = () => {
       try {
@@ -30,6 +31,7 @@ export function useActivityStream() {
         eventSource.onopen = () => {
           setIsConnected(true);
           setError(null);
+          retryAttempt = 0;
         };
 
         eventSource.onmessage = (event) => {
@@ -43,13 +45,15 @@ export function useActivityStream() {
 
         eventSource.onerror = () => {
           setIsConnected(false);
-          setError('Connection lost. Reconnecting in 5 seconds...');
+          const nextDelay = Math.min(30000, 2000 * Math.pow(2, retryAttempt));
+          retryAttempt += 1;
+          setError(`Connection lost. Reconnecting in ${Math.round(nextDelay / 1000)} seconds...`);
           eventSource?.close();
           
-          // Reconnect after 5 seconds
+          // Exponential backoff reconnect to reduce pressure when backend is unavailable
           reconnectTimeout = setTimeout(() => {
             connect();
-          }, 5000);
+          }, nextDelay);
         };
       } catch (err: any) {
         setError(err.message || 'Failed to connect to activity stream');

@@ -105,6 +105,26 @@ pub struct StreamEvent {
     pub last_seen: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditEvent {
+    pub id: i64,
+    pub actor: String,
+    pub action: String,
+    pub target: String,
+    pub details: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperationalMetrics {
+    pub devices_total: i64,
+    pub devices_online: i64,
+    pub devices_stale: i64,
+    pub activities_last_hour: i64,
+    pub input_rows_today: i64,
+    pub newest_activity_age_seconds: i64,
+}
+
 pub struct Database {
     pool: PgPool,
 }
@@ -301,6 +321,27 @@ impl Database {
         .execute(pool)
         .await?;
 
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS audit_events (
+                id BIGSERIAL PRIMARY KEY,
+                actor VARCHAR(255) NOT NULL,
+                action VARCHAR(128) NOT NULL,
+                target VARCHAR(255) NOT NULL,
+                details TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_audit_events_created_at ON audit_events(created_at DESC)"
+        )
+        .execute(pool)
+        .await?;
+
         Ok(())
     }
 
@@ -328,6 +369,13 @@ impl Database {
         .await?;
 
         Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn ping(&self) -> Result<(), sqlx::Error> {
+        sqlx::query_scalar::<_, i32>("SELECT 1")
+            .fetch_one(&self.pool)
+            .await
+            .map(|_| ())
     }
 
     // Activity Methods
@@ -465,16 +513,18 @@ impl Database {
         &self,
         device_id: Uuid,
         date: NaiveDate,
+        tz_offset_minutes: i32,
     ) -> Result<Vec<(String, String, i64, i64)>, sqlx::Error> {
         sqlx::query_as::<_, (String, String, i64, i64)>(
             "SELECT app_name, window_title, COALESCE(SUM(duration_seconds), 0)::BIGINT, COUNT(*)::BIGINT
              FROM activity_logs
-             WHERE device_id = $1 AND DATE(timestamp) = $2
+             WHERE device_id = $1 AND DATE(timestamp + ($3 * INTERVAL '1 minute')) = $2
              GROUP BY app_name, window_title
              ORDER BY 3 DESC"
         )
         .bind(device_id)
         .bind(date)
+        .bind(tz_offset_minutes)
         .fetch_all(&self.pool)
         .await
     }
@@ -483,18 +533,20 @@ impl Database {
         &self,
         device_id: Uuid,
         date: NaiveDate,
+        tz_offset_minutes: i32,
     ) -> Result<Vec<(i32, i64, i64)>, sqlx::Error> {
         sqlx::query_as::<_, (i32, i64, i64)>(
-            "SELECT EXTRACT(HOUR FROM timestamp)::INT,
+            "SELECT EXTRACT(HOUR FROM (timestamp + ($3 * INTERVAL '1 minute')))::INT,
                     COALESCE(SUM(CASE WHEN LOWER(app_name) LIKE '%idle%' OR LOWER(window_title) LIKE '%idle%' THEN 0 ELSE duration_seconds END), 0)::BIGINT,
                     COALESCE(SUM(CASE WHEN LOWER(app_name) LIKE '%idle%' OR LOWER(window_title) LIKE '%idle%' THEN duration_seconds ELSE 0 END), 0)::BIGINT
              FROM activity_logs
-             WHERE device_id = $1 AND DATE(timestamp) = $2
+             WHERE device_id = $1 AND DATE(timestamp + ($3 * INTERVAL '1 minute')) = $2
              GROUP BY 1
              ORDER BY 1"
         )
         .bind(device_id)
         .bind(date)
+        .bind(tz_offset_minutes)
         .fetch_all(&self.pool)
         .await
     }
@@ -503,26 +555,29 @@ impl Database {
         &self,
         device_id: Option<Uuid>,
         limit: i64,
+        tz_offset_minutes: i32,
     ) -> Result<Vec<NaiveDate>, sqlx::Error> {
         if let Some(did) = device_id {
             sqlx::query_scalar::<_, NaiveDate>(
-                "SELECT DISTINCT DATE(timestamp)
+                "SELECT DISTINCT DATE(timestamp + ($2 * INTERVAL '1 minute'))
                  FROM activity_logs
                  WHERE device_id = $1
                  ORDER BY 1 DESC
-                 LIMIT $2"
+                 LIMIT $3"
             )
             .bind(did)
+            .bind(tz_offset_minutes)
             .bind(limit.max(1))
             .fetch_all(&self.pool)
             .await
         } else {
             sqlx::query_scalar::<_, NaiveDate>(
-                "SELECT DISTINCT DATE(timestamp)
+                "SELECT DISTINCT DATE(timestamp + ($1 * INTERVAL '1 minute'))
                  FROM activity_logs
                  ORDER BY 1 DESC
-                 LIMIT $1"
+                 LIMIT $2"
             )
+            .bind(tz_offset_minutes)
             .bind(limit.max(1))
             .fetch_all(&self.pool)
             .await
@@ -552,28 +607,31 @@ impl Database {
         device_id: Option<Uuid>,
         from: NaiveDate,
         to: NaiveDate,
+        tz_offset_minutes: i32,
     ) -> Result<Vec<ActivityLog>, sqlx::Error> {
         let rows = if let Some(did) = device_id {
             sqlx::query_as::<_, (Uuid, Uuid, String, String, i64, DateTime<Utc>)>(
                 "SELECT id, device_id, app_name, window_title, duration_seconds, timestamp
                  FROM activity_logs
-                 WHERE device_id = $1 AND DATE(timestamp) BETWEEN $2 AND $3
+                 WHERE device_id = $1 AND DATE(timestamp + ($4 * INTERVAL '1 minute')) BETWEEN $2 AND $3
                  ORDER BY timestamp DESC"
             )
             .bind(did)
             .bind(from)
             .bind(to)
+            .bind(tz_offset_minutes)
             .fetch_all(&self.pool)
             .await?
         } else {
             sqlx::query_as::<_, (Uuid, Uuid, String, String, i64, DateTime<Utc>)>(
                 "SELECT id, device_id, app_name, window_title, duration_seconds, timestamp
                  FROM activity_logs
-                 WHERE DATE(timestamp) BETWEEN $1 AND $2
+                 WHERE DATE(timestamp + ($3 * INTERVAL '1 minute')) BETWEEN $1 AND $2
                  ORDER BY timestamp DESC"
             )
             .bind(from)
             .bind(to)
+            .bind(tz_offset_minutes)
             .fetch_all(&self.pool)
             .await?
         };
@@ -589,6 +647,123 @@ impl Database {
                 timestamp,
             })
             .collect())
+    }
+
+    pub async fn update_device_nickname(
+        &self,
+        device_id: Uuid,
+        nickname: Option<String>,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE devices SET nickname = $2, updated_at = NOW() WHERE device_id = $1"
+        )
+        .bind(device_id)
+        .bind(nickname)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn insert_audit_event(
+        &self,
+        actor: &str,
+        action: &str,
+        target: &str,
+        details: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO audit_events (actor, action, target, details) VALUES ($1, $2, $3, $4)"
+        )
+        .bind(actor)
+        .bind(action)
+        .bind(target)
+        .bind(details)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_audit_events(&self, limit: i64) -> Result<Vec<AuditEvent>, sqlx::Error> {
+        let rows = sqlx::query_as::<_, (i64, String, String, String, Option<String>, DateTime<Utc>)>(
+            "SELECT id, actor, action, target, details, created_at
+             FROM audit_events
+             ORDER BY created_at DESC
+             LIMIT $1"
+        )
+        .bind(limit.max(1))
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(id, actor, action, target, details, created_at)| AuditEvent {
+                id,
+                actor,
+                action,
+                target,
+                details,
+                created_at,
+            })
+            .collect())
+    }
+
+    pub async fn get_operational_metrics(
+        &self,
+        online_threshold_seconds: i64,
+        stale_threshold_seconds: i64,
+    ) -> Result<OperationalMetrics, sqlx::Error> {
+        let devices_total = sqlx::query_scalar::<_, i64>("SELECT COUNT(*)::BIGINT FROM devices")
+            .fetch_one(&self.pool)
+            .await?
+            .max(0);
+
+        let devices_online = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*)::BIGINT FROM devices WHERE last_seen >= NOW() - ($1 * INTERVAL '1 second')"
+        )
+        .bind(online_threshold_seconds.max(1))
+        .fetch_one(&self.pool)
+        .await?
+        .max(0);
+
+        let devices_stale = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*)::BIGINT FROM devices WHERE last_seen < NOW() - ($1 * INTERVAL '1 second')"
+        )
+        .bind(stale_threshold_seconds.max(1))
+        .fetch_one(&self.pool)
+        .await?
+        .max(0);
+
+        let activities_last_hour = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*)::BIGINT FROM activity_logs WHERE timestamp >= NOW() - INTERVAL '1 hour'"
+        )
+        .fetch_one(&self.pool)
+        .await?
+        .max(0);
+
+        let input_rows_today = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*)::BIGINT FROM input_activity_metrics WHERE timestamp >= date_trunc('day', NOW())"
+        )
+        .fetch_one(&self.pool)
+        .await?
+        .max(0);
+
+        let newest_activity_age_seconds = sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(EXTRACT(EPOCH FROM (NOW() - MAX(timestamp)))::BIGINT, 0) FROM activity_logs"
+        )
+        .fetch_one(&self.pool)
+        .await?
+        .max(0);
+
+        Ok(OperationalMetrics {
+            devices_total,
+            devices_online,
+            devices_stale,
+            activities_last_hour,
+            input_rows_today,
+            newest_activity_age_seconds,
+        })
     }
 
     pub async fn get_live_devices_activity(&self) -> Result<Vec<LiveDeviceActivity>, sqlx::Error> {
@@ -919,19 +1094,21 @@ impl Database {
         mouse_moves_count: i64,
         clicks_count: i64,
         status: String,
+        bucket_max_seconds: i64,
     ) -> Result<(), sqlx::Error> {
         let id = Uuid::new_v4();
         let device_uuid = Uuid::parse_str(&device_id)
             .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
 
-        let mut safe_active = active_seconds.max(0).min(60);
-        let mut safe_idle = idle_seconds.max(0).min(60);
-        if safe_active + safe_idle > 60 {
+        let safe_bucket_max = bucket_max_seconds.max(1);
+        let mut safe_active = active_seconds.max(0).min(safe_bucket_max);
+        let mut safe_idle = idle_seconds.max(0).min(safe_bucket_max);
+        if safe_active + safe_idle > safe_bucket_max {
             if status == "idle" {
                 safe_active = 0;
-                safe_idle = 60;
+                safe_idle = safe_bucket_max;
             } else {
-                safe_active = 60;
+                safe_active = safe_bucket_max;
                 safe_idle = 0;
             }
         }

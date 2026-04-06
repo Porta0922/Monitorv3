@@ -17,13 +17,18 @@ use chrono::{Duration, Utc};
 use tower_http::cors::{CorsLayer, AllowOrigin, AllowHeaders};
 use futures::stream::{self, StreamExt};
 use std::convert::Infallible;
+use tokio::time::timeout;
+use lapin::{Connection, ConnectionProperties};
 
 use crate::auth::AuthManager;
+use crate::config::RuntimeConfig;
 use crate::postgres_db::Database;
 
 pub struct AppState {
     pub auth: AuthManager,
     pub db: Database,
+    pub config: RuntimeConfig,
+    pub rabbitmq_url: String,
 }
 
 pub fn create_router(state: Arc<AppState>) -> Router {
@@ -60,6 +65,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/active_vs_idle", get(get_active_vs_idle))
         .route("/live_devices", get(get_live_devices))
         .route("/export/csv", get(export_csv))
+        .route("/audit", get(list_audit_events))
         
         // NEW: Input Heatmaps
         .route("/heatmaps/upload", post(upload_heatmap))
@@ -79,11 +85,13 @@ pub fn create_router(state: Arc<AppState>) -> Router {
     // Public routes
     let public_router = Router::new()
         .route("/health", get(health_check))
+        .route("/readiness", get(readiness_check))
         .route("/auth/register", post(register_user))
         .route("/auth/login", post(login_user))
         .route("/devices/register", post(register_device))
         .route("/overview", get(get_overview))
         .route("/top_apps", get(get_top_apps))
+        .route("/metrics/summary", get(get_metrics_summary))
         .route("/stream", get(stream_events))
         .with_state(state);
 
@@ -100,6 +108,47 @@ async fn health_check() -> impl IntoResponse {
         "status": "ok",
         "service": "ActivityMonitor Server",
         "version": "0.1.0"
+    }))
+}
+
+async fn readiness_check(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let db_ready = timeout(
+        std::time::Duration::from_millis(state.config.readiness_timeout_ms),
+        state.db.ping(),
+    )
+    .await
+    .map(|res| res.is_ok())
+    .unwrap_or(false);
+
+    let rabbit_ready = timeout(
+        std::time::Duration::from_millis(state.config.readiness_timeout_ms),
+        Connection::connect(&state.rabbitmq_url, ConnectionProperties::default()),
+    )
+    .await
+    .map(|res| res.is_ok())
+    .unwrap_or(false);
+
+    let overall = if db_ready && rabbit_ready {
+        "ok"
+    } else if db_ready || rabbit_ready {
+        "degraded"
+    } else {
+        "down"
+    };
+
+    Json(json!({
+        "status": overall,
+        "checks": {
+            "database": if db_ready { "ok" } else { "down" },
+            "rabbitmq": if rabbit_ready { "ok" } else { "down" }
+        },
+        "thresholds": {
+            "online_threshold_seconds": state.config.online_threshold_seconds,
+            "live_threshold_seconds": state.config.live_threshold_seconds,
+            "stale_threshold_seconds": state.config.stale_threshold_seconds
+        }
     }))
 }
 
@@ -120,21 +169,47 @@ async fn register_user(
 async fn login_user(
     State(state): State<Arc<AppState>>,
     Json(_payload): Json<serde_json::Value>,
-) -> impl IntoResponse {
-    let username = _payload.get("username").and_then(|u| u.as_str());
-    let password = _payload.get("password").and_then(|p| p.as_str());
-    
-    if let (Some(username), Some(password)) = (username, password) {
-        // TODO: Fetch user from database
-        // TODO: Verify password hash
-        
-        if let Ok(token) = state.auth.issue_token(username, 24) {
+) -> Response {
+    let username = _payload
+        .get("username")
+        .and_then(|u| u.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let has_password = _payload
+        .get("password")
+        .and_then(|p| p.as_str())
+        .is_some();
+
+    if has_password {
+        // TODO: Fetch user from database and verify password hash
+        let token_result = state.auth.issue_token(&username, 24);
+        if let Ok(token) = token_result {
+            if state.config.audit_log_enabled {
+                let db = state.db.clone();
+                let actor = username.clone();
+                tokio::spawn(async move {
+                    let _ = db
+                        .insert_audit_event(&actor, "auth.login.success", "api", None)
+                        .await;
+                });
+            }
             return Json(json!({
                 "success": true,
                 "token": token,
                 "expires_in": 86400
-            })).into_response();
+            }))
+            .into_response();
         }
+    }
+
+    if state.config.audit_log_enabled {
+        let db = state.db.clone();
+        let actor = username.clone();
+        tokio::spawn(async move {
+            let _ = db
+                .insert_audit_event(&actor, "auth.login.failed", "api", None)
+                .await;
+        });
     }
     
     Json(json!({
@@ -176,7 +251,7 @@ async fn register_device(
     match state.db.register_device(hostname, device_id, mac_address, nickname).await {
         Ok(device) => Json(json!({
             "success": true,
-            "device": serialize_device(device)
+            "device": serialize_device(device, &state.config)
         })),
         Err(error) => {
             tracing::error!("Failed to register device: {}", error);
@@ -218,7 +293,7 @@ async fn list_devices(
             let device_json: Vec<serde_json::Value> = devices
                 .into_iter()
                 .map(|device| {
-                    let mut value = serialize_device(device.clone());
+                    let mut value = serialize_device(device.clone(), &state.config);
                     let (active_seconds, idle_seconds, keys_count, mouse_moves_count, clicks_count) = totals_map
                         .get(&device.device_id)
                         .copied()
@@ -270,7 +345,7 @@ async fn get_device(
                     Err(_) => (0, 0, 0, 0, 0),
                 };
 
-                let mut device_json = serialize_device(device);
+                let mut device_json = serialize_device(device, &state.config);
                 if let Some(obj) = device_json.as_object_mut() {
                     obj.insert("active_time_today_seconds".to_string(), json!(active_seconds));
                     obj.insert("idle_time_today_seconds".to_string(), json!(idle_seconds));
@@ -297,16 +372,45 @@ async fn get_device(
 }
 
 async fn update_device(
-    State(_state): State<Arc<AppState>>,
-    Path(_device_id): Path<Uuid>,
-    Json(_payload): Json<serde_json::Value>,
+    State(state): State<Arc<AppState>>,
+    Path(device_id): Path<Uuid>,
+    Json(payload): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    // TODO: Update device nickname or other fields
-    
-    Json(json!({
-        "success": true,
-        "message": "Device updated successfully"
-    }))
+    let nickname = payload
+        .get("nickname")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_string());
+
+    match state.db.update_device_nickname(device_id, nickname.clone()).await {
+        Ok(_) => {
+            if state.config.audit_log_enabled {
+                let detail = format!("nickname={}", nickname.clone().unwrap_or_default());
+                let _ = state
+                    .db
+                    .insert_audit_event(
+                        "api/device",
+                        "device.nickname.update",
+                        &device_id.to_string(),
+                        Some(detail.as_str()),
+                    )
+                    .await;
+            }
+
+            Json(json!({
+                "success": true,
+                "message": "Device updated successfully",
+                "device_id": device_id,
+                "nickname": nickname,
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to update device {}: {}", device_id, e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to update device",
+            }))
+        }
+    }
 }
 
 async fn ingest_activity_logs(
@@ -412,6 +516,7 @@ struct ListLimitQuery {
 struct DeviceDateQuery {
     device_id: Option<String>,
     date: Option<String>,
+    tz_offset_minutes: Option<i32>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -420,10 +525,22 @@ struct ActiveIdleQuery {
 }
 
 #[derive(Debug, Deserialize, Default)]
+struct LiveDevicesQuery {
+    live_only: Option<bool>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct AuditQuery {
+    limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, Default)]
 struct ExportCsvQuery {
     device_id: Option<String>,
     from: Option<String>,
     to: Option<String>,
+    tz_offset_minutes: Option<i32>,
 }
 
 fn format_duration(seconds: i64) -> String {
@@ -730,8 +847,13 @@ async fn get_history(
     };
 
     let selected_date = parse_iso_date(query.date.as_deref()).unwrap_or_else(|| Utc::now().date_naive());
+    let tz_offset_minutes = query.tz_offset_minutes.unwrap_or(0);
 
-    match state.db.get_device_history_for_date(device_id, selected_date).await {
+    match state
+        .db
+        .get_device_history_for_date(device_id, selected_date, tz_offset_minutes)
+        .await
+    {
         Ok(rows) => {
             let history: Vec<serde_json::Value> = rows
                 .into_iter()
@@ -753,6 +875,7 @@ async fn get_history(
                 "success": true,
                 "device_id": device_id,
                 "date": selected_date.to_string(),
+                "tz_offset_minutes": tz_offset_minutes,
                 "history": history,
             }))
         }
@@ -788,8 +911,13 @@ async fn get_hourly(
     };
 
     let selected_date = parse_iso_date(query.date.as_deref()).unwrap_or_else(|| Utc::now().date_naive());
+    let tz_offset_minutes = query.tz_offset_minutes.unwrap_or(0);
 
-    match state.db.get_device_hourly_for_date(device_id, selected_date).await {
+    match state
+        .db
+        .get_device_hourly_for_date(device_id, selected_date, tz_offset_minutes)
+        .await
+    {
         Ok(rows) => {
             let mut by_hour = std::collections::HashMap::new();
             for (hour, active_seconds, idle_seconds) in rows {
@@ -812,6 +940,7 @@ async fn get_hourly(
                 "success": true,
                 "device_id": device_id,
                 "date": selected_date.to_string(),
+                "tz_offset_minutes": tz_offset_minutes,
                 "hourly": hourly,
             }))
         }
@@ -835,11 +964,14 @@ async fn get_available_dates(
         .as_deref()
         .and_then(|value| Uuid::parse_str(value).ok());
 
-    match state.db.get_available_dates(device_uuid, 90).await {
+    let tz_offset_minutes = query.tz_offset_minutes.unwrap_or(0);
+
+    match state.db.get_available_dates(device_uuid, 90, tz_offset_minutes).await {
         Ok(dates) => {
             let items: Vec<String> = dates.into_iter().map(|d| d.to_string()).collect();
             Json(json!({
                 "success": true,
+                "tz_offset_minutes": tz_offset_minutes,
                 "dates": items,
             }))
         }
@@ -903,10 +1035,14 @@ async fn get_active_vs_idle(
 
 async fn get_live_devices(
     State(state): State<Arc<AppState>>,
+    Query(query): Query<LiveDevicesQuery>,
 ) -> impl IntoResponse {
     match state.db.get_live_devices_activity().await {
         Ok(rows) => {
             let now = Utc::now();
+            let live_threshold = state.config.live_threshold_seconds.max(1);
+            let stale_threshold = state.config.stale_threshold_seconds.max(1);
+            let limit = query.limit.unwrap_or(50).max(1);
             let data: Vec<serde_json::Value> = rows
                 .into_iter()
                 .map(|row| {
@@ -917,11 +1053,22 @@ async fn get_live_devices(
                         "title": row.window_title,
                         "last_seen": row.timestamp.to_rfc3339(),
                         "ago_sec": ago_sec,
-                        "is_live": ago_sec < 180,
+                        "is_live": ago_sec < live_threshold,
+                        "is_stale": ago_sec >= stale_threshold,
                         "is_idle": row.app_name.to_lowercase().contains("idle") || row.window_title.to_lowercase().contains("idle"),
                         "duration": format_duration(row.duration_seconds),
                     })
                 })
+                .filter(|row| {
+                    if query.live_only.unwrap_or(false) {
+                        row.get("is_live")
+                            .and_then(|value| value.as_bool())
+                            .unwrap_or(false)
+                    } else {
+                        true
+                    }
+                })
+                .take(limit)
                 .collect();
 
             Json(json!({
@@ -951,8 +1098,13 @@ async fn export_csv(
         .device_id
         .as_deref()
         .and_then(|value| Uuid::parse_str(value).ok());
+    let tz_offset_minutes = query.tz_offset_minutes.unwrap_or(0);
 
-    match state.db.get_activity_logs_for_export(device_uuid, from, to).await {
+    match state
+        .db
+        .get_activity_logs_for_export(device_uuid, from, to, tz_offset_minutes)
+        .await
+    {
         Ok(rows) => {
             let mut csv = String::from("timestamp,device_id,app_name,window_title,duration_seconds\n");
             for row in rows {
@@ -964,6 +1116,22 @@ async fn export_csv(
                     csv_escape(&row.window_title),
                     row.duration_seconds,
                 ));
+            }
+
+            if state.config.audit_log_enabled {
+                let actor = "api/export";
+                let target = query.device_id.as_deref().unwrap_or("all-devices");
+                let details = format!(
+                    "from={},to={},tz_offset_minutes={},rows={}",
+                    from,
+                    to,
+                    tz_offset_minutes,
+                    csv.lines().count().saturating_sub(1)
+                );
+                let _ = state
+                    .db
+                    .insert_audit_event(actor, "csv.export", target, Some(details.as_str()))
+                    .await;
             }
 
             let filename = format!("activity_{}_{}.csv", from, to);
@@ -986,6 +1154,78 @@ async fn export_csv(
                 "error": "Failed to export csv"
             }))
             .into_response()
+        }
+    }
+}
+
+async fn list_audit_events(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AuditQuery>,
+) -> impl IntoResponse {
+    match state.db.get_audit_events(query.limit.unwrap_or(100)).await {
+        Ok(rows) => {
+            let events: Vec<serde_json::Value> = rows
+                .into_iter()
+                .map(|e| {
+                    json!({
+                        "id": e.id,
+                        "actor": e.actor,
+                        "action": e.action,
+                        "target": e.target,
+                        "details": e.details,
+                        "created_at": e.created_at.to_rfc3339(),
+                    })
+                })
+                .collect();
+
+            Json(json!({
+                "success": true,
+                "events": events,
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch audit events: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch audit events",
+                "events": [],
+            }))
+        }
+    }
+}
+
+async fn get_metrics_summary(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    match state
+        .db
+        .get_operational_metrics(
+            state.config.online_threshold_seconds,
+            state.config.stale_threshold_seconds,
+        )
+        .await
+    {
+        Ok(m) => Json(json!({
+            "success": true,
+            "metrics": {
+                "devices_total": m.devices_total,
+                "devices_online": m.devices_online,
+                "devices_stale": m.devices_stale,
+                "activities_last_hour": m.activities_last_hour,
+                "input_rows_today": m.input_rows_today,
+                "newest_activity_age_seconds": m.newest_activity_age_seconds,
+            },
+            "thresholds": {
+                "online_threshold_seconds": state.config.online_threshold_seconds,
+                "stale_threshold_seconds": state.config.stale_threshold_seconds,
+            }
+        })),
+        Err(e) => {
+            tracing::error!("Failed to fetch metrics summary: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch metrics summary"
+            }))
         }
     }
 }
@@ -1124,8 +1364,9 @@ async fn verify_jwt_middleware(
     Ok(next.run(req).await)
 }
 
-fn serialize_device(device: crate::postgres_db::Device) -> serde_json::Value {
-    let online = device.last_seen > Utc::now() - Duration::minutes(5);
+fn serialize_device(device: crate::postgres_db::Device, config: &RuntimeConfig) -> serde_json::Value {
+    let online = device.last_seen > Utc::now() - Duration::seconds(config.online_threshold_seconds.max(1));
+    let stale = !online;
 
     json!({
         "id": device.id,
@@ -1136,6 +1377,7 @@ fn serialize_device(device: crate::postgres_db::Device) -> serde_json::Value {
         "created_at": device.created_at.to_rfc3339(),
         "last_seen": device.last_seen.to_rfc3339(),
         "online": online,
+        "stale": stale,
         "status": if online { "online" } else { "offline" }
     })
 }
@@ -1206,16 +1448,22 @@ async fn stream_events(
     State(state): State<Arc<AppState>>,
 ) -> axum::response::sse::Sse<impl futures::stream::Stream<Item = Result<axum::response::sse::Event, Infallible>>> {
     let db = state.db.clone();
+    let stream_poll_interval_ms = state.config.stream_poll_interval_ms.max(250);
+    let stream_fetch_limit = state.config.stream_fetch_limit.max(50);
+    let stream_max_devices = state.config.stream_max_devices.max(1);
     
     // Create a stream that emits events periodically
     let stream = stream::repeat_with(move || {
         let db = db.clone();
         async move {
-            // Wait 2 seconds between emissions
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            // Bounded poll interval to avoid flooding clients
+            tokio::time::sleep(std::time::Duration::from_millis(stream_poll_interval_ms)).await;
             
-            // Fetch current activity logs
-            match db.get_activity_logs(None).await {
+            // Fetch a bounded window to prevent unbounded memory/cpu during bursts
+            match db
+                .get_activity_logs_filtered(None, None, None, Some(stream_fetch_limit))
+                .await
+            {
                 Ok(logs) => {
                     if logs.is_empty() {
                         return Ok(axum::response::sse::Event::default());
@@ -1237,6 +1485,7 @@ async fn stream_events(
                     // Build a combined event with all device activities
                     let activities: Vec<serde_json::Value> = device_logs
                         .into_iter()
+                        .take(stream_max_devices)
                         .map(|(_, log)| {
                             let is_idle = log.app_name.to_lowercase().contains("idle");
                             json!({

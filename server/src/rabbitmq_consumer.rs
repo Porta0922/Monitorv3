@@ -6,12 +6,38 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use tracing::{info, error, warn};
 use chrono::{DateTime, Utc};
+use sha2::{Digest, Sha256};
 
+use crate::config::RuntimeConfig;
 use crate::postgres_db::Database;
 
 pub struct RabbitMQConsumer;
 
 impl RabbitMQConsumer {
+    fn event_dedupe_id(event: &Value, queue_name: &str) -> String {
+        if let Some(event_id) = event.get("event_id").and_then(|value| value.as_str()) {
+            return event_id.to_string();
+        }
+
+        let event_type = event
+            .get("event_type")
+            .and_then(|value| value.as_str())
+            .unwrap_or(queue_name);
+        let device_id = event
+            .get("device_id")
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown");
+        let timestamp = event
+            .get("timestamp")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let payload = event.get("payload").cloned().unwrap_or_else(|| event.clone());
+        let canonical = format!("{}|{}|{}|{}", device_id, event_type, timestamp, payload);
+
+        let digest = Sha256::digest(canonical.as_bytes());
+        digest.iter().map(|b| format!("{:02x}", b)).collect::<String>()
+    }
+
     fn should_skip_inventory_app(app_name: &str) -> bool {
         let normalized = app_name.trim().to_lowercase();
         if normalized.is_empty() {
@@ -38,7 +64,11 @@ impl RabbitMQConsumer {
     }
 
     /// Start RabbitMQ consumer for monitoring events with PostgreSQL database connection
-    pub async fn start_consumer(rabbitmq_url: &str, db: Database) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn start_consumer(
+        rabbitmq_url: &str,
+        db: Database,
+        config: RuntimeConfig,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         println!("========================================");
         println!("🚀 INICIALIZANDO CONSUMIDOR RABBITMQ");
         println!("========================================");
@@ -96,35 +126,35 @@ impl RabbitMQConsumer {
         println!("");
         println!("CREANDO Y VINCULANDO COLAS ESTÁNDAR...");
         info!("🏗️  Creating standard queues (ignoring .env queue configuration)...");
-        Self::setup_queue(&channel, "inventory_queue", "monitoring.inventory", db.clone(), error_tx.clone()).await
+        Self::setup_queue(&channel, "inventory_queue", "monitoring.inventory", db.clone(), config.clone(), error_tx.clone()).await
             .map_err(|e| {
                 error!("❌ Failed to setup inventory_queue: {}", e);
                 println!("ERROR CRÍTICO: inventory_queue falló");
                 e
             })?;
         
-        Self::setup_queue(&channel, "activity_queue", "monitoring.activity", db.clone(), error_tx.clone()).await
+        Self::setup_queue(&channel, "activity_queue", "monitoring.activity", db.clone(), config.clone(), error_tx.clone()).await
             .map_err(|e| {
                 error!("❌ Failed to setup activity_queue: {}", e);
                 println!("ERROR CRÍTICO: activity_queue falló");
                 e
             })?;
 
-        Self::setup_queue(&channel, "heartbeat_queue", "monitoring.heartbeat", db.clone(), error_tx.clone()).await
+        Self::setup_queue(&channel, "heartbeat_queue", "monitoring.heartbeat", db.clone(), config.clone(), error_tx.clone()).await
             .map_err(|e| {
                 error!("❌ Failed to setup heartbeat_queue: {}", e);
                 println!("ERROR CRÍTICO: heartbeat_queue falló");
                 e
             })?;
 
-        Self::setup_queue(&channel, "usb_queue", "monitoring.usb", db.clone(), error_tx.clone()).await
+        Self::setup_queue(&channel, "usb_queue", "monitoring.usb", db.clone(), config.clone(), error_tx.clone()).await
             .map_err(|e| {
                 error!("❌ Failed to setup usb_queue: {}", e);
                 println!("ERROR CRÍTICO: usb_queue falló");
                 e
             })?;
 
-        Self::setup_queue(&channel, "wifi_queue", "monitoring.wifi", db.clone(), error_tx.clone()).await
+        Self::setup_queue(&channel, "wifi_queue", "monitoring.wifi", db.clone(), config.clone(), error_tx.clone()).await
             .map_err(|e| {
                 error!("❌ Failed to setup wifi_queue: {}", e);
                 println!("ERROR CRÍTICO: wifi_queue falló");
@@ -153,6 +183,7 @@ impl RabbitMQConsumer {
         queue_name: &str,
         routing_key: &str,
         db: Database,
+        config: RuntimeConfig,
         error_tx: mpsc::UnboundedSender<String>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // Declare durable queue - with explicit println for debugging
@@ -218,6 +249,7 @@ impl RabbitMQConsumer {
         // Spawn consumer task
         let queue_name_str = queue_name.to_string();
         let db_clone = db.clone();
+        let config_clone = config.clone();
         let error_tx_clone = error_tx.clone();
         
         tokio::spawn(async move {
@@ -229,24 +261,25 @@ impl RabbitMQConsumer {
                     Ok(delivery) => {
                         if let Ok(payload) = std::str::from_utf8(&delivery.data) {
                             if let Ok(event) = serde_json::from_str::<Value>(payload) {
-                                if let Some(event_id) = event.get("event_id").and_then(|value| value.as_str()) {
+                                {
+                                    let dedupe_id = Self::event_dedupe_id(&event, queue_name_str.as_str());
                                     let device_id = event.get("device_id").and_then(|value| value.as_str()).unwrap_or("unknown");
                                     let event_type = event.get("event_type").and_then(|value| value.as_str()).unwrap_or(queue_name_str.as_str());
                                     let sequence = event.get("sequence").and_then(|value| value.as_i64());
                                     let boot_id = event.get("boot_id").and_then(|value| value.as_str());
 
                                     match db_clone
-                                        .register_processed_event(event_id, device_id, event_type, sequence, boot_id)
+                                        .register_processed_event(&dedupe_id, device_id, event_type, sequence, boot_id)
                                         .await
                                     {
                                         Ok(false) => {
-                                            info!("⏭️ Skipping duplicate event: {} ({})", event_id, event_type);
+                                            info!("⏭️ Skipping duplicate event: {} ({})", dedupe_id, event_type);
                                             let _ = delivery.ack(Default::default()).await;
                                             continue;
                                         }
                                         Ok(true) => {}
                                         Err(e) => {
-                                            warn!("Failed to apply idempotency check for event {}: {}", event_id, e);
+                                            warn!("Failed to apply idempotency check for event {}: {}", dedupe_id, e);
                                         }
                                     }
                                 }
@@ -263,7 +296,7 @@ impl RabbitMQConsumer {
                                         }
                                     }
                                     "heartbeat_queue" => {
-                                        if let Err(e) = Self::handle_heartbeat_event(&event, &db_clone).await {
+                                        if let Err(e) = Self::handle_heartbeat_event(&event, &db_clone, &config_clone).await {
                                             warn!("Failed to process heartbeat event: {}", e);
                                         }
                                     }
@@ -399,7 +432,11 @@ impl RabbitMQConsumer {
         Ok(())
     }
 
-    async fn handle_heartbeat_event(event: &Value, db: &Database) -> Result<(), Box<dyn std::error::Error>> {
+    async fn handle_heartbeat_event(
+        event: &Value,
+        db: &Database,
+        config: &RuntimeConfig,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let payload = event.get("payload").unwrap_or(event);
         let event_type = event["event_type"].as_str().unwrap_or("heartbeat");
 
@@ -418,6 +455,18 @@ impl RabbitMQConsumer {
             .and_then(|raw| DateTime::parse_from_rfc3339(raw).ok())
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(Utc::now);
+        let now = Utc::now();
+        let max_past = chrono::Duration::seconds(config.max_event_past_skew_seconds.max(1));
+        let max_future = chrono::Duration::seconds(config.max_event_future_skew_seconds.max(1));
+        if event_timestamp < now - max_past || event_timestamp > now + max_future {
+            warn!(
+                "Discarding heartbeat/input_summary with out-of-range timestamp. device_id={}, ts={}",
+                device_id,
+                event_timestamp
+            );
+            return Ok(());
+        }
+
         let active_seconds = payload["active_seconds"].as_i64().unwrap_or(0);
         let idle_seconds = payload["idle_seconds"].as_i64().unwrap_or(0);
         let keys_count = payload["keys_count"].as_i64().unwrap_or(0);
@@ -437,6 +486,7 @@ impl RabbitMQConsumer {
                     mouse_moves_count,
                     clicks_count,
                     status.to_string(),
+                    config.input_bucket_max_seconds,
                 )
                 .await;
         }
