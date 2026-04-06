@@ -155,7 +155,3 @@ Consulta estos archivos para detalle tecnico y operativo:
 - Si las metricas del dia aparecen infladas, valida colas RabbitMQ y timestamps del evento.
 - Para diagnostico rapido en Windows, usa `diagnostic.ps1`.
 - Para verificar RabbitMQ, usa `verify_rabbitmq.ps1`.
-
-## Licencia
-
-Define aqui tu licencia (por ejemplo MIT, Apache-2.0 o licencia propietaria interna).
