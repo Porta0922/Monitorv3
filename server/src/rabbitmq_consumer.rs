@@ -5,6 +5,7 @@ use lapin::options::BasicConsumeOptions;
 use serde_json::Value;
 use tokio::sync::mpsc;
 use tracing::{info, error, warn};
+use chrono::{DateTime, Utc};
 
 use crate::postgres_db::Database;
 
@@ -120,6 +121,13 @@ impl RabbitMQConsumer {
             .map_err(|e| {
                 error!("❌ Failed to setup usb_queue: {}", e);
                 println!("ERROR CRÍTICO: usb_queue falló");
+                e
+            })?;
+
+        Self::setup_queue(&channel, "wifi_queue", "monitoring.wifi", db.clone(), error_tx.clone()).await
+            .map_err(|e| {
+                error!("❌ Failed to setup wifi_queue: {}", e);
+                println!("ERROR CRÍTICO: wifi_queue falló");
                 e
             })?;
 
@@ -264,6 +272,11 @@ impl RabbitMQConsumer {
                                             warn!("Failed to process usb event: {}", e);
                                         }
                                     }
+                                    "wifi_queue" => {
+                                        if let Err(e) = Self::handle_wifi_event(&event, &db_clone).await {
+                                            warn!("Failed to process wifi event: {}", e);
+                                        }
+                                    }
                                     _ => {}
                                 }
                             } else {
@@ -397,14 +410,28 @@ impl RabbitMQConsumer {
         let _ = db.register_device(hostname, device_id.clone(), mac_address, None).await;
 
         // Input summary events carry active/idle minute counters.
+        let event_timestamp = event
+            .get("timestamp")
+            .and_then(|value| value.as_str())
+            .and_then(|raw| DateTime::parse_from_rfc3339(raw).ok())
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(Utc::now);
         let active_seconds = payload["active_seconds"].as_i64().unwrap_or(0);
         let idle_seconds = payload["idle_seconds"].as_i64().unwrap_or(0);
-        if active_seconds > 0 || idle_seconds > 0 {
+        let keys_count = payload["keys_count"].as_i64().unwrap_or(0);
+        let mouse_moves_count = payload["mouse_moves_count"].as_i64().unwrap_or(0);
+        let clicks_count = payload["clicks_count"].as_i64().unwrap_or(0);
+
+        if active_seconds > 0 || idle_seconds > 0 || keys_count > 0 || mouse_moves_count > 0 || clicks_count > 0 {
             let _ = db
                 .insert_input_summary(
                     device_id.clone(),
+                    event_timestamp,
                     active_seconds,
                     idle_seconds,
+                    keys_count,
+                    mouse_moves_count,
+                    clicks_count,
                     status.to_string(),
                 )
                 .await;
@@ -440,6 +467,43 @@ impl RabbitMQConsumer {
             .await?;
 
         info!("✅ USB event processed: {} {} {} ({})", device_id, action, device_name, usb_event.id);
+        Ok(())
+    }
+
+    async fn handle_wifi_event(event: &Value, db: &Database) -> Result<(), Box<dyn std::error::Error>> {
+        let payload = event.get("payload").unwrap_or(event);
+        let device_id = event["device_id"].as_str().unwrap_or("unknown").to_string();
+        let hostname = event["hostname"].as_str().unwrap_or(&device_id).to_string();
+        let mac_address = event["mac_address"].as_str().map(str::to_string);
+
+        let _ = db.register_device(hostname, device_id.clone(), mac_address, None).await;
+
+        let event_timestamp = event
+            .get("timestamp")
+            .and_then(|value| value.as_str())
+            .and_then(|raw| DateTime::parse_from_rfc3339(raw).ok())
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(Utc::now);
+
+        let interface_name = payload["interface_name"].as_str().unwrap_or("Wi-Fi").to_string();
+        let state = payload["state"].as_str().unwrap_or("unknown").to_string();
+        let ssid = payload["ssid"].as_str().map(str::to_string);
+        let bssid = payload["bssid"].as_str().map(str::to_string);
+        let signal_percent = payload["signal_percent"].as_i64().map(|v| v.clamp(0, 100) as i32);
+
+        let wifi_event = db
+            .insert_wifi_event(
+                device_id.clone(),
+                interface_name.clone(),
+                state.clone(),
+                ssid,
+                bssid,
+                signal_percent,
+                event_timestamp,
+            )
+            .await?;
+
+        info!("✅ WiFi event processed: {} {} ({})", device_id, interface_name, wifi_event.id);
         Ok(())
     }
 }

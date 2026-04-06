@@ -12,6 +12,8 @@ const IDLE_THRESHOLD_SECONDS: u64 = 300; // 5 minutes
 #[derive(Debug, Clone, Default)]
 pub struct KeystrokeStats {
     pub keystroke_count: u64,
+    pub mouse_moves_count: u64,
+    pub mouse_clicks_count: u64,
     pub last_keystroke_time: Option<DateTime<Utc>>,
     pub is_idle: bool,
     pub idle_duration_seconds: u64,
@@ -30,6 +32,8 @@ impl KeystrokeTracker {
         Self {
             stats: Arc::new(Mutex::new(KeystrokeStats {
                 keystroke_count: 0,
+                mouse_moves_count: 0,
+                mouse_clicks_count: 0,
                 last_keystroke_time: Some(now),
                 is_idle: false,
                 idle_duration_seconds: 0,
@@ -52,14 +56,28 @@ impl KeystrokeTracker {
         *last_activity = now;
     }
 
-    /// Record a mouse event (click or movement)
-    pub async fn record_mouse_activity(&self) {
+    /// Record mouse movement
+    pub async fn record_mouse_movement(&self) {
         let now = Utc::now();
         let mut stats = self.stats.lock().await;
-        
+
+        stats.mouse_moves_count += 1;
         stats.is_idle = false;
         stats.idle_duration_seconds = 0;
-        
+
+        let mut last_activity = self.last_activity_time.lock().await;
+        *last_activity = now;
+    }
+
+    /// Record mouse click
+    pub async fn record_mouse_click(&self) {
+        let now = Utc::now();
+        let mut stats = self.stats.lock().await;
+
+        stats.mouse_clicks_count += 1;
+        stats.is_idle = false;
+        stats.idle_duration_seconds = 0;
+
         let mut last_activity = self.last_activity_time.lock().await;
         *last_activity = now;
     }
@@ -90,10 +108,12 @@ impl KeystrokeTracker {
         self.stats.lock().await.clone()
     }
 
-    /// Reset keystroke count (typically after uploading stats)
-    pub async fn reset_keystroke_count(&self) {
+    /// Reset per-minute counters after summary upload
+    pub async fn reset_minute_counters(&self) {
         let mut stats = self.stats.lock().await;
         stats.keystroke_count = 0;
+        stats.mouse_moves_count = 0;
+        stats.mouse_clicks_count = 0;
     }
 
     /// Get time since last activity in seconds
@@ -140,51 +160,74 @@ fn platform_idle_seconds() -> Option<u64> {
 pub mod windows_input_listener {
     use super::*;
     use std::sync::Arc;
+    use std::sync::mpsc;
+    use std::sync::OnceLock;
+    use std::thread;
+    use std::time::Duration;
+    use tokio::runtime::Handle;
     use winapi::um::winuser::{
         SetWindowsHookExA, UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL,
-        KBDLLHOOKSTRUCT, MSLLHOOKSTRUCT, CallNextHookEx, HC_ACTION,
-        WM_KEYDOWN, WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MOUSEMOVE,
+        CallNextHookEx, HC_ACTION, GetMessageW, TranslateMessage, DispatchMessageW, MSG,
+        WM_KEYDOWN, WM_SYSKEYDOWN, WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MOUSEMOVE,
     };
-    use winapi::um::processthreadsapi::GetCurrentThreadId;
-    use std::mem;
-    use std::ffi::CStr;
 
-    static mut KEYSTROKE_TRACKER: Option<Arc<KeystrokeTracker>> = None;
+    static KEYSTROKE_TRACKER: OnceLock<Arc<KeystrokeTracker>> = OnceLock::new();
+    static TOKIO_HANDLE: OnceLock<Handle> = OnceLock::new();
 
     /// Initialize Windows input listener
     pub async fn init_input_listener(tracker: Arc<KeystrokeTracker>) -> Result<(), Box<dyn std::error::Error>> {
-        unsafe {
-            KEYSTROKE_TRACKER = Some(tracker);
-        }
+        let runtime_handle = Handle::current();
+        let (init_tx, init_rx) = mpsc::channel::<Result<(), String>>();
 
-        // Set up low-level keyboard hook
-        unsafe {
-            let kb_hook = SetWindowsHookExA(
-                WH_KEYBOARD_LL,
-                Some(keyboard_hook_proc),
-                std::ptr::null_mut(),
-                0,
-            );
+        thread::spawn(move || {
+            unsafe {
+                let _ = KEYSTROKE_TRACKER.set(tracker);
+                let _ = TOKIO_HANDLE.set(runtime_handle);
 
-            if kb_hook.is_null() {
-                return Err("Failed to set keyboard hook".into());
-            }
+                let kb_hook = SetWindowsHookExA(
+                    WH_KEYBOARD_LL,
+                    Some(keyboard_hook_proc),
+                    std::ptr::null_mut(),
+                    0,
+                );
 
-            // Set up low-level mouse hook
-            let mouse_hook = SetWindowsHookExA(
-                WH_MOUSE_LL,
-                Some(mouse_hook_proc),
-                std::ptr::null_mut(),
-                0,
-            );
+                if kb_hook.is_null() {
+                    let _ = init_tx.send(Err("Failed to set keyboard hook".to_string()));
+                    return;
+                }
 
-            if mouse_hook.is_null() {
+                let mouse_hook = SetWindowsHookExA(
+                    WH_MOUSE_LL,
+                    Some(mouse_hook_proc),
+                    std::ptr::null_mut(),
+                    0,
+                );
+
+                if mouse_hook.is_null() {
+                    UnhookWindowsHookEx(kb_hook);
+                    let _ = init_tx.send(Err("Failed to set mouse hook".to_string()));
+                    return;
+                }
+
+                let _ = init_tx.send(Ok(()));
+
+                // Keep this thread alive and pumping messages so low-level hooks keep receiving events.
+                let mut msg: MSG = std::mem::zeroed();
+                while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+
+                UnhookWindowsHookEx(mouse_hook);
                 UnhookWindowsHookEx(kb_hook);
-                return Err("Failed to set mouse hook".into());
             }
-        }
+        });
 
-        Ok(())
+        match init_rx.recv_timeout(Duration::from_secs(3)) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(err)) => Err(err.into()),
+            Err(_) => Err("Timed out initializing Windows input hooks".into()),
+        }
     }
 
     unsafe extern "system" fn keyboard_hook_proc(
@@ -193,11 +236,14 @@ pub mod windows_input_listener {
         lparam: isize,
     ) -> isize {
         if code == HC_ACTION as i32 {
-            if let Some(ref tracker) = KEYSTROKE_TRACKER {
-                let tracker = tracker.clone();
-                tokio::spawn(async move {
-                    tracker.record_keystroke().await;
-                });
+            if wparam == WM_KEYDOWN as usize || wparam == WM_SYSKEYDOWN as usize {
+                if let (Some(tracker), Some(handle)) = (KEYSTROKE_TRACKER.get(), TOKIO_HANDLE.get()) {
+                    let tracker = Arc::clone(tracker);
+                    let handle = handle.clone();
+                    handle.spawn(async move {
+                        tracker.record_keystroke().await;
+                    });
+                }
             }
         }
 
@@ -210,14 +256,21 @@ pub mod windows_input_listener {
         lparam: isize,
     ) -> isize {
         if code == HC_ACTION as i32 {
-            if wparam == WM_LBUTTONDOWN as usize || 
-               wparam == WM_RBUTTONDOWN as usize ||
-               wparam == WM_MOUSEMOVE as usize {
-                if let Some(ref tracker) = KEYSTROKE_TRACKER {
-                    let tracker = tracker.clone();
-                    tokio::spawn(async move {
-                        tracker.record_mouse_activity().await;
-                    });
+            if let (Some(tracker), Some(handle)) = (KEYSTROKE_TRACKER.get(), TOKIO_HANDLE.get()) {
+                let tracker = Arc::clone(tracker);
+                let handle = handle.clone();
+                match wparam {
+                    w if w == WM_MOUSEMOVE as usize => {
+                        handle.spawn(async move {
+                            tracker.record_mouse_movement().await;
+                        });
+                    }
+                    w if w == WM_LBUTTONDOWN as usize || w == WM_RBUTTONDOWN as usize => {
+                        handle.spawn(async move {
+                            tracker.record_mouse_click().await;
+                        });
+                    }
+                    _ => {}
                 }
             }
         }

@@ -1,7 +1,7 @@
 // API client for the dashboard
 import axios from 'axios';
 import type { AxiosInstance } from 'axios';
-import type { Device, ActivityLog, AppInfo, USBEvent, SecurityAlert, LoginResponse } from '../types';
+import type { Device, ActivityLog, AppInfo, USBEvent, WifiEvent, SecurityAlert, LoginResponse } from '../types';
 
 const BASE_URL = 'http://localhost:3000/api';
 
@@ -149,6 +149,19 @@ class ApiClient {
     return response.data.events || [];
   }
 
+  // WiFi Events
+  async getWifiHistory(deviceId?: string, limit = 100): Promise<WifiEvent[]> {
+    const params = { limit };
+    if (deviceId) {
+      const response = await this.client.get<{ events: WifiEvent[] }>(`/wifi/${deviceId}`, {
+        params,
+      });
+      return response.data.events || [];
+    }
+    const response = await this.client.get<{ events: WifiEvent[] }>('/wifi', { params });
+    return response.data.events || [];
+  }
+
   // Security Alerts
   async getAlerts(severity?: string, resolved = false): Promise<SecurityAlert[]> {
     const params: any = { resolved };
@@ -171,6 +184,8 @@ class ApiClient {
     idle_time: number;
     idle_pct: string;
     keys_today: number;
+    mouse_moves_today: number;
+    mouse_clicks_today: number;
   }> {
     const response = await this.client.get<{
       success: boolean;
@@ -180,6 +195,8 @@ class ApiClient {
         idle_time: number;
         idle_pct: string;
         keys_today: number;
+        mouse_moves_today: number;
+        mouse_clicks_today: number;
       };
     }>('/overview');
     return response.data.data;

@@ -10,6 +10,9 @@ export interface Device {
   created_at: string;
   active_time_today_seconds?: number;
   idle_time_today_seconds?: number;
+  keys_today?: number;
+  mouse_moves_today?: number;
+  mouse_clicks_today?: number;
 }
 
 export interface ActivityLog {
@@ -38,6 +41,16 @@ export interface USBEvent {
   device_name: string;
   serial_number: string;
   volume_label?: string;
+}
+
+export interface WifiEvent {
+  timestamp: string;
+  device_id: string;
+  interface_name: string;
+  state: string;
+  ssid?: string;
+  bssid?: string;
+  signal_percent?: number;
 }
 
 export interface SecurityAlert {

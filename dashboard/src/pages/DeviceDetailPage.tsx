@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import { AppShell } from '../components/AppShell';
-import type { AppInfo, Device, USBEvent } from '../types';
+import type { AppInfo, Device, USBEvent, WifiEvent } from '../types';
 
-type TabKey = 'activity' | 'inventory' | 'usb';
+type TabKey = 'activity' | 'inventory' | 'usb' | 'wifi';
+type WifiStateFilter = 'all' | 'connected' | 'disconnected';
+type WifiDateFilter = 'all' | 'today' | 'selected';
 
 interface HistoryItem {
   app: string;
@@ -22,6 +24,10 @@ interface HourlyItem {
   idle_seconds: number;
 }
 
+interface WifiEventWithDuration extends WifiEvent {
+  connected_duration_seconds: number;
+}
+
 export function DeviceDetailPage() {
   const { deviceId } = useParams<{ deviceId: string }>();
   const navigate = useNavigate();
@@ -29,17 +35,19 @@ export function DeviceDetailPage() {
   const [device, setDevice] = useState<Device | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [hourly, setHourly] = useState<HourlyItem[]>([]);
-  const [availableDates, setAvailableDates] = useState<string[]>([]);
-  const [selectedDate, setSelectedDate] = useState('');
 
   const [inventory, setInventory] = useState<AppInfo[]>([]);
   const [usbEvents, setUsbEvents] = useState<USBEvent[]>([]);
+  const [wifiEvents, setWifiEvents] = useState<WifiEvent[]>([]);
   const [tab, setTab] = useState<TabKey>('activity');
+  const [wifiStateFilter, setWifiStateFilter] = useState<WifiStateFilter>('all');
+  const [wifiDateFilter, setWifiDateFilter] = useState<WifiDateFilter>('today');
   const [isLoading, setIsLoading] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState('');
 
   const dateToday = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const [selectedDate, setSelectedDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
 
   useEffect(() => {
     if (!deviceId) return;
@@ -49,27 +57,22 @@ export function DeviceDetailPage() {
       setError('');
 
       try {
-        const [devices, apps, usb, dates] = await Promise.all([
+        const [devices, apps, usb, wifi] = await Promise.all([
           apiClient.getDevices(),
           apiClient.getApps(deviceId).catch(() => []),
           apiClient.getUsbHistory(deviceId, 250).catch(() => []),
-          apiClient.getAvailableDates(deviceId).catch(() => []),
+          apiClient.getWifiHistory(deviceId, 250).catch(() => []),
         ]);
 
         const selected = devices.find((d) => d.device_id === deviceId) || null;
         setDevice(selected);
         setInventory(apps);
         setUsbEvents(usb);
-        setAvailableDates(dates);
-
-        const resolvedDate = selectedDate || dates[0] || dateToday;
-        if (!selectedDate) {
-          setSelectedDate(resolvedDate);
-        }
+        setWifiEvents(wifi);
 
         const [historyData, hourlyData] = await Promise.all([
-          apiClient.getHistory(deviceId, resolvedDate).catch(() => []),
-          apiClient.getHourly(deviceId, resolvedDate).catch(() => []),
+          apiClient.getHistory(deviceId, selectedDate).catch(() => []),
+          apiClient.getHourly(deviceId, selectedDate).catch(() => []),
         ]);
 
         setHistory(historyData as HistoryItem[]);
@@ -82,15 +85,16 @@ export function DeviceDetailPage() {
     };
 
     load();
-  }, [deviceId, selectedDate, dateToday]);
+  }, [deviceId, selectedDate]);
 
   const tabStats = useMemo(
     () => ({
       activity: history.length,
       inventory: inventory.length,
       usb: usbEvents.length,
+      wifi: wifiEvents.length,
     }),
-    [history.length, inventory.length, usbEvents.length]
+    [history.length, inventory.length, usbEvents.length, wifiEvents.length]
   );
 
   const formatDuration = (seconds?: number) => {
@@ -115,20 +119,87 @@ export function DeviceDetailPage() {
 
   const maxHourlyValue = Math.max(1, ...hourly.map((item) => item.active_seconds + item.idle_seconds));
 
+  const wifiEventsWithDuration = useMemo<WifiEventWithDuration[]>(() => {
+    return wifiEvents.map((event, index) => {
+      const startedAtMs = new Date(event.timestamp).getTime();
+      const endedAtMs =
+        index === 0
+          ? Date.now()
+          : new Date(wifiEvents[index - 1].timestamp).getTime();
+
+      const connectedDurationSeconds =
+        event.state === 'connected'
+          ? Math.max(0, Math.floor((endedAtMs - startedAtMs) / 1000))
+          : 0;
+
+      return {
+        ...event,
+        connected_duration_seconds: connectedDurationSeconds,
+      };
+    });
+  }, [wifiEvents]);
+
+  const filteredWifiEvents = useMemo(() => {
+    return wifiEventsWithDuration.filter((event) => {
+      const stateMatches =
+        wifiStateFilter === 'all' ? true : event.state.toLowerCase() === wifiStateFilter;
+
+      const eventDate = new Date(event.timestamp).toISOString().slice(0, 10);
+      const dateMatches =
+        wifiDateFilter === 'all'
+          ? true
+          : eventDate === dateToday;
+
+      return stateMatches && dateMatches;
+    });
+  }, [wifiEventsWithDuration, wifiStateFilter, wifiDateFilter, dateToday]);
+
+  const currentWifiEvent = useMemo(() => {
+    return wifiEventsWithDuration[0] || null;
+  }, [wifiEventsWithDuration]);
+
+  const wifiTotalsBySsid = useMemo(() => {
+    const totals = new Map<string, number>();
+
+    for (const event of filteredWifiEvents) {
+      if (event.state !== 'connected' || event.connected_duration_seconds <= 0) {
+        continue;
+      }
+
+      const ssidKey = event.ssid?.trim() ? event.ssid.trim() : '(sin SSID)';
+      totals.set(ssidKey, (totals.get(ssidKey) || 0) + event.connected_duration_seconds);
+    }
+
+    return Array.from(totals.entries())
+      .map(([ssid, seconds]) => ({ ssid, seconds }))
+      .sort((a, b) => b.seconds - a.seconds)
+      .slice(0, 6);
+  }, [filteredWifiEvents]);
+
+  const formatLongDuration = (seconds?: number) => {
+    const safeSeconds = Math.max(0, seconds || 0);
+    const hours = Math.floor(safeSeconds / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    }
+    return `${minutes}m`;
+  };
+
   const handleExportCsv = async () => {
     if (!deviceId) return;
     setIsExporting(true);
     try {
       const blob = await apiClient.exportCsv({
         deviceId,
-        from: selectedDate || dateToday,
-        to: selectedDate || dateToday,
+        from: selectedDate,
+        to: selectedDate,
       });
 
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `ame_${deviceId.slice(0, 8)}_${selectedDate || dateToday}.csv`;
+      a.download = `ame_${deviceId.slice(0, 8)}_${selectedDate}.csv`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -156,7 +227,7 @@ export function DeviceDetailPage() {
     >
       {device && (
         <section className="rounded-2xl border border-[#1b2b56] bg-[linear-gradient(160deg,#0f1d43,#0b1329)] p-5 shadow-[0_12px_26px_rgba(0,0,0,0.32)]">
-          <div className="grid grid-cols-6 gap-4 text-sm">
+          <div className="grid grid-cols-9 gap-4 text-sm">
             <div className="col-span-2">
               <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Hostname</p>
               <p className="mt-1 font-display text-base text-[#e4e6eb]">{device.hostname}</p>
@@ -174,6 +245,18 @@ export function DeviceDetailPage() {
             <div>
               <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Inactivo hoy</p>
               <p className="mt-1 font-mono text-sm text-[#ff9f1a]">{formatDuration(device.idle_time_today_seconds)}</p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Teclas hoy</p>
+              <p className="mt-1 font-mono text-sm text-[#00ff88]">{(device.keys_today || 0).toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Mouse mov hoy</p>
+              <p className="mt-1 font-mono text-sm text-[#00d9ff]">{(device.mouse_moves_today || 0).toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Clicks hoy</p>
+              <p className="mt-1 font-mono text-sm text-[#ffd54a]">{(device.mouse_clicks_today || 0).toLocaleString()}</p>
             </div>
             <div>
               <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">MAC</p>
@@ -194,20 +277,21 @@ export function DeviceDetailPage() {
           <button className={tabClass('usb')} onClick={() => setTab('usb')}>
             USB ({tabStats.usb})
           </button>
+          <button className={tabClass('wifi')} onClick={() => setTab('wifi')}>
+            WiFi ({tabStats.wifi})
+          </button>
         </div>
 
         {tab === 'activity' && (
           <div className="flex items-center gap-2">
             <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Fecha</span>
-            <select
+            <input
+              type="date"
               value={selectedDate}
-              onChange={(event) => setSelectedDate(event.target.value)}
-              className="rounded-full border border-[#223462] bg-[#111a35] px-3 py-1.5 text-[11px] text-[#dce6ff]"
-            >
-              {[...(availableDates.length ? availableDates : [dateToday])].map((dateValue) => (
-                <option key={dateValue} value={dateValue}>{dateValue}</option>
-              ))}
-            </select>
+              max={dateToday}
+              onChange={(e) => setSelectedDate(e.target.value || dateToday)}
+              className="rounded-full border border-[#223462] bg-[#111a35] px-3 py-1.5 font-mono text-[11px] text-[#dce6ff] cursor-pointer"
+            />
             <button
               onClick={handleExportCsv}
               disabled={isExporting}
@@ -215,6 +299,32 @@ export function DeviceDetailPage() {
             >
               {isExporting ? 'Exportando...' : 'Export CSV'}
             </button>
+          </div>
+        )}
+
+        {tab === 'wifi' && (
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Estado</span>
+            <select
+              value={wifiStateFilter}
+              onChange={(event) => setWifiStateFilter(event.target.value as WifiStateFilter)}
+              className="rounded-full border border-[#223462] bg-[#111a35] px-3 py-1.5 text-[11px] text-[#dce6ff]"
+            >
+              <option value="all">Todos</option>
+              <option value="connected">Conectado</option>
+              <option value="disconnected">Desconectado</option>
+            </select>
+
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Fecha</span>
+            <select
+              value={wifiDateFilter}
+              onChange={(event) => setWifiDateFilter(event.target.value as WifiDateFilter)}
+              className="rounded-full border border-[#223462] bg-[#111a35] px-3 py-1.5 text-[11px] text-[#dce6ff]"
+            >
+              <option value="today">Hoy</option>
+              <option value="selected">Fecha seleccionada</option>
+              <option value="all">Todo</option>
+            </select>
           </div>
         )}
       </section>
@@ -356,6 +466,94 @@ export function DeviceDetailPage() {
                   )}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {tab === 'wifi' && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-5 gap-3 rounded-xl border border-[#20315a] bg-[#0a122a] px-4 py-3">
+                <div className="col-span-2">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Red actual</p>
+                  <p className="mt-1 truncate font-display text-base text-[#e4e6eb]" title={currentWifiEvent?.ssid || 'Sin conexion'}>
+                    {currentWifiEvent?.ssid || 'Sin conexion'}
+                  </p>
+                </div>
+                <div>
+                  <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Estado</p>
+                  <p className={`mt-1 font-mono text-sm ${currentWifiEvent?.state === 'connected' ? 'text-[#00ff88]' : 'text-[#ff9f1a]'}`}>
+                    {(currentWifiEvent?.state || 'unknown').toUpperCase()}
+                  </p>
+                </div>
+                <div>
+                  <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Senal</p>
+                  <p className="mt-1 font-mono text-sm text-[#00d9ff]">{currentWifiEvent?.signal_percent !== undefined ? `${currentWifiEvent.signal_percent}%` : 'N/A'}</p>
+                </div>
+                <div>
+                  <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Ultimo cambio</p>
+                  <p className="mt-1 truncate font-mono text-[11px] text-[#a7b5dc]" title={currentWifiEvent?.timestamp}>
+                    {currentWifiEvent ? new Date(currentWifiEvent.timestamp).toLocaleString() : 'N/A'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-[#20315a] bg-[#0a122a] px-4 py-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Top redes por tiempo conectado</p>
+                  <span className="font-mono text-[10px] text-[#8ea0cf]">{wifiTotalsBySsid.length} SSID</span>
+                </div>
+
+                {wifiTotalsBySsid.length === 0 ? (
+                  <p className="font-mono text-[11px] text-[#8fa0c9]">Sin tiempo conectado acumulado para el filtro actual.</p>
+                ) : (
+                  <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                    {wifiTotalsBySsid.map((item) => (
+                      <div key={item.ssid} className="flex items-center justify-between rounded-lg border border-[#243665] bg-[#0d1733] px-3 py-2">
+                        <p className="max-w-[70%] truncate font-mono text-[11px] text-[#dce6ff]" title={item.ssid}>{item.ssid}</p>
+                        <p className="font-mono text-[11px] text-[#00ff88]">{formatLongDuration(item.seconds)}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr>
+                      <th>Hora</th>
+                      <th>SSID</th>
+                      <th>BSSID</th>
+                      <th>Senal</th>
+                      <th>Duracion conectada</th>
+                      <th>Estado</th>
+                      <th>Interfaz</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredWifiEvents.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-8 text-center text-[#8fa0c9]">Sin historial WiFi para el filtro seleccionado.</td>
+                      </tr>
+                    ) : (
+                      filteredWifiEvents.map((event, idx) => (
+                        <tr key={`${event.timestamp}-${idx}`}>
+                          <td className="whitespace-nowrap font-mono text-[11px] text-[#9eb0dc]">{new Date(event.timestamp).toLocaleString()}</td>
+                          <td className="max-w-[280px] truncate text-[12px] text-[#dce6ff]" title={event.ssid}>{event.ssid || 'N/A'}</td>
+                          <td className="max-w-[280px] truncate font-mono text-[11px] text-[#91a3d2]" title={event.bssid}>{event.bssid || 'N/A'}</td>
+                          <td className="whitespace-nowrap font-mono text-[11px] text-[#00d9ff]">{event.signal_percent !== undefined ? `${event.signal_percent}%` : 'N/A'}</td>
+                          <td className="whitespace-nowrap font-mono text-[11px] text-[#00ff88]">{event.state === 'connected' ? formatLongDuration(event.connected_duration_seconds) : '--'}</td>
+                          <td>
+                            <span className={`inline-flex rounded-full px-2.5 py-1 font-mono text-[10px] ${event.state === 'connected' ? 'border border-[#00ff88]/40 bg-[#00ff88]/10 text-[#00ff88]' : 'border border-[#ff9f1a]/40 bg-[#ff9f1a]/10 text-[#ff9f1a]'}`}>
+                              {event.state.toUpperCase()}
+                            </span>
+                          </td>
+                          <td className="max-w-[220px] truncate font-mono text-[11px] text-[#91a3d2]" title={event.interface_name}>{event.interface_name}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </section>

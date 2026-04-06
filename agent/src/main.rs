@@ -4,6 +4,7 @@ mod inventory;
 mod device_id;
 mod rabbitmq_publisher;
 mod usb_detection;
+mod wifi_detection;
 mod input_tracking;
 mod keystroke_tracker;
 mod process_protection;
@@ -16,6 +17,7 @@ use tokio::time::{sleep, Duration, interval};
 use device_id::{load_or_create_device_identity, get_device_nickname};
 use monitoring::MonitoringLoop;
 use usb_detection::UsbMonitor;
+use wifi_detection::WifiMonitor;
 use input_tracking::InputTracker;
 use keystroke_tracker::KeystrokeTracker;
 use process_protection::ProcessProtection;
@@ -396,6 +398,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+
+    // Spawn WiFi history task
+    let mut wifi_monitor = WifiMonitor::new();
+    let publisher_clone = publisher.clone();
+    let cache_clone = cache.clone();
+    let auth_token_clone = auth_token.clone();
+    let hostname_clone = hostname.clone();
+    let mac_clone = mac_address.clone();
+    let device_id_clone_for_wifi = device_identity.device_id.to_string();
+    let envelope_metadata_clone = envelope_metadata.clone();
+
+    tokio::spawn(async move {
+        let mut interval = interval(Duration::from_secs(60)); // Check every 60 seconds
+        loop {
+            interval.tick().await;
+
+            match wifi_monitor.scan_and_detect_change().await {
+                Ok(Some(snapshot)) => {
+                    let wifi_payload = build_event_envelope(
+                        "wifi",
+                        1,
+                        &device_id_clone_for_wifi,
+                        &hostname_clone,
+                        &mac_clone,
+                        &auth_token_clone,
+                        envelope_metadata_clone.as_ref(),
+                        serde_json::json!({
+                            "interface_name": snapshot.interface_name,
+                            "state": snapshot.state,
+                            "ssid": snapshot.ssid,
+                            "bssid": snapshot.bssid,
+                            "signal_percent": snapshot.signal_percent,
+                            "timestamp": Utc::now().to_rfc3339(),
+                        }),
+                    );
+
+                    publish_or_cache(&publisher_clone, &cache_clone, "wifi", wifi_payload).await;
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!("WiFi scan error: {}", e);
+                }
+            }
+        }
+    });
     
     // Spawn software inventory scan (initial snapshot + every 7 days only new apps)
     let publisher_clone = publisher.clone();
@@ -556,7 +603,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Input summary metrics every minute (optional but useful for KPIs)
-    let input_tracker_clone = input_tracker.clone();
     let keystroke_tracker_clone = keystroke_tracker.clone();
     let publisher_clone = publisher.clone();
     let cache_clone = cache.clone();
@@ -570,7 +616,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             interval.tick().await;
 
-            let input_stats = input_tracker_clone.get_stats().await;
             let key_stats = keystroke_tracker_clone.get_stats().await;
             let summary_payload = build_event_envelope(
                 "input_summary",
@@ -582,7 +627,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 envelope_metadata_clone.as_ref(),
                 serde_json::json!({
                     "keys_count": key_stats.keystroke_count,
-                    "clicks_count": input_stats.mouse_clicks,
+                    "mouse_moves_count": key_stats.mouse_moves_count,
+                    "clicks_count": key_stats.mouse_clicks_count,
                     "idle_seconds": if key_stats.is_idle { 60 } else { 0 },
                     "active_seconds": if key_stats.is_idle { 0 } else { 60 },
                     "status": if key_stats.is_idle { "idle" } else { "active" },
@@ -590,6 +636,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
 
             publish_or_cache(&publisher_clone, &cache_clone, "heartbeat", summary_payload).await;
+            keystroke_tracker_clone.reset_minute_counters().await;
         }
     });
 
@@ -633,7 +680,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     
     tracing::info!("✅ Agent started successfully");
-    tracing::info!("📊 Monitoring: focus-activity (2s) | heartbeat (15s) | USB (30s) | inventory (12h) | input summary (60s)");
+    tracing::info!("📊 Monitoring: focus-activity (2s) | heartbeat (15s) | USB (30s) | WiFi (60s) | inventory (12h) | input summary (60s)");
     
     // Keep agent running
     loop {

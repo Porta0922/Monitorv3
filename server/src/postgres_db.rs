@@ -37,10 +37,25 @@ pub struct UsbEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WifiEvent {
+    pub id: Uuid,
+    pub device_id: Uuid,
+    pub interface_name: String,
+    pub state: String,
+    pub ssid: Option<String>,
+    pub bssid: Option<String>,
+    pub signal_percent: Option<i32>,
+    pub timestamp: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceTimeTotals {
     pub device_id: Uuid,
     pub active_seconds: i64,
     pub idle_seconds: i64,
+    pub keys_count: i64,
+    pub mouse_moves_count: i64,
+    pub clicks_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +85,8 @@ pub struct Overview {
     pub idle_time: i64,
     pub idle_pct: f64,
     pub keys_today: i64,
+    pub mouse_moves_today: i64,
+    pub mouse_clicks_today: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,6 +218,31 @@ impl Database {
         .execute(pool)
         .await?;
 
+        // Create WiFi events table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS wifi_events (
+                id UUID PRIMARY KEY,
+                device_id UUID NOT NULL REFERENCES devices(device_id),
+                interface_name VARCHAR(255) NOT NULL,
+                state VARCHAR(32) NOT NULL,
+                ssid VARCHAR(255),
+                bssid VARCHAR(64),
+                signal_percent INTEGER,
+                timestamp TIMESTAMPTZ NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_wifi_events_device_timestamp ON wifi_events(device_id, timestamp DESC)"
+        )
+        .execute(pool)
+        .await?;
+
         // Create input activity metrics table (minute-level active/idle summaries)
         sqlx::query(
             r#"
@@ -210,6 +252,9 @@ impl Database {
                 timestamp TIMESTAMPTZ NOT NULL,
                 active_seconds BIGINT NOT NULL DEFAULT 0,
                 idle_seconds BIGINT NOT NULL DEFAULT 0,
+                keys_count BIGINT NOT NULL DEFAULT 0,
+                mouse_moves_count BIGINT NOT NULL DEFAULT 0,
+                clicks_count BIGINT NOT NULL DEFAULT 0,
                 status VARCHAR(16) NOT NULL DEFAULT 'active',
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
@@ -223,6 +268,16 @@ impl Database {
         )
         .execute(pool)
         .await?;
+
+        sqlx::query("ALTER TABLE input_activity_metrics ADD COLUMN IF NOT EXISTS keys_count BIGINT NOT NULL DEFAULT 0")
+            .execute(pool)
+            .await?;
+        sqlx::query("ALTER TABLE input_activity_metrics ADD COLUMN IF NOT EXISTS mouse_moves_count BIGINT NOT NULL DEFAULT 0")
+            .execute(pool)
+            .await?;
+        sqlx::query("ALTER TABLE input_activity_metrics ADD COLUMN IF NOT EXISTS clicks_count BIGINT NOT NULL DEFAULT 0")
+            .execute(pool)
+            .await?;
 
         // Create processed events table for idempotency (dedupe retries)
         sqlx::query(
@@ -759,22 +814,120 @@ impl Database {
             .collect())
     }
 
-    pub async fn insert_input_summary(
+    pub async fn insert_wifi_event(
         &self,
         device_id: String,
-        active_seconds: i64,
-        idle_seconds: i64,
-        status: String,
-    ) -> Result<(), sqlx::Error> {
+        interface_name: String,
+        state: String,
+        ssid: Option<String>,
+        bssid: Option<String>,
+        signal_percent: Option<i32>,
+        timestamp: DateTime<Utc>,
+    ) -> Result<WifiEvent, sqlx::Error> {
         let id = Uuid::new_v4();
-        let timestamp = Utc::now();
         let device_uuid = Uuid::parse_str(&device_id)
             .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
 
         sqlx::query(
             r#"
-            INSERT INTO input_activity_metrics (id, device_id, timestamp, active_seconds, idle_seconds, status)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO wifi_events (id, device_id, interface_name, state, ssid, bssid, signal_percent, timestamp)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            "#,
+        )
+        .bind(id)
+        .bind(device_uuid)
+        .bind(&interface_name)
+        .bind(&state)
+        .bind(&ssid)
+        .bind(&bssid)
+        .bind(signal_percent)
+        .bind(timestamp)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(WifiEvent {
+            id,
+            device_id: device_uuid,
+            interface_name,
+            state,
+            ssid,
+            bssid,
+            signal_percent,
+            timestamp,
+        })
+    }
+
+    pub async fn get_wifi_events(
+        &self,
+        device_id: Option<Uuid>,
+        limit: Option<i64>,
+    ) -> Result<Vec<WifiEvent>, sqlx::Error> {
+        let rows = if let Some(did) = device_id {
+            if let Some(limit_value) = limit {
+                sqlx::query_as::<_, (Uuid, Uuid, String, String, Option<String>, Option<String>, Option<i32>, DateTime<Utc>)>(
+                    "SELECT id, device_id, interface_name, state, ssid, bssid, signal_percent, timestamp FROM wifi_events WHERE device_id = $1 ORDER BY timestamp DESC LIMIT $2"
+                )
+                .bind(did)
+                .bind(limit_value.max(1))
+                .fetch_all(&self.pool)
+                .await?
+            } else {
+                sqlx::query_as::<_, (Uuid, Uuid, String, String, Option<String>, Option<String>, Option<i32>, DateTime<Utc>)>(
+                    "SELECT id, device_id, interface_name, state, ssid, bssid, signal_percent, timestamp FROM wifi_events WHERE device_id = $1 ORDER BY timestamp DESC"
+                )
+                .bind(did)
+                .fetch_all(&self.pool)
+                .await?
+            }
+        } else if let Some(limit_value) = limit {
+            sqlx::query_as::<_, (Uuid, Uuid, String, String, Option<String>, Option<String>, Option<i32>, DateTime<Utc>)>(
+                "SELECT id, device_id, interface_name, state, ssid, bssid, signal_percent, timestamp FROM wifi_events ORDER BY timestamp DESC LIMIT $1"
+            )
+            .bind(limit_value.max(1))
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as::<_, (Uuid, Uuid, String, String, Option<String>, Option<String>, Option<i32>, DateTime<Utc>)>(
+                "SELECT id, device_id, interface_name, state, ssid, bssid, signal_percent, timestamp FROM wifi_events ORDER BY timestamp DESC"
+            )
+            .fetch_all(&self.pool)
+            .await?
+        };
+
+        Ok(rows
+            .into_iter()
+            .map(|(id, device_id, interface_name, state, ssid, bssid, signal_percent, timestamp)| WifiEvent {
+                id,
+                device_id,
+                interface_name,
+                state,
+                ssid,
+                bssid,
+                signal_percent,
+                timestamp,
+            })
+            .collect())
+    }
+
+    pub async fn insert_input_summary(
+        &self,
+        device_id: String,
+        timestamp: DateTime<Utc>,
+        active_seconds: i64,
+        idle_seconds: i64,
+        keys_count: i64,
+        mouse_moves_count: i64,
+        clicks_count: i64,
+        status: String,
+    ) -> Result<(), sqlx::Error> {
+        let id = Uuid::new_v4();
+        let device_uuid = Uuid::parse_str(&device_id)
+            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO input_activity_metrics (id, device_id, timestamp, active_seconds, idle_seconds, keys_count, mouse_moves_count, clicks_count, status)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             "#,
         )
         .bind(id)
@@ -782,6 +935,9 @@ impl Database {
         .bind(timestamp)
         .bind(active_seconds.max(0))
         .bind(idle_seconds.max(0))
+        .bind(keys_count.max(0))
+        .bind(mouse_moves_count.max(0))
+        .bind(clicks_count.max(0))
         .bind(&status)
         .execute(&self.pool)
         .await?;
@@ -790,8 +946,13 @@ impl Database {
     }
 
     pub async fn get_device_time_totals_today(&self) -> Result<Vec<DeviceTimeTotals>, sqlx::Error> {
-        let rows = sqlx::query_as::<_, (Uuid, i64, i64)>(
-            "SELECT device_id, COALESCE(SUM(active_seconds), 0)::BIGINT, COALESCE(SUM(idle_seconds), 0)::BIGINT
+        let rows = sqlx::query_as::<_, (Uuid, i64, i64, i64, i64, i64)>(
+            "SELECT device_id,
+                    COALESCE(SUM(active_seconds), 0)::BIGINT,
+                    COALESCE(SUM(idle_seconds), 0)::BIGINT,
+                    COALESCE(SUM(keys_count), 0)::BIGINT,
+                    COALESCE(SUM(mouse_moves_count), 0)::BIGINT,
+                    COALESCE(SUM(clicks_count), 0)::BIGINT
              FROM input_activity_metrics
              WHERE timestamp >= date_trunc('day', NOW())
              GROUP BY device_id"
@@ -801,10 +962,13 @@ impl Database {
 
         Ok(rows
             .into_iter()
-            .map(|(device_id, active_seconds, idle_seconds)| DeviceTimeTotals {
+            .map(|(device_id, active_seconds, idle_seconds, keys_count, mouse_moves_count, clicks_count)| DeviceTimeTotals {
                 device_id,
                 active_seconds,
                 idle_seconds,
+                keys_count,
+                mouse_moves_count,
+                clicks_count,
             })
             .collect())
     }
@@ -813,8 +977,12 @@ impl Database {
         &self,
         device_id: Uuid,
     ) -> Result<DeviceTimeTotals, sqlx::Error> {
-        let row = sqlx::query_as::<_, (i64, i64)>(
-            "SELECT COALESCE(SUM(active_seconds), 0)::BIGINT, COALESCE(SUM(idle_seconds), 0)::BIGINT
+        let row = sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
+            "SELECT COALESCE(SUM(active_seconds), 0)::BIGINT,
+                    COALESCE(SUM(idle_seconds), 0)::BIGINT,
+                    COALESCE(SUM(keys_count), 0)::BIGINT,
+                    COALESCE(SUM(mouse_moves_count), 0)::BIGINT,
+                    COALESCE(SUM(clicks_count), 0)::BIGINT
              FROM input_activity_metrics
              WHERE device_id = $1 AND timestamp >= date_trunc('day', NOW())"
         )
@@ -826,6 +994,9 @@ impl Database {
             device_id,
             active_seconds: row.0,
             idle_seconds: row.1,
+            keys_count: row.2,
+            mouse_moves_count: row.3,
+            clicks_count: row.4,
         })
     }
 
@@ -907,24 +1078,41 @@ impl Database {
 
     /// Get overview statistics for the dashboard (devices today, active time, idle time, etc.)
     pub async fn get_overview(&self) -> Result<Overview, sqlx::Error> {
-        // Count unique devices that have activity today
+        // Count unique devices that sent input summaries today.
         let devices_today_result = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(DISTINCT device_id) FROM activity_logs WHERE timestamp >= NOW() - INTERVAL '1 day'"
+            "SELECT COUNT(DISTINCT device_id) FROM input_activity_metrics WHERE timestamp >= date_trunc('day', NOW())"
         )
         .fetch_optional(&self.pool)
         .await?
         .unwrap_or(0);
 
-        // Sum of duration_seconds for today (active time)
+        // Aggregate daily input metrics from midnight.
         let active_time_result = sqlx::query_scalar::<_, i64>(
-            "SELECT COALESCE(SUM(duration_seconds), 0)::BIGINT FROM activity_logs WHERE timestamp >= NOW() - INTERVAL '1 day' AND window_title NOT LIKE '%idle%'"
+            "SELECT COALESCE(SUM(active_seconds), 0)::BIGINT FROM input_activity_metrics WHERE timestamp >= date_trunc('day', NOW())"
         )
         .fetch_one(&self.pool)
         .await?;
 
-        // Sum of duration_seconds for idle activity today
         let idle_time_result = sqlx::query_scalar::<_, i64>(
-            "SELECT COALESCE(SUM(duration_seconds), 0)::BIGINT FROM activity_logs WHERE timestamp >= NOW() - INTERVAL '1 day' AND window_title LIKE '%idle%'"
+            "SELECT COALESCE(SUM(idle_seconds), 0)::BIGINT FROM input_activity_metrics WHERE timestamp >= date_trunc('day', NOW())"
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        let keys_today = sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(SUM(keys_count), 0)::BIGINT FROM input_activity_metrics WHERE timestamp >= date_trunc('day', NOW())"
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        let mouse_moves_today = sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(SUM(mouse_moves_count), 0)::BIGINT FROM input_activity_metrics WHERE timestamp >= date_trunc('day', NOW())"
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        let mouse_clicks_today = sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(SUM(clicks_count), 0)::BIGINT FROM input_activity_metrics WHERE timestamp >= date_trunc('day', NOW())"
         )
         .fetch_one(&self.pool)
         .await?;
@@ -937,15 +1125,14 @@ impl Database {
             0.0
         };
 
-        // For now, keys_today is a placeholder (would need keystroke tracking in the agent)
-        let keys_today = 0i64;
-
         Ok(Overview {
             devices_today: devices_today_result,
             active_time: active_time_result,
             idle_time: idle_time_result,
             idle_pct,
             keys_today,
+            mouse_moves_today,
+            mouse_clicks_today,
         })
     }
 

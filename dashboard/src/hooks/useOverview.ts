@@ -7,6 +7,8 @@ export interface OverviewData {
   idle_time: number;
   idle_pct: string;
   keys_today: number;
+  mouse_moves_today: number;
+  mouse_clicks_today: number;
 }
 
 export function useOverview() {
