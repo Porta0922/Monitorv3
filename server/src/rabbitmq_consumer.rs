@@ -14,6 +14,35 @@ use crate::postgres_db::Database;
 pub struct RabbitMQConsumer;
 
 impl RabbitMQConsumer {
+    fn is_unknown_like(value: &str) -> bool {
+        let normalized = value.trim().to_lowercase();
+        normalized.is_empty()
+            || normalized == "unknown"
+            || normalized == "n/a"
+            || normalized == "<unknown>"
+            || normalized == "(unknown)"
+    }
+
+    fn normalize_activity_names(app_name: &str, window_title: &str) -> (String, String) {
+        let clean_window = if Self::is_unknown_like(window_title) {
+            "Sin titulo".to_string()
+        } else {
+            window_title.trim().to_string()
+        };
+
+        let clean_app = if Self::is_unknown_like(app_name) {
+            if clean_window != "Sin titulo" {
+                clean_window.clone()
+            } else {
+                "Sin identificar".to_string()
+            }
+        } else {
+            app_name.trim().to_string()
+        };
+
+        (clean_app, clean_window)
+    }
+
     fn event_dedupe_id(event: &Value, queue_name: &str) -> String {
         if let Some(event_id) = event.get("event_id").and_then(|value| value.as_str()) {
             return event_id.to_string();
@@ -346,11 +375,12 @@ impl RabbitMQConsumer {
         let device_id = event["device_id"].as_str().unwrap_or("unknown").to_string();
         let hostname = event["hostname"].as_str().unwrap_or(&device_id).to_string();
         let mac_address = event["mac_address"].as_str().map(str::to_string);
-        let app_name = payload["app_name"].as_str().unwrap_or("unknown").to_string();
-        let window_title = payload["window_title"].as_str().unwrap_or("").to_string();
+        let raw_app_name = payload["app_name"].as_str().unwrap_or("unknown").to_string();
+        let raw_window_title = payload["window_title"].as_str().unwrap_or("").to_string();
+        let (app_name, window_title) = Self::normalize_activity_names(&raw_app_name, &raw_window_title);
         let duration_seconds = payload["duration_seconds"].as_i64().unwrap_or(0);
 
-        if app_name == "unknown" || duration_seconds <= 0 {
+        if duration_seconds <= 0 {
             return Ok(());
         }
 

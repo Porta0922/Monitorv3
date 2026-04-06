@@ -73,6 +73,35 @@ fn build_event_envelope(
     })
 }
 
+fn is_unknown_like(value: &str) -> bool {
+    let normalized = value.trim().to_lowercase();
+    normalized.is_empty()
+        || normalized == "unknown"
+        || normalized == "n/a"
+        || normalized == "<unknown>"
+        || normalized == "(unknown)"
+}
+
+fn sanitize_activity_fields(app_name: &str, window_title: &str) -> (String, String) {
+    let clean_window = if is_unknown_like(window_title) {
+        "Sin titulo".to_string()
+    } else {
+        window_title.trim().to_string()
+    };
+
+    let clean_app = if is_unknown_like(app_name) {
+        if clean_window != "Sin titulo" {
+            clean_window.clone()
+        } else {
+            "Sin identificar".to_string()
+        }
+    } else {
+        app_name.trim().to_string()
+    };
+
+    (clean_app, clean_window)
+}
+
 async fn publish_or_cache(
     publisher: &SharedPublisher,
     cache: &Arc<offline_cache::OfflineCache>,
@@ -261,8 +290,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             keystroke_tracker_clone.update_idle_status().await;
             
             if let Some(current) = monitoring.capture_active_window() {
+                let (current_app, current_title) = sanitize_activity_fields(&current.app_name, &current.window_title);
+
                 if let Some((last_app, last_title, started_at)) = &last_window {
-                    let changed = *last_app != current.app_name || *last_title != current.window_title;
+                    let changed = *last_app != current_app || *last_title != current_title;
                     if changed {
                         let duration_seconds = (current.timestamp - *started_at).num_seconds().max(1);
                         let activity_payload = build_event_envelope(
@@ -283,10 +314,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         publish_or_cache(&publisher_clone, &cache_clone, "activity", activity_payload).await;
 
-                        last_window = Some((current.app_name, current.window_title, current.timestamp));
+                        last_window = Some((current_app, current_title, current.timestamp));
                     }
                 } else {
-                    last_window = Some((current.app_name, current.window_title, current.timestamp));
+                    last_window = Some((current_app, current_title, current.timestamp));
                 }
             }
         }

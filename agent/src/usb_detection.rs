@@ -98,41 +98,112 @@ impl UsbMonitor {
 impl UsbMonitor {
     async fn scan_windows_devices() -> Result<Vec<UsbDevice>, String> {
         use std::process::Command;
+        use serde_json::Value;
 
         let mut devices = Vec::new();
 
-        // Use Get-PnpDevice PowerShell to get USB devices
+        // Capture only physical USB storage devices (exclude internal NVMe/SATA).
         let output = Command::new("powershell")
             .args(&[
                 "-NoProfile",
                 "-Command",
-                "Get-PnpDevice -PresentOnly | Where-Object {$_.Class -eq 'DISKDRIVE'} | Select-Object Name,InstanceId",
+                "Get-CimInstance Win32_DiskDrive | Where-Object { $_.PNPDeviceID -match '^USBSTOR\\\\' -or $_.InterfaceType -eq 'USB' } | Select-Object Model,PNPDeviceID,SerialNumber,DeviceID | ConvertTo-Json -Compress",
             ])
             .output()
             .map_err(|e| e.to_string())?;
 
-        let output_str = String::from_utf8_lossy(&output.stdout);
+        if !output.status.success() {
+            return Ok(devices);
+        }
 
-        // Parse PowerShell output
-        for line in output_str.lines().skip(3) {
-            // Skip header
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 2 {
-                let device = UsbDevice {
-                    device_id: parts.join("-"),
-                    vendor_id: "UNKNOWN".to_string(),
-                    product_id: "UNKNOWN".to_string(),
-                    serial_number: "UNKNOWN".to_string(),
-                    device_name: parts[0].to_string(),
-                    volume_label: None,
-                    capacity_bytes: None,
-                    detected_at: Utc::now(),
-                };
-                devices.push(device);
+        let output_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if output_str.is_empty() {
+            return Ok(devices);
+        }
+
+        let json_value: Value = serde_json::from_str(&output_str).map_err(|e| e.to_string())?;
+
+        let rows: Vec<&Value> = if let Some(arr) = json_value.as_array() {
+            arr.iter().collect()
+        } else {
+            vec![&json_value]
+        };
+
+        for row in rows {
+            let model = row
+                .get("Model")
+                .and_then(|v| v.as_str())
+                .unwrap_or("USB Storage Device")
+                .trim()
+                .to_string();
+
+            let pnp_device_id = row
+                .get("PNPDeviceID")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+
+            if pnp_device_id.is_empty() {
+                continue;
             }
+
+            let serial_raw = row
+                .get("SerialNumber")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+
+            let serial_from_pnp = pnp_device_id
+                .split('\\')
+                .last()
+                .map(|s| s.trim().trim_matches('&').to_string())
+                .unwrap_or_default();
+
+            let serial_number = if !serial_raw.is_empty() {
+                serial_raw
+            } else if !serial_from_pnp.is_empty() {
+                serial_from_pnp
+            } else {
+                "UNKNOWN".to_string()
+            };
+
+            let upper_pnp = pnp_device_id.to_uppercase();
+            let vendor_id = extract_token_value(&upper_pnp, "VID_").unwrap_or_else(|| "UNKNOWN".to_string());
+            let product_id = extract_token_value(&upper_pnp, "PID_").unwrap_or_else(|| "UNKNOWN".to_string());
+
+            let device = UsbDevice {
+                // Stable key for IN/OUT matching between scans.
+                device_id: pnp_device_id.clone(),
+                vendor_id,
+                product_id,
+                serial_number,
+                device_name: model,
+                volume_label: None,
+                capacity_bytes: None,
+                detected_at: Utc::now(),
+            };
+            devices.push(device);
         }
 
         Ok(devices)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn extract_token_value(source: &str, token: &str) -> Option<String> {
+    let idx = source.find(token)?;
+    let after = &source[idx + token.len()..];
+    let value: String = after
+        .chars()
+        .take_while(|c| c.is_ascii_hexdigit())
+        .collect();
+
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
     }
 }
 

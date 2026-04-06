@@ -24,6 +24,33 @@ interface HourlyItem {
   idle_seconds: number;
 }
 
+interface HourlyProgramItem {
+  app: string;
+  seconds: number;
+  duration: string;
+  intervals: number;
+  is_idle: boolean;
+}
+
+interface HourlyProgramsGroup {
+  hour: number;
+  label: string;
+  programs: HourlyProgramItem[];
+}
+
+interface UsbSummaryRow {
+  key: string;
+  device_key: string;
+  timestamp: string;
+  device_name: string;
+  serial_number?: string;
+  hardware_id: string;
+  action: 'IN' | 'OUT';
+  pair_id: string;
+  pair_step: number;
+  pair_started_at: number;
+}
+
 interface WifiEventWithDuration extends WifiEvent {
   connected_duration_seconds: number;
 }
@@ -34,6 +61,7 @@ export function DeviceDetailPage() {
 
   const [device, setDevice] = useState<Device | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [hourlyPrograms, setHourlyPrograms] = useState<HourlyProgramsGroup[]>([]);
   const [hourly, setHourly] = useState<HourlyItem[]>([]);
 
   const [inventory, setInventory] = useState<AppInfo[]>([]);
@@ -75,7 +103,10 @@ export function DeviceDetailPage() {
           apiClient.getHourly(deviceId, selectedDate).catch(() => []),
         ]);
 
+        const hourlyProgramsData = await apiClient.getHistoryHourlyPrograms(deviceId, selectedDate).catch(() => []);
+
         setHistory(historyData as HistoryItem[]);
+        setHourlyPrograms(hourlyProgramsData as HourlyProgramsGroup[]);
         setHourly(hourlyData as HourlyItem[]);
       } catch (err: any) {
         setError(err?.message || 'No fue posible cargar la consola de dispositivo.');
@@ -105,8 +136,14 @@ export function DeviceDetailPage() {
   };
 
   const shortAppName = (rawName: string) => {
-    const normalized = rawName.replace(/\\/g, '/');
-    const lastSegment = normalized.split('/').pop() || rawName;
+    const cleaned = (rawName || '').trim();
+    const normalized = cleaned.toLowerCase();
+    if (!cleaned || normalized === 'unknown' || normalized === 'n/a' || normalized === '<unknown>' || normalized === '(unknown)') {
+      return 'Sin identificar';
+    }
+
+    const normalizedPath = cleaned.replace(/\\/g, '/');
+    const lastSegment = normalizedPath.split('/').pop() || cleaned;
     return lastSegment.length > 38 ? `${lastSegment.slice(0, 35)}...` : lastSegment;
   };
 
@@ -118,6 +155,81 @@ export function DeviceDetailPage() {
     }`;
 
   const maxHourlyValue = Math.max(1, ...hourly.map((item) => item.active_seconds + item.idle_seconds));
+
+  const usbSummaryRows = useMemo<UsbSummaryRow[]>(() => {
+    const normalized = (value?: string) => (value || '').trim();
+    const isUnknownLike = (value?: string) => {
+      const v = normalized(value).toLowerCase();
+      return !v || v === 'unknown' || v === 'n/a' || v === '<unknown>' || v === '(unknown)';
+    };
+
+    const eventsByDevice = new Map<string, USBEvent[]>();
+
+    for (const event of usbEvents) {
+      const serial = isUnknownLike(event.serial_number) ? '' : normalized(event.serial_number);
+      const hardware = isUnknownLike(event.hardware_id) ? '' : normalized(event.hardware_id);
+      const name = normalized(event.device_name);
+
+      const uniqueKey = serial || hardware || name;
+
+      if (!uniqueKey) {
+        continue;
+      }
+
+      const list = eventsByDevice.get(uniqueKey) || [];
+      list.push(event);
+      eventsByDevice.set(uniqueKey, list);
+    }
+
+    const pairedRows: UsbSummaryRow[] = [];
+
+    for (const [deviceKey, events] of eventsByDevice.entries()) {
+      const sortedAsc = [...events].sort(
+        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
+
+      let pairCounter = 0;
+      let hasOpenConnection = false;
+      let pairStartedAt = 0;
+
+      for (const event of sortedAsc) {
+        if (event.action === 'IN' || !hasOpenConnection) {
+          pairCounter += 1;
+          pairStartedAt = new Date(event.timestamp).getTime();
+        }
+
+        const pairId = `${deviceKey}#${pairCounter}`;
+
+        pairedRows.push({
+          key: `${pairId}|${event.action}|${event.timestamp}`,
+          device_key: deviceKey,
+          timestamp: event.timestamp,
+          device_name: event.device_name,
+          serial_number: event.serial_number,
+          hardware_id: event.hardware_id,
+          action: event.action,
+          pair_id: pairId,
+          pair_step: event.action === 'IN' ? 1 : 2,
+          pair_started_at: pairStartedAt,
+        });
+
+        if (event.action === 'IN') {
+          hasOpenConnection = true;
+        }
+        if (event.action === 'OUT') {
+          hasOpenConnection = false;
+        }
+      }
+    }
+
+    return pairedRows.sort((a, b) => {
+      const pairCompare = b.pair_started_at - a.pair_started_at;
+      if (pairCompare !== 0) return pairCompare;
+      const stepCompare = a.pair_step - b.pair_step;
+      if (stepCompare !== 0) return stepCompare;
+      return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+    });
+  }, [usbEvents]);
 
   const wifiEventsWithDuration = useMemo<WifiEventWithDuration[]>(() => {
     return wifiEvents.map((event, index) => {
@@ -360,42 +472,49 @@ export function DeviceDetailPage() {
         <section className="overflow-hidden rounded-2xl border border-[#1b2b56] bg-[linear-gradient(160deg,#0f1d43,#0b1329)] shadow-[0_12px_26px_rgba(0,0,0,0.32)]">
           {tab === 'activity' && (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr>
-                    <th>Aplicacion</th>
-                    <th>Ventana</th>
-                    <th>Duracion</th>
-                    <th>Intervalos</th>
-                    <th>Estado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="py-8 text-center text-[#8fa0c9]">No hay actividad para esta fecha.</td>
-                    </tr>
-                  ) : (
-                    history.map((row, idx) => (
-                      <tr key={`${row.app}-${idx}`}>
-                        <td className="max-w-[320px] truncate font-mono text-[12px] text-[#dce6ff]" title={row.app}>
-                          {shortAppName(row.app)}
-                        </td>
-                        <td className="max-w-[540px] truncate text-[12px] text-[#9eb0dc]" title={row.title}>
-                          {row.title || 'Sin titulo'}
-                        </td>
-                        <td className="whitespace-nowrap font-mono text-[11px] text-[#00ff88]">{row.duration}</td>
-                        <td className="whitespace-nowrap font-mono text-[11px] text-[#9eb0dc]">{row.intervals}</td>
-                        <td>
-                          <span className={`inline-flex rounded-full px-2.5 py-1 font-mono text-[10px] ${row.is_idle ? 'border border-[#ff9f1a]/40 bg-[#ff9f1a]/10 text-[#ff9f1a]' : 'border border-[#00d9ff]/40 bg-[#00d9ff]/10 text-[#00d9ff]'}`}>
-                            {row.is_idle ? 'IDLE' : 'ACTIVE'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+              {hourlyPrograms.length === 0 ? (
+                <div className="py-8 text-center text-[#8fa0c9]">No hay actividad para esta fecha.</div>
+              ) : (
+                <div className="space-y-3 p-3">
+                  {hourlyPrograms.map((group) => (
+                    <section key={group.hour} className="rounded-xl border border-[#21325d] bg-[#0a122a]">
+                      <header className="flex items-center justify-between border-b border-[#1b2a4f] px-4 py-2">
+                        <h3 className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#8ea0cf]">{group.label}</h3>
+                        <span className="font-mono text-[10px] text-[#7c90c1]">{group.programs.length} apps</span>
+                      </header>
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr>
+                              <th>Aplicacion</th>
+                              <th>Duracion</th>
+                              <th>Intervalos</th>
+                              <th>Estado</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {group.programs.map((program, idx) => (
+                              <tr key={`${group.hour}-${program.app}-${idx}`}>
+                                <td className="max-w-[420px] truncate font-mono text-[12px] text-[#dce6ff]" title={program.app}>
+                                  {shortAppName(program.app)}
+                                </td>
+                                <td className="whitespace-nowrap font-mono text-[11px] text-[#00ff88]">{program.duration}</td>
+                                <td className="whitespace-nowrap font-mono text-[11px] text-[#9eb0dc]">{program.intervals}</td>
+                                <td>
+                                  <span className={`inline-flex rounded-full px-2.5 py-1 font-mono text-[10px] ${program.is_idle ? 'border border-[#ff9f1a]/40 bg-[#ff9f1a]/10 text-[#ff9f1a]' : 'border border-[#00d9ff]/40 bg-[#00d9ff]/10 text-[#00d9ff]'}`}>
+                                    {program.is_idle ? 'IDLE' : 'ACTIVE'}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -439,23 +558,29 @@ export function DeviceDetailPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr>
-                    <th>Hora</th>
+                    <th>Par</th>
+                    <th>Ultimo evento</th>
                     <th>Dispositivo</th>
                     <th>Serial</th>
+                    <th>Identificador</th>
                     <th>Accion</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {usbEvents.length === 0 ? (
+                  {usbSummaryRows.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="py-8 text-center text-[#8fa0c9]">Sin eventos USB para este equipo.</td>
+                      <td colSpan={6} className="py-8 text-center text-[#8fa0c9]">Sin eventos USB para este equipo.</td>
                     </tr>
                   ) : (
-                    usbEvents.map((event, idx) => (
-                      <tr key={`${event.timestamp}-${idx}`}>
+                    usbSummaryRows.map((event) => (
+                      <tr key={event.key}>
+                        <td className="whitespace-nowrap font-mono text-[11px] text-[#8ea0cf]">
+                          {event.pair_id.split('#').pop()}
+                        </td>
                         <td className="whitespace-nowrap font-mono text-[11px] text-[#9eb0dc]">{new Date(event.timestamp).toLocaleString()}</td>
                         <td className="max-w-[380px] truncate text-[12px] text-[#dce6ff]" title={event.device_name}>{event.device_name}</td>
                         <td className="max-w-[340px] truncate font-mono text-[11px] text-[#91a3d2]" title={event.serial_number}>{event.serial_number || 'N/A'}</td>
+                        <td className="max-w-[420px] truncate font-mono text-[11px] text-[#91a3d2]" title={event.hardware_id}>{event.hardware_id || 'N/A'}</td>
                         <td>
                           <span className={`inline-flex rounded-full px-2.5 py-1 font-mono text-[10px] ${event.action === 'IN' ? 'border border-[#00ff88]/40 bg-[#00ff88]/10 text-[#00ff88]' : 'border border-red-500/40 bg-red-500/10 text-red-300'}`}>
                             {event.action === 'IN' ? 'CONNECTED' : 'DISCONNECTED'}

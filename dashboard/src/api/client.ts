@@ -236,6 +236,17 @@ class ApiClient {
     return response.data.history || [];
   }
 
+  async getHistoryHourlyPrograms(deviceId: string, date?: string): Promise<any[]> {
+    const response = await this.client.get<{ success: boolean; groups: any[] }>('/history_hourly_programs', {
+      params: {
+        device_id: deviceId,
+        ...(date ? { date } : {}),
+        tz_offset_minutes: getClientUtcOffsetMinutes(),
+      },
+    });
+    return response.data.groups || [];
+  }
+
   async getHourly(deviceId: string, date?: string): Promise<any[]> {
     const response = await this.client.get<{ success: boolean; hourly: any[] }>('/hourly', {
       params: {

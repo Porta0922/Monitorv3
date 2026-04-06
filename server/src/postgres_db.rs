@@ -529,6 +529,30 @@ impl Database {
         .await
     }
 
+    pub async fn get_device_programs_by_hour_for_date(
+        &self,
+        device_id: Uuid,
+        date: NaiveDate,
+        tz_offset_minutes: i32,
+    ) -> Result<Vec<(i32, String, i64, i64)>, sqlx::Error> {
+        sqlx::query_as::<_, (i32, String, i64, i64)>(
+            "SELECT EXTRACT(HOUR FROM (timestamp + ($3 * INTERVAL '1 minute')))::INT,
+                    app_name,
+                    COALESCE(SUM(duration_seconds), 0)::BIGINT,
+                    COUNT(*)::BIGINT
+             FROM activity_logs
+             WHERE device_id = $1
+               AND DATE(timestamp + ($3 * INTERVAL '1 minute')) = $2
+             GROUP BY 1, 2
+             ORDER BY 1 ASC, 3 DESC"
+        )
+        .bind(device_id)
+        .bind(date)
+        .bind(tz_offset_minutes)
+        .fetch_all(&self.pool)
+        .await
+    }
+
     pub async fn get_device_hourly_for_date(
         &self,
         device_id: Uuid,

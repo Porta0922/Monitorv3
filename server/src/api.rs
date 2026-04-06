@@ -60,6 +60,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/wifi", get(list_wifi_events))
         .route("/wifi/:device_id", get(list_device_wifi_events))
         .route("/history", get(get_history))
+        .route("/history_hourly_programs", get(get_history_hourly_programs))
         .route("/hourly", get(get_hourly))
         .route("/available_dates", get(get_available_dates))
         .route("/active_vs_idle", get(get_active_vs_idle))
@@ -566,6 +567,26 @@ fn csv_escape(value: &str) -> String {
     format!("\"{}\"", escaped)
 }
 
+fn is_unknown_like(value: &str) -> bool {
+    let normalized = value.trim().to_lowercase();
+    normalized.is_empty()
+        || normalized == "unknown"
+        || normalized == "n/a"
+        || normalized == "<unknown>"
+        || normalized == "(unknown)"
+}
+
+fn normalize_activity_name(app_name: &str, window_title: &str) -> String {
+    if is_unknown_like(app_name) {
+        if !is_unknown_like(window_title) {
+            return window_title.trim().to_string();
+        }
+        return "Sin identificar".to_string();
+    }
+
+    app_name.trim().to_string()
+}
+
 fn parse_time_bounds(filters: &ActivityLogFilters) -> (Option<chrono::DateTime<Utc>>, Option<chrono::DateTime<Utc>>) {
     let from = filters
         .from
@@ -858,10 +879,11 @@ async fn get_history(
             let history: Vec<serde_json::Value> = rows
                 .into_iter()
                 .map(|(app_name, window_title, seconds, intervals)| {
-                    let is_idle = app_name.to_lowercase().contains("idle")
+                    let resolved_app = normalize_activity_name(&app_name, &window_title);
+                    let is_idle = resolved_app.to_lowercase().contains("idle")
                         || window_title.to_lowercase().contains("idle");
                     json!({
-                        "app": app_name,
+                        "app": resolved_app,
                         "title": window_title,
                         "seconds": seconds,
                         "duration": format_duration(seconds),
@@ -950,6 +972,78 @@ async fn get_hourly(
                 "success": false,
                 "error": "Failed to fetch hourly data",
                 "hourly": []
+            }))
+        }
+    }
+}
+
+async fn get_history_hourly_programs(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<DeviceDateQuery>,
+) -> impl IntoResponse {
+    let Some(device_id_raw) = query.device_id.as_deref() else {
+        return Json(json!({
+            "success": false,
+            "error": "device_id is required",
+            "groups": []
+        }));
+    };
+
+    let Ok(device_id) = Uuid::parse_str(device_id_raw) else {
+        return Json(json!({
+            "success": false,
+            "error": "invalid device_id",
+            "groups": []
+        }));
+    };
+
+    let selected_date = parse_iso_date(query.date.as_deref()).unwrap_or_else(|| Utc::now().date_naive());
+    let tz_offset_minutes = query.tz_offset_minutes.unwrap_or(0);
+
+    match state
+        .db
+        .get_device_programs_by_hour_for_date(device_id, selected_date, tz_offset_minutes)
+        .await
+    {
+        Ok(rows) => {
+            let mut grouped: std::collections::BTreeMap<i32, Vec<serde_json::Value>> = std::collections::BTreeMap::new();
+
+            for (hour, app_name, seconds, intervals) in rows {
+                let resolved_app = normalize_activity_name(&app_name, &app_name);
+                grouped.entry(hour).or_default().push(json!({
+                    "app": resolved_app,
+                    "seconds": seconds,
+                    "duration": format_duration(seconds),
+                    "intervals": intervals,
+                    "is_idle": resolved_app.to_lowercase().contains("idle"),
+                }));
+            }
+
+            let groups: Vec<serde_json::Value> = grouped
+                .into_iter()
+                .map(|(hour, programs)| {
+                    json!({
+                        "hour": hour,
+                        "label": format!("{:02}:00 - {:02}:59", hour, hour),
+                        "programs": programs,
+                    })
+                })
+                .collect();
+
+            Json(json!({
+                "success": true,
+                "device_id": device_id,
+                "date": selected_date.to_string(),
+                "tz_offset_minutes": tz_offset_minutes,
+                "groups": groups,
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch hourly program history: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch hourly program history",
+                "groups": []
             }))
         }
     }
