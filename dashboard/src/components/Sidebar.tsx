@@ -55,7 +55,7 @@ export function Sidebar({ currentPage }: { currentPage: string }) {
       <div className="h-16 border-b border-[#16213f] px-5 flex items-center">
         <div>
           <div className="flex items-center gap-2">
-            <p className="font-display text-xl font-black tracking-widest text-[#00d9ff]">AM</p>
+            <p className="font-display text-xl font-black tracking-widest text-[#00d9ff]">AME</p>
             {newAlertsCount > 0 && <span className="inline-block h-2 w-2 rounded-full bg-red-500"></span>}
           </div>
           <p className="font-mono text-[10px] tracking-[0.2em] text-[#6f7ea8]">ENTERPRISE</p>

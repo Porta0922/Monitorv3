@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use std::process::Command;
 
 #[derive(Debug, Clone)]
@@ -12,14 +11,14 @@ pub struct WifiSnapshot {
 
 pub struct WifiMonitor {
     last_key: Option<String>,
-    last_published_at: Option<DateTime<Utc>>,
+    last_signal: Option<i32>,
 }
 
 impl WifiMonitor {
     pub fn new() -> Self {
         Self {
             last_key: None,
-            last_published_at: None,
+            last_signal: None,
         }
     }
 
@@ -38,18 +37,22 @@ impl WifiMonitor {
             snapshot.bssid.as_deref().unwrap_or(""),
         );
 
-        let changed = self.last_key.as_ref() != Some(&current_key);
-        let periodic = self
-            .last_published_at
-            .map(|last| (Utc::now() - last).num_seconds() >= 600)
-            .unwrap_or(true);
+        let state_changed = self.last_key.as_ref() != Some(&current_key);
 
-        if changed || periodic {
+        // Detect significant signal drop (>= 20 percentage points)
+        let signal_dropped = match (self.last_signal, snapshot.signal_percent) {
+            (Some(last), Some(current)) => last - current >= 20,
+            _ => false,
+        };
+
+        if state_changed || signal_dropped {
             self.last_key = Some(current_key);
-            self.last_published_at = Some(Utc::now());
+            self.last_signal = snapshot.signal_percent;
             return Ok(Some(snapshot));
         }
 
+        // Always update tracked signal so drops are measured from current level
+        self.last_signal = snapshot.signal_percent;
         Ok(None)
     }
 }
