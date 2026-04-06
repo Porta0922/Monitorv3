@@ -401,6 +401,7 @@ impl RabbitMQConsumer {
 
     async fn handle_heartbeat_event(event: &Value, db: &Database) -> Result<(), Box<dyn std::error::Error>> {
         let payload = event.get("payload").unwrap_or(event);
+        let event_type = event["event_type"].as_str().unwrap_or("heartbeat");
 
         let device_id = event["device_id"].as_str().unwrap_or("unknown").to_string();
         let hostname = event["hostname"].as_str().unwrap_or(&device_id).to_string();
@@ -409,7 +410,8 @@ impl RabbitMQConsumer {
 
         let _ = db.register_device(hostname, device_id.clone(), mac_address, None).await;
 
-        // Input summary events carry active/idle minute counters.
+        // Only input_summary events should contribute to persisted time counters.
+        // Regular heartbeat events contain cumulative idle_seconds and would inflate totals.
         let event_timestamp = event
             .get("timestamp")
             .and_then(|value| value.as_str())
@@ -422,7 +424,9 @@ impl RabbitMQConsumer {
         let mouse_moves_count = payload["mouse_moves_count"].as_i64().unwrap_or(0);
         let clicks_count = payload["clicks_count"].as_i64().unwrap_or(0);
 
-        if active_seconds > 0 || idle_seconds > 0 || keys_count > 0 || mouse_moves_count > 0 || clicks_count > 0 {
+        if event_type == "input_summary"
+            && (active_seconds > 0 || idle_seconds > 0 || keys_count > 0 || mouse_moves_count > 0 || clicks_count > 0)
+        {
             let _ = db
                 .insert_input_summary(
                     device_id.clone(),

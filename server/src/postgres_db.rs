@@ -924,6 +924,18 @@ impl Database {
         let device_uuid = Uuid::parse_str(&device_id)
             .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
 
+        let mut safe_active = active_seconds.max(0).min(60);
+        let mut safe_idle = idle_seconds.max(0).min(60);
+        if safe_active + safe_idle > 60 {
+            if status == "idle" {
+                safe_active = 0;
+                safe_idle = 60;
+            } else {
+                safe_active = 60;
+                safe_idle = 0;
+            }
+        }
+
         sqlx::query(
             r#"
             INSERT INTO input_activity_metrics (id, device_id, timestamp, active_seconds, idle_seconds, keys_count, mouse_moves_count, clicks_count, status)
@@ -933,8 +945,8 @@ impl Database {
         .bind(id)
         .bind(device_uuid)
         .bind(timestamp)
-        .bind(active_seconds.max(0))
-        .bind(idle_seconds.max(0))
+        .bind(safe_active)
+        .bind(safe_idle)
         .bind(keys_count.max(0))
         .bind(mouse_moves_count.max(0))
         .bind(clicks_count.max(0))
@@ -953,8 +965,9 @@ impl Database {
                     COALESCE(SUM(keys_count), 0)::BIGINT,
                     COALESCE(SUM(mouse_moves_count), 0)::BIGINT,
                     COALESCE(SUM(clicks_count), 0)::BIGINT
-             FROM input_activity_metrics
-             WHERE timestamp >= date_trunc('day', NOW())
+                         FROM input_activity_metrics
+                         WHERE timestamp >= date_trunc('day', NOW())
+                             AND (active_seconds + idle_seconds) <= 60
              GROUP BY device_id"
         )
         .fetch_all(&self.pool)
@@ -983,8 +996,10 @@ impl Database {
                     COALESCE(SUM(keys_count), 0)::BIGINT,
                     COALESCE(SUM(mouse_moves_count), 0)::BIGINT,
                     COALESCE(SUM(clicks_count), 0)::BIGINT
-             FROM input_activity_metrics
-             WHERE device_id = $1 AND timestamp >= date_trunc('day', NOW())"
+                         FROM input_activity_metrics
+                         WHERE device_id = $1
+                             AND timestamp >= date_trunc('day', NOW())
+                             AND (active_seconds + idle_seconds) <= 60"
         )
         .bind(device_id)
         .fetch_one(&self.pool)
@@ -1080,7 +1095,10 @@ impl Database {
     pub async fn get_overview(&self) -> Result<Overview, sqlx::Error> {
         // Count unique devices that sent input summaries today.
         let devices_today_result = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(DISTINCT device_id) FROM input_activity_metrics WHERE timestamp >= date_trunc('day', NOW())"
+                        "SELECT COUNT(DISTINCT device_id)
+                         FROM input_activity_metrics
+                         WHERE timestamp >= date_trunc('day', NOW())
+                             AND (active_seconds + idle_seconds) <= 60"
         )
         .fetch_optional(&self.pool)
         .await?
@@ -1088,31 +1106,46 @@ impl Database {
 
         // Aggregate daily input metrics from midnight.
         let active_time_result = sqlx::query_scalar::<_, i64>(
-            "SELECT COALESCE(SUM(active_seconds), 0)::BIGINT FROM input_activity_metrics WHERE timestamp >= date_trunc('day', NOW())"
+                        "SELECT COALESCE(SUM(active_seconds), 0)::BIGINT
+                         FROM input_activity_metrics
+                         WHERE timestamp >= date_trunc('day', NOW())
+                             AND (active_seconds + idle_seconds) <= 60"
         )
         .fetch_one(&self.pool)
         .await?;
 
         let idle_time_result = sqlx::query_scalar::<_, i64>(
-            "SELECT COALESCE(SUM(idle_seconds), 0)::BIGINT FROM input_activity_metrics WHERE timestamp >= date_trunc('day', NOW())"
+                        "SELECT COALESCE(SUM(idle_seconds), 0)::BIGINT
+                         FROM input_activity_metrics
+                         WHERE timestamp >= date_trunc('day', NOW())
+                             AND (active_seconds + idle_seconds) <= 60"
         )
         .fetch_one(&self.pool)
         .await?;
 
         let keys_today = sqlx::query_scalar::<_, i64>(
-            "SELECT COALESCE(SUM(keys_count), 0)::BIGINT FROM input_activity_metrics WHERE timestamp >= date_trunc('day', NOW())"
+                        "SELECT COALESCE(SUM(keys_count), 0)::BIGINT
+                         FROM input_activity_metrics
+                         WHERE timestamp >= date_trunc('day', NOW())
+                             AND (active_seconds + idle_seconds) <= 60"
         )
         .fetch_one(&self.pool)
         .await?;
 
         let mouse_moves_today = sqlx::query_scalar::<_, i64>(
-            "SELECT COALESCE(SUM(mouse_moves_count), 0)::BIGINT FROM input_activity_metrics WHERE timestamp >= date_trunc('day', NOW())"
+                        "SELECT COALESCE(SUM(mouse_moves_count), 0)::BIGINT
+                         FROM input_activity_metrics
+                         WHERE timestamp >= date_trunc('day', NOW())
+                             AND (active_seconds + idle_seconds) <= 60"
         )
         .fetch_one(&self.pool)
         .await?;
 
         let mouse_clicks_today = sqlx::query_scalar::<_, i64>(
-            "SELECT COALESCE(SUM(clicks_count), 0)::BIGINT FROM input_activity_metrics WHERE timestamp >= date_trunc('day', NOW())"
+                        "SELECT COALESCE(SUM(clicks_count), 0)::BIGINT
+                         FROM input_activity_metrics
+                         WHERE timestamp >= date_trunc('day', NOW())
+                             AND (active_seconds + idle_seconds) <= 60"
         )
         .fetch_one(&self.pool)
         .await?;
