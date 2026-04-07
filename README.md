@@ -19,9 +19,11 @@ Incluye monitoreo de aplicaciones en foco, actividad/inactividad, teclado/mouse,
 - Cola de mensajes con RabbitMQ y persistencia en PostgreSQL
 - Dashboard con vistas por dispositivo y exportacion CSV
 - Cache offline en agente con reintentos de sincronizacion
-- **Seguridad MITRE ATT&CK**: deteccion de amenazas via osquery con 8 tecnicas mapeadas
+- **Seguridad MITRE ATT&CK**: deteccion de amenazas via osquery con 11 tecnicas mapeadas
+- **Scheduler osquery por-query**: cada query ejecuta según su intervalo individual (300s-1800s) para minimizar overhead
+- **Deteccion de copia en USB**: identifica archivos recientemente escritos en drives USB (T1052.001)
 - Deduplicacion de eventos de seguridad por fingerprint SHA-256
-- Busqueda de dispositivos por MAC address, hostname, apodo o Device ID
+- Busqueda y filtrado de dispositivos por MAC address, hostname, apodo o Device ID
 
 ## Arquitectura
 
@@ -159,18 +161,51 @@ npm run build
 
 ## Modulo de seguridad (osquery + MITRE ATT&CK)
 
-El agente ejecuta queries osquery cada **5 minutos** (si osqueryi esta instalado; de lo contrario opera en modo silencioso sin afectar el resto del agente).
+El agente ejecuta queries osquery con **scheduler inteligente por-query** (si osqueryi esta instalado; de lo contrario opera en modo silencioso sin afectar el resto del agente).
 
-| Query | Tecnica MITRE | Severidad |
-|---|---|---|
-| `scheduled_tasks_hidden` | T1053.005 — Scheduled Task | HIGH |
-| `autorun_registry_keys` | T1547.001 — Registry Run Keys | MEDIUM |
-| `powershell_encoded_commands` | T1059.001 — PowerShell | HIGH |
-| `unsigned_system_path_processes` | T1036 — Masquerading | MEDIUM |
-| `executable_in_temp_paths` | T1105 — Ingress Tool Transfer | HIGH |
-| `unusual_listening_ports` | T1021 — Remote Services | MEDIUM |
-| `startup_items` | T1547.009 — Shortcut Modification | LOW |
-| `cmd_spawned_by_unusual_parent` | T1059.003 — Command Shell | MEDIUM |
+Cada query ejecuta según su propia frecuencia para optimizar recursos:
+
+| Query | Intervalo | Tecnica MITRE | Severidad |
+|---|---|---|---|
+| `powershell_encoded_commands` | 5min | T1059.001 — PowerShell Encoding | HIGH |
+| `powershell_download_cradles` | 5min | T1105 — Download Cradles | HIGH |
+| `suspicious_script_hosts` | 5min | T1059.005 — Script Hosts | MEDIUM |
+| `unusual_listening_ports` | 10min | T1021 — Remote Services | MEDIUM |
+| `executable_in_temp_paths` | 10min | T1105 — Ingress Tool Transfer | HIGH |
+| `lolbins_with_remote_content` | 10min | T1218 — LOLBins | HIGH |
+| `scheduled_tasks_hidden` | 20min | T1053.005 — Scheduled Task | HIGH |
+| `autorun_registry_keys` | 20min | T1547.001 — Registry Run Keys | MEDIUM |
+| `cmd_spawned_by_unusual_parent` | 20min | T1059.003 — Command Shell | MEDIUM |
+| `unsigned_system_path_processes` | 30min | T1036 — Masquerading | MEDIUM |
+| `startup_items_persistence` | 30min | T1547.009 — Startup Items | LOW |
+
+### Configuración del scheduler osquery
+
+Por defecto, el scheduler está **deshabilitado** (no consume recursos). Para activarlo:
+
+```bash
+# Windows
+set AGENT_OSQUERY_SCHEDULER_SECONDS=30
+
+# Linux/macOS
+export AGENT_OSQUERY_SCHEDULER_SECONDS=30
+```
+
+Valores recomendados:
+- `0` o no establecida = deshabilitado (default)
+- `30` = tick cada 30s, cada query ejecuta segun su intervalo
+- `60` = tick cada 60s (menos aggressive)
+
+### Detección de copia en USB (T1052.001)
+
+El agente monitorea continuamente drives USB removibles cada **45 segundos** y detecta:
+- Archivos recientemente escritos (últimos 180s)
+- Máximo 20 archivos por drive
+- Deduplicación por SHA-256 para evitar alertas duplicadas
+
+Los hallazgos se publican a `monitoring.security` con severidad **HIGH** cuando se detectan escrituras en USB.
+
+### Integración con dashboard
 
 Los hallazgos se publican a la cola `monitoring.security`, el servidor los persiste en la tabla `security_events` y el dashboard los muestra en la pestaña **Seguridad** con:
 
@@ -178,6 +213,7 @@ Los hallazgos se publican a la cola `monitoring.security`, el servidor los persi
 - Filtros por rango de fechas, severidad y tecnica MITRE
 - Enlace directo a `attack.mitre.org` por cada tecnica
 - Vista expandida del JSON `raw_data` de cada evento
+- Búsqueda por MAC address del dispositivo
 
 ## Documentacion del proyecto
 
@@ -192,8 +228,10 @@ Consulta estos archivos para detalle tecnico y operativo:
 
 ## Notas operativas
 
+- **osquery opcional**: se descarga/instala automáticamente en Windows (`deploy/install-windows.bat`). Si no está disponible, el agente funciona normalmente sin scans de seguridad.
+- **Scheduler deshabilitado por defecto**: establece `AGENT_OSQUERY_SCHEDULER_SECONDS` para activar análisis de amenazas.
+- **USB detection siempre activo**: monitorea 24/7 si está habilitado el agente; no requiere configuración adicional.
+- **Deduplicación SHA-256**: la tabla `security_events` usa fingerprints para evitar duplicados, incluso si una query detecta lo mismo múltiples veces.
 - Si las metricas del dia aparecen infladas, valida colas RabbitMQ y timestamps del evento.
 - Para diagnostico rapido en Windows, usa `diagnostic.ps1`.
 - Para verificar RabbitMQ, usa `verify_rabbitmq.ps1`.
-- osquery es **opcional**: si no esta instalado, el agente inicia igual y omite los scans de seguridad.
-- La tabla `security_events` usa deduplicacion por fingerprint SHA-256; eventos repetidos no se duplican en la base de datos.

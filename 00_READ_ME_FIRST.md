@@ -15,7 +15,7 @@
 | **React Dashboard** | ✅ PASS | 191ms | UI structure complete |
 | **Docker Stack** | ✅ READY | - | PostgreSQL, RabbitMQ, TimescaleDB |
 
-**Next Step**: Run `cargo check` in each directory to verify, then see NEXT_STEPS.md for testing
+**Next Step**: Run `cargo check` in each directory to verify, then see README.md for configuration and features
 
 ---
 
@@ -36,7 +36,7 @@ Start here to get up to speed:
 
 ### 🧪 For QA / Testers
 Start here to verify everything works:
-1. **NEXT_STEPS.md** - Testing sequence and success criteria
+1. **README.md** - Main documentation with features and how to run
 2. **WINDOWS_DEMO_GUIDE.md** - Step-by-step demo walkthrough
 3. **BUILD_STATUS.md** - Detailed build metrics
 
@@ -226,7 +226,7 @@ Before considering this "done", verify:
 
 **Expected time**: 15-20 minutes
 
-See **NEXT_STEPS.md** for detailed testing procedure.
+See **README.md** for configuration and how to enable monitoring features.
 
 ---
 
@@ -271,7 +271,7 @@ For production, update:
 | **THIS FILE** | Start here | 5 min |
 | PROJECT_STATUS.md | See what's done | 10 min |
 | QUICK_BUILD.md | Build instructions | 5 min |
-| NEXT_STEPS.md | Testing roadmap | 10 min |
+| README.md | Features and configuration | 10 min |
 | ARCHITECTURE.md | System design | 15 min |
 | API_REFERENCE.md | API endpoints | 10 min |
 | WINDOWS_DEMO_GUIDE.md | Demo walkthrough | 15 min |
@@ -341,7 +341,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 4. Access dashboard: http://localhost:4173
 
 ### Short Term (Next 2-3 hours)
-1. Complete integration testing (see NEXT_STEPS.md)
+1. Review README.md for enabled features and configuration options
 2. Verify end-to-end data flow
 3. Run performance benchmarks
 4. Document findings
@@ -367,7 +367,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 - **Compilation/Build**: See BUILD_STATUS.md
 - **Architecture/Design**: See ARCHITECTURE.md  
 - **API Endpoints**: See API_REFERENCE.md
-- **Testing**: See NEXT_STEPS.md
+- **Configuration**: See README.md for osquery scheduler and USB detection settings
 - **Advanced Features**: See HEATMAPS_AND_PROTECTION_GUIDE.md
 - **Getting Started**: See QUICK_BUILD.md
 
@@ -378,7 +378,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ├── PROJECT_STATUS.md (Visual dashboard)
 ├── COMPLETION_SUMMARY.md (What was done)
 ├── BUILD_STATUS.md (Build metrics)
-├── NEXT_STEPS.md (Testing guide)
+├── README.md (Features and quick start)
 ├── QUICK_BUILD.md (Quick start)
 ├── START_HERE.md (Alternative entry point)
 ├── ARCHITECTURE.md (Design document)
@@ -433,7 +433,7 @@ You'll know things are working when:
 **Ready to dive in?** 
 
 👉 Start with **QUICK_BUILD.md** for a 5-minute build tutorial  
-👉 Or **NEXT_STEPS.md** to begin testing  
+👉 Or **README.md** for all features and how to use them  
 👉 Or **PROJECT_STATUS.md** to see the full picture
 
 ---
