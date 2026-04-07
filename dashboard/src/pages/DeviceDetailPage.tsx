@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import { AppShell } from '../components/AppShell';
-import type { AppInfo, Device, USBEvent, WifiEvent } from '../types';
+import type { AppInfo, Device, RunningAppInfo, USBEvent, WifiEvent } from '../types';
 
 type TabKey = 'activity' | 'inventory' | 'usb' | 'wifi';
 type WifiStateFilter = 'all' | 'connected' | 'disconnected';
@@ -65,6 +65,7 @@ export function DeviceDetailPage() {
   const [hourly, setHourly] = useState<HourlyItem[]>([]);
 
   const [inventory, setInventory] = useState<AppInfo[]>([]);
+  const [runningApps, setRunningApps] = useState<RunningAppInfo[]>([]);
   const [usbEvents, setUsbEvents] = useState<USBEvent[]>([]);
   const [wifiEvents, setWifiEvents] = useState<WifiEvent[]>([]);
   const [tab, setTab] = useState<TabKey>('activity');
@@ -85,9 +86,10 @@ export function DeviceDetailPage() {
       setError('');
 
       try {
-        const [devices, apps, usb, wifi] = await Promise.all([
+        const [devices, apps, openApps, usb, wifi] = await Promise.all([
           apiClient.getDevices(),
           apiClient.getApps(deviceId).catch(() => []),
+          apiClient.getRunningApps(deviceId).catch(() => []),
           apiClient.getUsbHistory(deviceId, 250).catch(() => []),
           apiClient.getWifiHistory(deviceId, 250).catch(() => []),
         ]);
@@ -95,6 +97,7 @@ export function DeviceDetailPage() {
         const selected = devices.find((d) => d.device_id === deviceId) || null;
         setDevice(selected);
         setInventory(apps);
+        setRunningApps(openApps);
         setUsbEvents(usb);
         setWifiEvents(wifi);
 
@@ -121,11 +124,11 @@ export function DeviceDetailPage() {
   const tabStats = useMemo(
     () => ({
       activity: history.length,
-      inventory: inventory.length,
+      inventory: runningApps.length,
       usb: usbEvents.length,
       wifi: wifiEvents.length,
     }),
-    [history.length, inventory.length, usbEvents.length, wifiEvents.length]
+    [history.length, runningApps.length, usbEvents.length, wifiEvents.length]
   );
 
   const formatDuration = (seconds?: number) => {
@@ -384,7 +387,7 @@ export function DeviceDetailPage() {
             Actividad ({tabStats.activity})
           </button>
           <button className={tabClass('inventory')} onClick={() => setTab('inventory')}>
-            Inventario ({tabStats.inventory})
+              Apps abiertas ({tabStats.inventory})
           </button>
           <button className={tabClass('usb')} onClick={() => setTab('usb')}>
             USB ({tabStats.usb})
@@ -519,37 +522,80 @@ export function DeviceDetailPage() {
           )}
 
           {tab === 'inventory' && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr>
-                    <th>Aplicacion</th>
-                    <th>Version</th>
-                    <th>Estado</th>
-                    <th>Hash</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {inventory.length === 0 ? (
-                    <tr>
-                      <td colSpan={4} className="py-8 text-center text-[#8fa0c9]">Sin datos de inventario para este equipo.</td>
-                    </tr>
-                  ) : (
-                    inventory.map((app, idx) => (
-                      <tr key={`${app.app_name}-${idx}`}>
-                        <td className="max-w-[360px] truncate text-[12px] text-[#dce6ff]" title={app.app_name}>{app.app_name}</td>
-                        <td className="text-[12px] text-[#9eb0dc]">{app.version || 'Unknown'}</td>
-                        <td>
-                          <span className={`inline-flex rounded-full px-2.5 py-1 font-mono text-[10px] ${app.verified ? 'border border-[#00ff88]/40 bg-[#00ff88]/10 text-[#00ff88]' : 'border border-red-500/40 bg-red-500/10 text-red-300'}`}>
-                            {app.verified ? 'VERIFIED' : 'UNVERIFIED'}
-                          </span>
-                        </td>
-                        <td className="max-w-[440px] truncate font-mono text-[11px] text-[#91a3d2]" title={app.exe_hash}>{app.exe_hash}</td>
+            <div className="space-y-6">
+              <section className="space-y-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-[#dce6ff]">Aplicaciones abiertas</h3>
+                  <p className="text-xs text-[#8fa0c9]">Lista actual de ventanas visibles del usuario. El panel en vivo sigue mostrando solo la ventana enfocada en este momento.</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr>
+                        <th>Aplicacion</th>
+                        <th>Ventanas</th>
+                        <th>Ventana principal</th>
+                        <th>Ruta</th>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {runningApps.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="py-8 text-center text-[#8fa0c9]">Sin snapshot de apps abiertas para este equipo.</td>
+                        </tr>
+                      ) : (
+                        runningApps.map((app) => (
+                          <tr key={app.id}>
+                            <td className="max-w-[260px] truncate text-[12px] text-[#dce6ff]" title={app.app_name}>{shortAppName(app.app_name)}</td>
+                            <td className="whitespace-nowrap font-mono text-[11px] text-[#00d9ff]">{app.window_count}</td>
+                            <td className="max-w-[420px] truncate text-[12px] text-[#9eb0dc]" title={app.primary_title || 'Sin titulo'}>{app.primary_title || 'Sin titulo'}</td>
+                            <td className="max-w-[360px] truncate font-mono text-[11px] text-[#91a3d2]" title={app.exe_path || ''}>{app.exe_path || 'No disponible'}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section className="space-y-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-[#dce6ff]">Inventario detectado</h3>
+                  <p className="text-xs text-[#8fa0c9]">Listado historico de software detectado en el equipo.</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr>
+                        <th>Aplicacion</th>
+                        <th>Version</th>
+                        <th>Estado</th>
+                        <th>Hash</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {inventory.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="py-8 text-center text-[#8fa0c9]">Sin datos de inventario para este equipo.</td>
+                        </tr>
+                      ) : (
+                        inventory.map((app, idx) => (
+                          <tr key={`${app.app_name}-${idx}`}>
+                            <td className="max-w-[360px] truncate text-[12px] text-[#dce6ff]" title={app.app_name}>{app.app_name}</td>
+                            <td className="text-[12px] text-[#9eb0dc]">{app.version || 'Unknown'}</td>
+                            <td>
+                              <span className={`inline-flex rounded-full px-2.5 py-1 font-mono text-[10px] ${app.verified ? 'border border-[#00ff88]/40 bg-[#00ff88]/10 text-[#00ff88]' : 'border border-red-500/40 bg-red-500/10 text-red-300'}`}>
+                                {app.verified ? 'VERIFIED' : 'UNVERIFIED'}
+                              </span>
+                            </td>
+                            <td className="max-w-[440px] truncate font-mono text-[11px] text-[#91a3d2]" title={app.exe_hash}>{app.exe_hash}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
             </div>
           )}
 

@@ -474,6 +474,58 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+
+    // Spawn open-app snapshot task (visible user windows only)
+    let publisher_clone = publisher.clone();
+    let cache_clone = cache.clone();
+    let auth_token_clone = auth_token.clone();
+    let hostname_clone = hostname.clone();
+    let mac_clone = mac_address.clone();
+    let device_id_clone_for_running_apps = device_identity.device_id.to_string();
+    let envelope_metadata_clone = envelope_metadata.clone();
+    tokio::spawn(async move {
+        let mut monitor = MonitoringLoop::new();
+        let mut interval = interval(Duration::from_secs(20));
+        let mut last_fingerprint = String::new();
+
+        loop {
+            interval.tick().await;
+
+            let apps = monitor.capture_open_apps();
+            let fingerprint = apps
+                .iter()
+                .map(|app| format!("{}|{}|{}", app.app_name, app.window_count, app.primary_title))
+                .collect::<Vec<_>>()
+                .join("||");
+
+            if fingerprint == last_fingerprint {
+                continue;
+            }
+            last_fingerprint = fingerprint;
+
+            let running_apps_payload = build_event_envelope(
+                "running_apps",
+                1,
+                &device_id_clone_for_running_apps,
+                &hostname_clone,
+                &mac_clone,
+                &auth_token_clone,
+                envelope_metadata_clone.as_ref(),
+                serde_json::json!({
+                    "detected_at": Utc::now().to_rfc3339(),
+                    "apps": apps.into_iter().map(|app| serde_json::json!({
+                        "app_name": app.app_name,
+                        "primary_title": app.primary_title,
+                        "window_count": app.window_count,
+                        "exe_path": app.exe_path,
+                        "exe_hash": app.exe_hash,
+                    })).collect::<Vec<_>>()
+                }),
+            );
+
+            publish_or_cache(&publisher_clone, &cache_clone, "running_apps", running_apps_payload).await;
+        }
+    });
     
     // Spawn software inventory scan (initial snapshot + every 7 days only new apps)
     let publisher_clone = publisher.clone();
@@ -711,7 +763,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     
     tracing::info!("✅ Agent started successfully");
-    tracing::info!("📊 Monitoring: focus-activity (2s) | heartbeat (15s) | USB (30s) | WiFi (60s) | inventory (12h) | input summary (60s)");
+    tracing::info!("📊 Monitoring: focus-activity (2s) | heartbeat (15s) | open apps (20s) | USB (30s) | WiFi (60s) | inventory (12h) | input summary (60s)");
     
     // Keep agent running
     loop {

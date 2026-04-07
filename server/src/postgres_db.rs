@@ -25,6 +25,18 @@ pub struct InventoryItem {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunningAppItem {
+    pub id: Uuid,
+    pub device_id: Uuid,
+    pub app_name: String,
+    pub primary_title: String,
+    pub window_count: i32,
+    pub exe_path: Option<String>,
+    pub exe_hash: Option<String>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsbEvent {
     pub id: Uuid,
     pub device_id: Uuid,
@@ -158,6 +170,29 @@ impl Database {
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
             "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS running_apps_current (
+                id UUID PRIMARY KEY,
+                device_id UUID NOT NULL REFERENCES devices(device_id),
+                app_name VARCHAR(255) NOT NULL,
+                primary_title TEXT,
+                window_count INTEGER NOT NULL DEFAULT 1,
+                exe_path TEXT,
+                exe_hash VARCHAR(255),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_running_apps_current_device_updated_at ON running_apps_current(device_id, updated_at DESC)"
         )
         .execute(pool)
         .await?;
@@ -914,6 +949,71 @@ impl Database {
                 version,
                 exe_hash,
                 timestamp,
+            })
+            .collect())
+    }
+
+    pub async fn replace_running_apps_snapshot(
+        &self,
+        device_id: String,
+        apps: Vec<(String, String, i32, Option<String>, Option<String>)>,
+    ) -> Result<(), sqlx::Error> {
+        let device_uuid = Uuid::parse_str(&device_id)
+            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query("DELETE FROM running_apps_current WHERE device_id = $1")
+            .bind(device_uuid)
+            .execute(&mut *tx)
+            .await?;
+
+        let updated_at = Utc::now();
+        for (app_name, primary_title, window_count, exe_path, exe_hash) in apps {
+            sqlx::query(
+                r#"
+                INSERT INTO running_apps_current (id, device_id, app_name, primary_title, window_count, exe_path, exe_hash, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(device_uuid)
+            .bind(app_name)
+            .bind(primary_title)
+            .bind(window_count.max(1))
+            .bind(exe_path)
+            .bind(exe_hash)
+            .bind(updated_at)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn get_running_apps(&self, device_id: Uuid) -> Result<Vec<RunningAppItem>, sqlx::Error> {
+        let rows = sqlx::query_as::<_, (Uuid, Uuid, String, Option<String>, i32, Option<String>, Option<String>, DateTime<Utc>)>(
+            "SELECT id, device_id, app_name, primary_title, window_count, exe_path, exe_hash, updated_at
+             FROM running_apps_current
+             WHERE device_id = $1
+             ORDER BY window_count DESC, updated_at DESC, app_name ASC"
+        )
+        .bind(device_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(id, device_id, app_name, primary_title, window_count, exe_path, exe_hash, updated_at)| RunningAppItem {
+                id,
+                device_id,
+                app_name,
+                primary_title: primary_title.unwrap_or_default(),
+                window_count,
+                exe_path,
+                exe_hash,
+                updated_at,
             })
             .collect())
     }

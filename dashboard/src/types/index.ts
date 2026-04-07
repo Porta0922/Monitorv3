@@ -35,6 +35,17 @@ export interface AppInfo {
   last_detected: string;
 }
 
+export interface RunningAppInfo {
+  id: string;
+  device_id: string;
+  app_name: string;
+  primary_title: string;
+  window_count: number;
+  exe_path?: string;
+  exe_hash?: string;
+  updated_at: string;
+}
+
 export interface USBEvent {
   timestamp: string;
   device_id: string;

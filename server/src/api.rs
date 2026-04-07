@@ -55,6 +55,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/logs/:device_id", get(get_device_logs))
         .route("/inventory/apps", get(list_all_apps))
         .route("/inventory/apps/:device_id", get(list_device_apps))
+        .route("/running_apps/:device_id", get(list_device_running_apps))
         .route("/usb", get(list_usb_events))
         .route("/usb/:device_id", get(list_device_usb_events))
         .route("/wifi", get(list_wifi_events))
@@ -682,6 +683,48 @@ async fn list_device_apps(
             Json(json!({
                 "success": false,
                 "error": "Failed to fetch device inventory apps",
+                "device_id": device_id_str,
+                "apps": []
+            }))
+        }
+    }
+}
+
+async fn list_device_running_apps(
+    State(state): State<Arc<AppState>>,
+    Path(device_id): Path<Uuid>,
+) -> impl IntoResponse {
+    let device_id_str = device_id.to_string();
+
+    match state.db.get_running_apps(device_id).await {
+        Ok(apps) => {
+            let app_json: Vec<serde_json::Value> = apps
+                .into_iter()
+                .map(|app| {
+                    json!({
+                        "id": app.id,
+                        "device_id": app.device_id,
+                        "app_name": app.app_name,
+                        "primary_title": app.primary_title,
+                        "window_count": app.window_count,
+                        "exe_path": app.exe_path,
+                        "exe_hash": app.exe_hash,
+                        "updated_at": app.updated_at.to_rfc3339(),
+                    })
+                })
+                .collect();
+
+            Json(json!({
+                "success": true,
+                "device_id": device_id_str,
+                "apps": app_json
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch running apps: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch running apps",
                 "device_id": device_id_str,
                 "apps": []
             }))

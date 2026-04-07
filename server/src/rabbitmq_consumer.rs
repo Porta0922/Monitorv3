@@ -92,6 +92,22 @@ impl RabbitMQConsumer {
         blocked_keywords.iter().any(|keyword| normalized.contains(keyword))
     }
 
+    fn should_skip_running_app(app_name: &str, primary_title: &str) -> bool {
+        let app = app_name.trim().to_lowercase();
+        let title = primary_title.trim().to_lowercase();
+
+        app.is_empty()
+            || title.is_empty()
+            || app == "explorer.exe"
+            || app == "searchhost.exe"
+            || app == "textinputhost.exe"
+            || app == "shellexperiencehost.exe"
+            || app == "widgets.exe"
+            || title == "program manager"
+            || title == "start"
+            || title == "default ime"
+    }
+
     /// Start RabbitMQ consumer for monitoring events with PostgreSQL database connection
     pub async fn start_consumer(
         rabbitmq_url: &str,
@@ -187,6 +203,13 @@ impl RabbitMQConsumer {
             .map_err(|e| {
                 error!("❌ Failed to setup wifi_queue: {}", e);
                 println!("ERROR CRÍTICO: wifi_queue falló");
+                e
+            })?;
+
+        Self::setup_queue(&channel, "running_apps_queue", "monitoring.running_apps", db.clone(), config.clone(), error_tx.clone()).await
+            .map_err(|e| {
+                error!("❌ Failed to setup running_apps_queue: {}", e);
+                println!("ERROR CRÍTICO: running_apps_queue falló");
                 e
             })?;
 
@@ -337,6 +360,11 @@ impl RabbitMQConsumer {
                                     "wifi_queue" => {
                                         if let Err(e) = Self::handle_wifi_event(&event, &db_clone).await {
                                             warn!("Failed to process wifi event: {}", e);
+                                        }
+                                    }
+                                    "running_apps_queue" => {
+                                        if let Err(e) = Self::handle_running_apps_event(&event, &db_clone).await {
+                                            warn!("Failed to process running_apps event: {}", e);
                                         }
                                     }
                                     _ => {}
@@ -588,6 +616,36 @@ impl RabbitMQConsumer {
             .await?;
 
         info!("✅ WiFi event processed: {} {} ({})", device_id, interface_name, wifi_event.id);
+        Ok(())
+    }
+
+    async fn handle_running_apps_event(event: &Value, db: &Database) -> Result<(), Box<dyn std::error::Error>> {
+        let payload = event.get("payload").unwrap_or(event);
+        let device_id = event["device_id"].as_str().unwrap_or("unknown").to_string();
+        let hostname = event["hostname"].as_str().unwrap_or(&device_id).to_string();
+        let mac_address = event["mac_address"].as_str().map(str::to_string);
+
+        let _ = db.register_device(hostname, device_id.clone(), mac_address, None).await;
+
+        let mut apps = Vec::new();
+        if let Some(items) = payload["apps"].as_array() {
+            for item in items {
+                let app_name = item["app_name"].as_str().unwrap_or("").trim().to_string();
+                let primary_title = item["primary_title"].as_str().unwrap_or("").trim().to_string();
+                let window_count = item["window_count"].as_i64().unwrap_or(1) as i32;
+                let exe_path = item["exe_path"].as_str().map(str::to_string).filter(|value| !value.trim().is_empty());
+                let exe_hash = item["exe_hash"].as_str().map(str::to_string).filter(|value| !value.trim().is_empty());
+
+                if Self::should_skip_running_app(&app_name, &primary_title) {
+                    continue;
+                }
+
+                apps.push((app_name, primary_title, window_count, exe_path, exe_hash));
+            }
+        }
+
+        db.replace_running_apps_snapshot(device_id.clone(), apps).await?;
+        info!("✅ Running apps snapshot processed: {}", device_id);
         Ok(())
     }
 }

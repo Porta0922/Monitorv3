@@ -1,7 +1,7 @@
 // API client for the dashboard
 import axios from 'axios';
 import type { AxiosInstance } from 'axios';
-import type { Device, ActivityLog, AppInfo, USBEvent, WifiEvent, SecurityAlert, LoginResponse } from '../types';
+import type { Device, ActivityLog, AppInfo, RunningAppInfo, USBEvent, WifiEvent, SecurityAlert, LoginResponse } from '../types';
 
 const BASE_URL = 'http://localhost:3000/api';
 
@@ -137,6 +137,11 @@ class ApiClient {
       return response.data.apps || [];
     }
     const response = await this.client.get<{ apps: AppInfo[] }>('/inventory/apps');
+    return response.data.apps || [];
+  }
+
+  async getRunningApps(deviceId: string): Promise<RunningAppInfo[]> {
+    const response = await this.client.get<{ apps: RunningAppInfo[] }>(`/running_apps/${deviceId}`);
     return response.data.apps || [];
   }
 

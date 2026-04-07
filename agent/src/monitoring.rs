@@ -2,6 +2,7 @@
 use chrono::Utc;
 use sysinfo::{System, SystemExt, ProcessExt, PidExt};
 use sha2::{Sha256, Digest};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct ProcessSnapshot {
@@ -16,6 +17,15 @@ pub struct WindowCapture {
     pub app_name: String,
     pub window_title: String,
     pub timestamp: chrono::DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OpenAppSnapshot {
+    pub app_name: String,
+    pub primary_title: String,
+    pub window_count: u32,
+    pub exe_path: Option<String>,
+    pub exe_hash: Option<String>,
 }
 
 pub struct MonitoringLoop {
@@ -52,6 +62,29 @@ impl MonitoringLoop {
         processes
     }
 
+    /// Capture visible user-facing apps that currently have open windows.
+    pub fn capture_open_apps(&mut self) -> Vec<OpenAppSnapshot> {
+        #[cfg(target_os = "windows")]
+        {
+            return capture_open_apps_windows(&mut self.sys);
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            self.capture_processes()
+                .into_iter()
+                .filter(|process| !process.name.trim().is_empty())
+                .map(|process| OpenAppSnapshot {
+                    app_name: process.name,
+                    primary_title: String::new(),
+                    window_count: 1,
+                    exe_path: process.exe_path,
+                    exe_hash: process.exe_hash,
+                })
+                .collect()
+        }
+    }
+
     /// Get currently active window using platform APIs
     pub fn capture_active_window(&self) -> Option<WindowCapture> {
         // Platform-specific implementation
@@ -86,6 +119,145 @@ impl MonitoringLoop {
             tokio::time::sleep(interval).await;
         }
     }
+}
+
+#[cfg(target_os = "windows")]
+fn capture_open_apps_windows(sys: &mut System) -> Vec<OpenAppSnapshot> {
+    use std::path::Path;
+    use winapi::shared::minwindef::{BOOL, LPARAM, TRUE};
+    use winapi::shared::windef::HWND;
+    use winapi::um::winuser::{
+        EnumWindows, GetShellWindow, GetWindowTextLengthW, GetWindowTextW,
+        GetWindowThreadProcessId, IsWindowVisible,
+    };
+
+    #[derive(Debug, Clone)]
+    struct WindowSeed {
+        pid: u32,
+        title: String,
+    }
+
+    unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        if hwnd == GetShellWindow() || IsWindowVisible(hwnd) == 0 {
+            return TRUE;
+        }
+
+        let title_len = GetWindowTextLengthW(hwnd);
+        if title_len <= 0 {
+            return TRUE;
+        }
+
+        let mut title_buffer = vec![0u16; title_len as usize + 1];
+        let copied = GetWindowTextW(hwnd, title_buffer.as_mut_ptr(), title_buffer.len() as i32);
+        if copied <= 0 {
+            return TRUE;
+        }
+
+        let title = String::from_utf16_lossy(&title_buffer[..copied as usize]).trim().to_string();
+        if should_skip_window_title(&title) {
+            return TRUE;
+        }
+
+        let mut process_id: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut process_id);
+        if process_id == 0 {
+            return TRUE;
+        }
+
+        let windows = &mut *(lparam as *mut Vec<WindowSeed>);
+        windows.push(WindowSeed { pid: process_id, title });
+        TRUE
+    }
+
+    fn should_skip_window_title(title: &str) -> bool {
+        let normalized = title.trim().to_lowercase();
+        normalized.is_empty()
+            || normalized == "program manager"
+            || normalized == "windows default lock screen"
+            || normalized == "default ime"
+            || normalized == "msctfime ui"
+            || normalized == "searchhost"
+            || normalized == "start"
+    }
+
+    fn should_skip_process_name(name: &str) -> bool {
+        let normalized = name.trim().to_lowercase();
+        let blocked = [
+            "explorer.exe",
+            "dwm.exe",
+            "textinputhost.exe",
+            "searchhost.exe",
+            "shellexperiencehost.exe",
+            "startmenuexperiencehost.exe",
+            "lockapp.exe",
+            "ctfmon.exe",
+            "widgets.exe",
+        ];
+
+        blocked.iter().any(|candidate| normalized == *candidate)
+    }
+
+    fn display_app_name(process_name: &str, exe_path: &Option<String>) -> String {
+        if let Some(path) = exe_path {
+            if let Some(file_name) = Path::new(path).file_name().and_then(|value| value.to_str()) {
+                return file_name.to_string();
+            }
+        }
+        process_name.to_string()
+    }
+
+    let mut windows = Vec::<WindowSeed>::new();
+    unsafe {
+        EnumWindows(Some(enum_windows_proc), &mut windows as *mut _ as LPARAM);
+    }
+
+    if windows.is_empty() {
+        return Vec::new();
+    }
+
+    sys.refresh_processes();
+
+    let mut grouped: HashMap<String, OpenAppSnapshot> = HashMap::new();
+    for window in windows {
+        let Some(process) = sys.process(sysinfo::Pid::from_u32(window.pid)) else {
+            continue;
+        };
+
+        let exe_path = {
+            let p = process.exe();
+            let path = p.to_string_lossy().trim().to_string();
+            if path.is_empty() { None } else { Some(path) }
+        };
+
+        let process_name = process.name().trim().to_string();
+        if process_name.is_empty() || should_skip_process_name(&process_name) {
+            continue;
+        }
+
+        let app_name = display_app_name(&process_name, &exe_path);
+        let group_key = exe_path.clone().unwrap_or_else(|| app_name.to_lowercase());
+
+        let entry = grouped.entry(group_key).or_insert_with(|| OpenAppSnapshot {
+            app_name,
+            primary_title: window.title.clone(),
+            window_count: 0,
+            exe_hash: exe_path.as_deref().and_then(|path| calculate_file_hash(path).ok()),
+            exe_path: exe_path.clone(),
+        });
+
+        entry.window_count += 1;
+        if entry.primary_title.len() < window.title.len() {
+            entry.primary_title = window.title;
+        }
+    }
+
+    let mut apps: Vec<OpenAppSnapshot> = grouped.into_values().collect();
+    apps.sort_by(|a, b| {
+        b.window_count
+            .cmp(&a.window_count)
+            .then_with(|| a.app_name.to_lowercase().cmp(&b.app_name.to_lowercase()))
+    });
+    apps
 }
 
 /// Calculate SHA-256 hash of a file
