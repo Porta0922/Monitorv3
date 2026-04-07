@@ -4,6 +4,7 @@ mod inventory;
 mod device_id;
 mod rabbitmq_publisher;
 mod usb_detection;
+mod usb_file_copy_detection;
 mod wifi_detection;
 mod input_tracking;
 mod keystroke_tracker;
@@ -431,6 +432,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // Detect file writes/copies to removable USB drives and emit security events.
+    let publisher_clone = publisher.clone();
+    let cache_clone = cache.clone();
+    let device_id_clone = device_id_str.clone();
+    let hostname_clone = hostname.clone();
+    let mac_clone = mac_address.clone();
+    let auth_token_clone = auth_token.clone();
+    let envelope_metadata_clone = envelope_metadata.clone();
+    tokio::spawn(async move {
+        let mut detector = usb_file_copy_detection::UsbFileCopyMonitor::new(900);
+        let mut interval = interval(Duration::from_secs(45));
+
+        loop {
+            interval.tick().await;
+
+            let findings = match detector.scan_recent_writes(180, 20).await {
+                Ok(items) => items,
+                Err(e) => {
+                    tracing::debug!("USB copy detector scan failed: {}", e);
+                    continue;
+                }
+            };
+
+            for finding in findings {
+                let security_payload = build_event_envelope(
+                    "security",
+                    1,
+                    &device_id_clone,
+                    &hostname_clone,
+                    &mac_clone,
+                    &auth_token_clone,
+                    envelope_metadata_clone.as_ref(),
+                    serde_json::json!({
+                        "query_name": "usb_file_copy_detected",
+                        "query_pack": "usb_data_loss_prevention",
+                        "mitre_technique": "T1052.001",
+                        "severity": "HIGH",
+                        "raw_data": {
+                            "source": "usb_copy_monitor",
+                            "drive_letter": finding.drive_letter,
+                            "file_name": finding.file_name,
+                            "file_path": finding.file_path,
+                            "size_bytes": finding.size_bytes,
+                            "modified_utc": finding.modified_utc.to_rfc3339(),
+                        },
+                        "event_fingerprint": finding.fingerprint,
+                    }),
+                );
+
+                publish_or_cache(&publisher_clone, &cache_clone, "security", security_payload).await;
+            }
+        }
+    });
+
     // Spawn WiFi history task
     let mut wifi_monitor = WifiMonitor::new();
     let publisher_clone = publisher.clone();
@@ -800,7 +855,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     
     tracing::info!("✅ Agent started successfully");
-    tracing::info!("📊 Monitoring: focus-activity (2s) | heartbeat (15s) | open apps (20s) | USB (30s) | WiFi (60s) | inventory (12h) | input summary (60s) | osquery (5min)");
+    tracing::info!("📊 Monitoring: focus-activity (2s) | heartbeat (15s) | open apps (20s) | USB (30s) | USB-copy-detect (45s) | WiFi (60s) | inventory (12h) | input summary (60s) | osquery (5min)");
     
     // Keep agent running
     loop {
