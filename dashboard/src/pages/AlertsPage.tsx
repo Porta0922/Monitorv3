@@ -80,7 +80,7 @@ export function AlertsPage() {
     >
       {criticalAlerts.length > 0 && (
         <section className="rounded-xl border border-red-500/40 bg-red-500/10 p-5 shadow-xl">
-          <h3 className="text-lg font-semibold text-red-300">CRITICAL: Process Termination Attempts</h3>
+          <h3 className="text-lg font-semibold text-red-300">CRITICO: Intentos de terminacion de proceso</h3>
           <p className="mt-1 text-sm text-red-200/90">
             Se detectaron {criticalAlerts.length} intentos de terminacion de agente.
           </p>
@@ -109,7 +109,7 @@ export function AlertsPage() {
                     {getAlertIcon(alert.alert_type)} {alert.alert_type}
                   </h3>
                   <p className="mt-1 text-xs text-[#a0a5b2]">
-                    {alert.app_name ? `Application: ${alert.app_name}` : 'System Alert'}
+                    {alert.app_name ? `Aplicacion: ${alert.app_name}` : 'Alerta del sistema'}
                   </p>
                 </div>
                 <span
@@ -123,7 +123,7 @@ export function AlertsPage() {
               <p className="mb-3 text-sm text-[#a0a5b2]">{alert.description}</p>
 
               <div className="mb-4 space-y-1 text-xs text-[#717579]">
-                <p>Created: {new Date(alert.created_at).toLocaleString()}</p>
+                <p>Creada: {new Date(alert.created_at).toLocaleString()}</p>
                 {alert.exe_hash && <p className="font-mono">Hash: {alert.exe_hash.slice(0, 32)}...</p>}
               </div>
 

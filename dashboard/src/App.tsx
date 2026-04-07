@@ -8,6 +8,7 @@ import { USBPage } from './pages/USBPage';
 import { AlertsPage } from './pages/AlertsPage';
 import { SecurityPage } from './pages/SecurityPage';
 import { DeviceDetailPage } from './pages/DeviceDetailPage';
+import { MetricsPage } from './pages/MetricsPage';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -81,6 +82,14 @@ function App() {
           element={
             <PrivateRoute>
               <AlertsPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/metrics"
+          element={
+            <PrivateRoute>
+              <MetricsPage />
             </PrivateRoute>
           }
         />

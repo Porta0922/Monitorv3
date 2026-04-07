@@ -19,8 +19,9 @@ export function Sidebar({ currentPage }: { currentPage: string }) {
   };
 
   const navItems: NavItem[] = [
-    { path: '/dashboard', label: 'Overview', icon: '◆', current: 'dashboard' },
+    { path: '/dashboard', label: 'Resumen', icon: '◆', current: 'dashboard' },
     { path: '/activity', label: 'En Vivo', icon: '◉', current: 'activity' },
+    { path: '/metrics', label: 'Metricas', icon: '◈', current: 'metrics' },
     { path: '/security', label: 'Seguridad', icon: '⬢', current: 'security' },
     { path: '/alerts', label: 'Historial', icon: '◌', current: 'alerts' },
   ];
@@ -94,7 +95,7 @@ export function Sidebar({ currentPage }: { currentPage: string }) {
           className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-[#111c3b] hover:bg-[#163059] text-[#8a97ba] hover:text-[#00d9ff] rounded-md transition-all text-xs"
         >
           <span>◌</span>
-          Logout
+          Cerrar sesion
         </button>
       </div>
     </div>

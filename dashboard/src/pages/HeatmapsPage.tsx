@@ -84,20 +84,20 @@ export function HeatmapsPage() {
           padding: '3px 5px',
           borderRadius: '2px'
         }}>
-          High ← → Low
+          Alto ← → Bajo
         </div>
       </div>
     );
   };
 
   return (
-    <AppShell currentPage="dashboard" title="Heatmaps" subtitle="Mapa de actividad de teclado y mouse">
+    <AppShell currentPage="dashboard" title="Mapas de calor" subtitle="Mapa de actividad de teclado y mouse">
       <section className="rounded-xl border border-[#1e2339] bg-gradient-to-br from-[#131829] to-[#0a0e27] p-6 shadow-2xl">
-        <h2 className="mb-4 text-lg font-semibold text-[#e4e6eb]">Keyboard / Mouse Heatmaps</h2>
+        <h2 className="mb-4 text-lg font-semibold text-[#e4e6eb]">Mapas de calor de teclado y mouse</h2>
 
         <div className="mb-8">
           <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
-            Select Device:
+            Seleccionar dispositivo:
           </label>
           <select
             value={selectedDevice}
@@ -109,16 +109,16 @@ export function HeatmapsPage() {
               fontSize: '1rem'
             }}
           >
-            <option value="">Choose a device...</option>
+            <option value="">Elegir un dispositivo...</option>
             {/* TODO: Load devices from API */}
           </select>
         </div>
 
         {isLoading ? (
-          <div className="py-8 text-center text-[#a0a5b2]">Loading heatmaps...</div>
+          <div className="py-8 text-center text-[#a0a5b2]">Cargando mapas de calor...</div>
         ) : heatmaps.length === 0 ? (
           <div className="rounded-lg border border-[#1e2339] bg-[#0a0e27] px-6 py-8 text-center text-[#a0a5b2]">
-            No heatmap data available. Select a device to view activity.
+            No hay datos de mapa de calor. Selecciona un dispositivo para ver actividad.
           </div>
         ) : (
           <div style={{ display: 'grid', gap: '2rem' }}>
@@ -131,7 +131,7 @@ export function HeatmapsPage() {
                   {/* Heatmap Visualization */}
                   <div>
                     <h3 style={{ margin: '0 0 1rem 0', fontSize: '0.95rem' }}>
-                      Activity Map
+                      Mapa de actividad
                     </h3>
                     {renderHeatmapGrid(heatmap)}
                   </div>
@@ -139,23 +139,23 @@ export function HeatmapsPage() {
                   {/* Statistics */}
                   <div style={{ flex: 1 }}>
                     <h3 style={{ margin: '0 0 1rem 0', fontSize: '0.95rem' }}>
-                      Activity Statistics
+                      Estadisticas de actividad
                     </h3>
                     <div style={{ display: 'grid', gap: '0.5rem' }}>
                       <div style={{ padding: '0.75rem', backgroundColor: '#f9f9f9', borderRadius: '4px' }}>
-                        <p style={{ margin: 0, color: '#666', fontSize: '0.85rem' }}>Mouse Movements</p>
+                        <p style={{ margin: 0, color: '#666', fontSize: '0.85rem' }}>Movimientos de mouse</p>
                         <p style={{ margin: '0.25rem 0 0 0', fontSize: '1.5rem', fontWeight: 'bold', color: '#0066cc' }}>
                           {heatmap.stats.mouse_moves}
                         </p>
                       </div>
                       <div style={{ padding: '0.75rem', backgroundColor: '#f9f9f9', borderRadius: '4px' }}>
-                        <p style={{ margin: 0, color: '#666', fontSize: '0.85rem' }}>Mouse Clicks</p>
+                        <p style={{ margin: 0, color: '#666', fontSize: '0.85rem' }}>Clics de mouse</p>
                         <p style={{ margin: '0.25rem 0 0 0', fontSize: '1.5rem', fontWeight: 'bold', color: '#ff6600' }}>
                           {heatmap.stats.mouse_clicks}
                         </p>
                       </div>
                       <div style={{ padding: '0.75rem', backgroundColor: '#f9f9f9', borderRadius: '4px' }}>
-                        <p style={{ margin: 0, color: '#666', fontSize: '0.85rem' }}>Keyboard Events</p>
+                        <p style={{ margin: 0, color: '#666', fontSize: '0.85rem' }}>Eventos de teclado</p>
                         <p style={{ margin: '0.25rem 0 0 0', fontSize: '1.5rem', fontWeight: 'bold', color: '#00cc66' }}>
                           {heatmap.stats.keyboard_events}
                         </p>

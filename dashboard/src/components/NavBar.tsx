@@ -48,7 +48,7 @@ export function NavBar({ currentPage }: NavBarProps) {
           onClick={() => navigate('/dashboard')}
           style={navButtonStyle(currentPage === 'dashboard')}
         >
-          📊 Dashboard
+          📊 Resumen
         </button>
         <button
           onClick={() => navigate('/activity')}
@@ -72,7 +72,13 @@ export function NavBar({ currentPage }: NavBarProps) {
           onClick={() => navigate('/alerts')}
           style={navButtonStyle(currentPage === 'alerts')}
         >
-          🚨 Alerts
+          🚨 Historial
+        </button>
+        <button
+          onClick={() => navigate('/metrics')}
+          style={navButtonStyle(currentPage === 'metrics')}
+        >
+          📊 Metricas
         </button>
       </div>
 
@@ -88,7 +94,7 @@ export function NavBar({ currentPage }: NavBarProps) {
           fontSize: '0.85rem',
         }}
       >
-        Logout
+        Cerrar sesion
       </button>
     </div>
   );

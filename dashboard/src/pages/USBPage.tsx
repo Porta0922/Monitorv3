@@ -51,8 +51,8 @@ export function USBPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[#1e2339] bg-[#0a0e27]">
-                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Timestamp</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Device</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Fecha/Hora</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Dispositivo</th>
                   <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Nombre</th>
                   <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Serial</th>
                   <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Accion</th>
@@ -73,7 +73,7 @@ export function USBPage() {
                             : 'border-red-400/50 bg-red-500/10 text-red-400'
                         }`}
                       >
-                        {event.action === 'IN' ? 'Connected' : 'Disconnected'}
+                        {event.action === 'IN' ? 'Conectado' : 'Desconectado'}
                       </span>
                     </td>
                   </tr>

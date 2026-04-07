@@ -61,7 +61,7 @@ export function InventoryPage() {
                 {apps.slice(0, 120).map((app, idx) => (
                   <tr key={`${app.app_name}-${idx}`} className="border-b border-[#1e2339] hover:bg-[#131829]">
                     <td className="px-6 py-3 font-medium text-[#e4e6eb]">{app.app_name}</td>
-                    <td className="px-6 py-3 text-[#a0a5b2]">{app.version || 'Unknown'}</td>
+                    <td className="px-6 py-3 text-[#a0a5b2]">{app.version || 'Desconocida'}</td>
                     <td className="px-6 py-3">
                       <span
                         className={`rounded-full border px-3 py-1 text-xs font-semibold ${
@@ -70,7 +70,7 @@ export function InventoryPage() {
                             : 'border-red-400/50 bg-red-500/10 text-red-400'
                         }`}
                       >
-                        {app.verified ? 'Verified' : 'Unverified'}
+                        {app.verified ? 'Verificada' : 'No verificada'}
                       </span>
                     </td>
                     <td className="max-w-[380px] truncate px-6 py-3 font-mono text-xs text-[#a0a5b2]">{app.exe_hash}</td>

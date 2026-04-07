@@ -87,7 +87,7 @@ export function DashboardPage() {
   return (
     <AppShell
       currentPage="dashboard"
-      title="AME Command Center"
+      title="Centro de Mando AME"
       subtitle="Visibilidad operativa de actividad por dispositivo"
       noScroll
       actions={
@@ -95,7 +95,7 @@ export function DashboardPage() {
           onClick={loadDevices}
           className="rounded-full border border-[#00d9ff]/50 bg-[#00d9ff]/10 px-4 py-2 font-mono text-xs font-semibold tracking-wide text-[#00d9ff] hover:border-[#00d9ff] hover:bg-[#00d9ff]/20"
         >
-          Sync
+          Actualizar
         </button>
       }
     >

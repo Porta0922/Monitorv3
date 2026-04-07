@@ -284,6 +284,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(2));
         let mut last_window: Option<(String, String, DateTime<Utc>)> = None;
+        let mut last_heartbeat_sent: Option<DateTime<Utc>> = None;
 
         loop {
             interval.tick().await;
@@ -296,7 +297,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 if let Some((last_app, last_title, started_at)) = &last_window {
                     let changed = *last_app != current_app || *last_title != current_title;
+                    
                     if changed {
+                        // Window changed: send activity event for previous window
                         let duration_seconds = (current.timestamp - *started_at).num_seconds().max(1);
                         let activity_payload = build_event_envelope(
                             "activity",
@@ -315,11 +318,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         );
 
                         publish_or_cache(&publisher_clone, &cache_clone, "activity", activity_payload).await;
+                        last_window = Some((current_app.clone(), current_title.clone(), current.timestamp));
+                        last_heartbeat_sent = Some(current.timestamp);
+                    } else {
+                        // Window unchanged: send activity heartbeat every 30 seconds to show continuation
+                        let now = current.timestamp;
+                        let should_send_heartbeat = last_heartbeat_sent.is_none() || 
+                            (now - last_heartbeat_sent.unwrap()).num_seconds() >= 30;
+                        
+                        if should_send_heartbeat {
+                            let duration_seconds = (now - *started_at).num_seconds().max(1);
+                            let activity_payload = build_event_envelope(
+                                "activity",
+                                1,
+                                &device_id_clone_for_activity,
+                                &hostname_clone_for_activity,
+                                &mac_clone_for_activity,
+                                &auth_token_clone,
+                                envelope_metadata_clone.as_ref(),
+                                serde_json::json!({
+                                    "app_name": last_app,
+                                    "window_title": last_title,
+                                    "duration_seconds": duration_seconds,
+                                    "timestamp": now.to_rfc3339(),
+                                }),
+                            );
 
-                        last_window = Some((current_app, current_title, current.timestamp));
+                            publish_or_cache(&publisher_clone, &cache_clone, "activity", activity_payload).await;
+                            last_heartbeat_sent = Some(now);
+                        }
                     }
                 } else {
+                    // Initial window capture on startup
                     last_window = Some((current_app, current_title, current.timestamp));
+                    last_heartbeat_sent = Some(current.timestamp);
+                    
+                    // Send initial activity event
+                    let activity_payload = build_event_envelope(
+                        "activity",
+                        1,
+                        &device_id_clone_for_activity,
+                        &hostname_clone_for_activity,
+                        &mac_clone_for_activity,
+                        &auth_token_clone,
+                        envelope_metadata_clone.as_ref(),
+                        serde_json::json!({
+                            "app_name": current.app_name,
+                            "window_title": current.window_title,
+                            "duration_seconds": 0,
+                            "timestamp": current.timestamp.to_rfc3339(),
+                        }),
+                    );
+
+                    publish_or_cache(&publisher_clone, &cache_clone, "activity", activity_payload).await;
                 }
             }
         }
