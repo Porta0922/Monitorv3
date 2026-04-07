@@ -1,59 +1,39 @@
-// osquery runner: executes MITRE ATT&CK-mapped queries via osqueryi and returns findings.
-// Silent no-op when osqueryi is not installed.
+// osquery runner with per-query scheduling to avoid overloading endpoints.
+use std::collections::HashMap;
+
+use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-/// A security finding produced by one osquery SQL query.
 #[derive(Debug, Clone)]
 pub struct OsqueryFinding {
     pub query_name: String,
     pub query_pack: String,
     pub mitre_technique: Option<String>,
     pub severity: String,
-    /// Up to MAX_ROWS rows returned by osquery (JSON objects).
     pub raw_data: Vec<Value>,
-    /// SHA-256 of query_name + row content — used for server-side dedup.
     pub event_fingerprint: Option<String>,
 }
-
-// ─── Query catalogue ────────────────────────────────────────────────────────
 
 struct QueryDef {
     name: &'static str,
     pack: &'static str,
     mitre_technique: Option<&'static str>,
     severity: &'static str,
+    interval_seconds: i64,
+    max_rows: usize,
     sql: &'static str,
 }
 
-/// Max rows to include per finding to keep payloads bounded.
-const MAX_ROWS: usize = 50;
-
 static QUERIES: &[QueryDef] = &[
-    // T1053.005 – hidden scheduled tasks (Windows + macOS)
-    QueryDef {
-        name: "scheduled_tasks_hidden",
-        pack: "attck_t1053",
-        mitre_technique: Some("T1053.005"),
-        severity: "HIGH",
-        sql: "SELECT name, action, path, enabled, hidden \
-              FROM scheduled_tasks WHERE hidden = 1;",
-    },
-    // T1547.001 – persistence via Registry Run keys
-    QueryDef {
-        name: "autorun_registry_keys",
-        pack: "attck_t1547",
-        mitre_technique: Some("T1547.001"),
-        severity: "MEDIUM",
-        sql: "SELECT name, path, source, status, username \
-              FROM autoexec WHERE source LIKE 'Registry%';",
-    },
-    // T1059.001 – PowerShell with encoded-command or bypass flag
+    // Fast/high-risk checks (every 5 minutes)
     QueryDef {
         name: "powershell_encoded_commands",
-        pack: "attck_t1059",
+        pack: "custom_attack_surface",
         mitre_technique: Some("T1059.001"),
         severity: "HIGH",
+        interval_seconds: 300,
+        max_rows: 50,
         sql: "SELECT pid, name, path, cmdline \
               FROM processes \
               WHERE (name LIKE '%powershell%' OR name LIKE '%pwsh%') \
@@ -61,120 +41,188 @@ static QUERIES: &[QueryDef] = &[
                   OR cmdline LIKE '%-EncodedCommand%' \
                   OR cmdline LIKE '%bypass%');",
     },
-    // T1036 – masquerading: unsigned binaries running from Windows system paths
     QueryDef {
-        name: "unsigned_system_path_processes",
-        pack: "attck_t1036",
-        mitre_technique: Some("T1036"),
-        severity: "MEDIUM",
-        sql: "SELECT p.pid, p.name, p.path, a.signed \
-              FROM processes p \
-              JOIN authenticode a ON p.path = a.path \
-              WHERE a.signed = '0' AND p.path LIKE 'C:\\Windows\\%';",
-    },
-    // T1105 – ingress tool transfer: executables running from Temp
-    QueryDef {
-        name: "executable_in_temp_paths",
-        pack: "attck_t1105",
+        name: "powershell_download_cradles",
+        pack: "custom_attack_surface",
         mitre_technique: Some("T1105"),
         severity: "HIGH",
-        sql: "SELECT pid, name, path, cmdline \
+        interval_seconds: 300,
+        max_rows: 50,
+        sql: "SELECT pid, name, cmdline \
               FROM processes \
-              WHERE (path LIKE '%\\Temp\\%' OR path LIKE '%AppData%\\Temp%') \
-                AND (name LIKE '%.exe' OR name LIKE '%.bat' OR name LIKE '%.ps1');",
+              WHERE (name LIKE '%powershell%' OR name LIKE '%pwsh%') \
+                AND (cmdline LIKE '%Invoke-WebRequest%' \
+                  OR cmdline LIKE '%iwr %' \
+                  OR cmdline LIKE '%DownloadString%' \
+                  OR cmdline LIKE '%Net.WebClient%');",
     },
-    // T1021 – remote services: non-loopback listening ports outside expected set
+    QueryDef {
+        name: "suspicious_script_hosts",
+        pack: "custom_attack_surface",
+        mitre_technique: Some("T1059.005"),
+        severity: "MEDIUM",
+        interval_seconds: 300,
+        max_rows: 60,
+        sql: "SELECT pid, name, cmdline, path \
+              FROM processes \
+              WHERE name IN ('wscript.exe', 'cscript.exe', 'mshta.exe') \
+                AND (cmdline LIKE '%http%' \
+                  OR cmdline LIKE '%\\\\%'
+                  OR cmdline LIKE '%.js%'
+                  OR cmdline LIKE '%.vbs%');",
+    },
+    // Medium checks (every 10 minutes)
     QueryDef {
         name: "unusual_listening_ports",
-        pack: "attck_t1021",
+        pack: "custom_network",
         mitre_technique: Some("T1021"),
         severity: "MEDIUM",
+        interval_seconds: 600,
+        max_rows: 100,
         sql: "SELECT pid, port, protocol, address \
               FROM listening_ports \
               WHERE port > 1024 \
                 AND port NOT IN (3389, 5900, 8080, 8443, 9000, 49152) \
                 AND address NOT IN ('127.0.0.1', '::1', '0.0.0.0');",
     },
-    // T1547.009 – shortcut / startup item persistence
     QueryDef {
-        name: "startup_items",
-        pack: "attck_t1547",
-        mitre_technique: Some("T1547.009"),
-        severity: "LOW",
-        sql: "SELECT name, path, args, type, source, status, username \
-              FROM startup_items;",
+        name: "executable_in_temp_paths",
+        pack: "custom_execution_paths",
+        mitre_technique: Some("T1105"),
+        severity: "HIGH",
+        interval_seconds: 600,
+        max_rows: 80,
+        sql: "SELECT pid, name, path, cmdline \
+              FROM processes \
+              WHERE (path LIKE '%\\Temp\\%' OR path LIKE '%AppData%\\Temp%') \
+                AND (name LIKE '%.exe' OR name LIKE '%.bat' OR name LIKE '%.ps1');",
     },
-    // T1057 – process discovery: short-lived cmd.exe spawned by unusual parents
+    QueryDef {
+        name: "lolbins_with_remote_content",
+        pack: "custom_lolbins",
+        mitre_technique: Some("T1218"),
+        severity: "HIGH",
+        interval_seconds: 600,
+        max_rows: 50,
+        sql: "SELECT pid, name, cmdline, path \
+              FROM processes \
+              WHERE name IN ('regsvr32.exe', 'rundll32.exe', 'mshta.exe', 'certutil.exe', 'bitsadmin.exe') \
+                AND (cmdline LIKE '%http%' OR cmdline LIKE '%https%');",
+    },
+    // Slower baseline checks (every 20-30 minutes)
+    QueryDef {
+        name: "scheduled_tasks_hidden",
+        pack: "custom_persistence",
+        mitre_technique: Some("T1053.005"),
+        severity: "HIGH",
+        interval_seconds: 1200,
+        max_rows: 200,
+        sql: "SELECT name, action, path, enabled, hidden \
+              FROM scheduled_tasks WHERE hidden = 1;",
+    },
+    QueryDef {
+        name: "autorun_registry_keys",
+        pack: "custom_persistence",
+        mitre_technique: Some("T1547.001"),
+        severity: "MEDIUM",
+        interval_seconds: 1200,
+        max_rows: 200,
+        sql: "SELECT name, path, source, status, username \
+              FROM autoexec WHERE source LIKE 'Registry%';",
+    },
     QueryDef {
         name: "cmd_spawned_by_unusual_parent",
-        pack: "attck_t1059",
+        pack: "custom_process_chain",
         mitre_technique: Some("T1059.003"),
         severity: "MEDIUM",
+        interval_seconds: 1200,
+        max_rows: 80,
         sql: "SELECT p.pid, p.name, p.cmdline, p.path, pp.name AS parent_name \
               FROM processes p \
               JOIN processes pp ON p.parent = pp.pid \
               WHERE p.name IN ('cmd.exe', 'wscript.exe', 'cscript.exe') \
                 AND pp.name NOT IN ('explorer.exe', 'svchost.exe', 'cmd.exe', 'pwsh.exe', 'WindowsTerminal.exe');",
     },
+    QueryDef {
+        name: "unsigned_system_path_processes",
+        pack: "custom_masquerading",
+        mitre_technique: Some("T1036"),
+        severity: "MEDIUM",
+        interval_seconds: 1800,
+        max_rows: 120,
+        sql: "SELECT p.pid, p.name, p.path, a.signed \
+              FROM processes p \
+              JOIN authenticode a ON p.path = a.path \
+              WHERE a.signed = '0' AND p.path LIKE 'C:\\Windows\\%';",
+    },
+    QueryDef {
+        name: "startup_items_persistence",
+        pack: "custom_persistence",
+        mitre_technique: Some("T1547.009"),
+        severity: "LOW",
+        interval_seconds: 1800,
+        max_rows: 200,
+        sql: "SELECT name, path, args, type, source, status, username \
+              FROM startup_items;",
+    },
 ];
 
-// ─── Runner ─────────────────────────────────────────────────────────────────
-
-pub struct OsqueryRunner;
+pub struct OsqueryRunner {
+    last_run: HashMap<&'static str, DateTime<Utc>>,
+}
 
 impl OsqueryRunner {
-    /// Run all registered queries against the local osqueryi binary.
-    /// Returns an empty vec (without logging errors) when osqueryi is absent.
-    pub async fn scan_once() -> Vec<OsqueryFinding> {
+    pub fn new() -> Self {
+        Self {
+            last_run: HashMap::new(),
+        }
+    }
+
+    pub async fn scan_due(&mut self) -> Vec<OsqueryFinding> {
         let Some(osqueryi) = Self::find_osqueryi() else {
-            tracing::debug!("osqueryi not found – skipping security scan");
+            tracing::debug!("osqueryi not found, skipping security scan");
             return vec![];
         };
 
-        tracing::debug!("osquery security scan starting ({} queries)", QUERIES.len());
-
+        let now = Utc::now();
         let mut findings = Vec::new();
 
         for query in QUERIES {
+            if !self.is_due(query, now) {
+                continue;
+            }
+
+            self.last_run.insert(query.name, now);
+
             match Self::run_query(&osqueryi, query).await {
                 Ok(rows) if !rows.is_empty() => {
-                    tracing::info!(
-                        "🛡️  osquery '{}': {} row(s) detected (MITRE: {})",
-                        query.name,
-                        rows.len(),
-                        query.mitre_technique.unwrap_or("-")
-                    );
-                    let capped: Vec<Value> = rows.into_iter().take(MAX_ROWS).collect();
+                    let capped: Vec<Value> = rows.into_iter().take(query.max_rows).collect();
                     let fp = Self::fingerprint(query.name, &capped);
                     findings.push(OsqueryFinding {
                         query_name: query.name.to_string(),
                         query_pack: query.pack.to_string(),
-                        mitre_technique: query.mitre_technique.map(|s| s.to_string()),
+                        mitre_technique: query.mitre_technique.map(str::to_string),
                         severity: query.severity.to_string(),
                         raw_data: capped,
                         event_fingerprint: Some(fp),
                     });
                 }
-                Ok(_) => {
-                    tracing::debug!("osquery '{}': no results", query.name);
-                }
+                Ok(_) => {}
                 Err(e) => {
-                    // Table may not exist on this OS — log at debug, not warn.
                     tracing::debug!("osquery '{}' error: {}", query.name, e);
                 }
             }
         }
 
-        tracing::debug!(
-            "osquery scan complete: {}/{} queries produced findings",
-            findings.len(),
-            QUERIES.len()
-        );
-
         findings
     }
 
-    // ── osqueryi location ────────────────────────────────────────────────────
+    fn is_due(&self, query: &QueryDef, now: DateTime<Utc>) -> bool {
+        match self.last_run.get(query.name) {
+            None => true,
+            Some(last) => now.signed_duration_since(*last) >= Duration::seconds(query.interval_seconds.max(60)),
+        }
+    }
 
     fn find_osqueryi() -> Option<String> {
         #[cfg(target_os = "windows")]
@@ -204,7 +252,6 @@ impl OsqueryRunner {
             }
         }
 
-        // Last resort: check PATH via `where` (Windows) / `which` (Unix)
         #[cfg(target_os = "windows")]
         let locator = "where";
         #[cfg(not(target_os = "windows"))]
@@ -222,16 +269,10 @@ impl OsqueryRunner {
         None
     }
 
-    // ── Query execution ──────────────────────────────────────────────────────
-
-    async fn run_query(
-        osqueryi: &str,
-        query: &QueryDef,
-    ) -> Result<Vec<Value>, String> {
+    async fn run_query(osqueryi: &str, query: &QueryDef) -> Result<Vec<Value>, String> {
         let output = tokio::process::Command::new(osqueryi)
             .args(["--json", query.sql])
-            // Prevent osqueryi from inheriting the agent's console on Windows.
-            .creation_flags_if_windows(0x0800_0000) // CREATE_NO_WINDOW
+            .creation_flags_if_windows(0x0800_0000)
             .kill_on_drop(true)
             .output()
             .await
@@ -240,8 +281,7 @@ impl OsqueryRunner {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
 
-        // osqueryi exits 0 even on unsupported table; stderr contains the hint.
-        if !stderr.is_empty() {
+        if !stderr.trim().is_empty() {
             tracing::trace!("osquery '{}' stderr: {}", query.name, stderr.trim());
         }
 
@@ -250,8 +290,6 @@ impl OsqueryRunner {
 
         Ok(rows)
     }
-
-    // ── Fingerprint ──────────────────────────────────────────────────────────
 
     fn fingerprint(query_name: &str, rows: &[Value]) -> String {
         let mut hasher = Sha256::new();
@@ -262,8 +300,6 @@ impl OsqueryRunner {
         hex::encode(hasher.finalize())
     }
 }
-
-// ─── Platform helper trait ───────────────────────────────────────────────────
 
 trait CommandExt {
     fn creation_flags_if_windows(&mut self, flags: u32) -> &mut Self;

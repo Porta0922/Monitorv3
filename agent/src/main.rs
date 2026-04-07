@@ -779,41 +779,57 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // ── osquery security scan (every 5 minutes) ──────────────────────────────
-    let publisher_clone = publisher.clone();
-    let cache_clone = cache.clone();
-    let device_id_clone = device_id_str.clone();
-    let hostname_clone = hostname.clone();
-    let mac_clone = mac_address.clone();
-    let auth_token_clone = auth_token.clone();
-    let envelope_metadata_clone = envelope_metadata.clone();
-    tokio::spawn(async move {
-        let mut scan_interval = interval(Duration::from_secs(300));
-        loop {
-            scan_interval.tick().await;
-            let findings = osquery_runner::OsqueryRunner::scan_once().await;
-            for finding in findings {
-                let security_payload = build_event_envelope(
-                    "security",
-                    1,
-                    &device_id_clone,
-                    &hostname_clone,
-                    &mac_clone,
-                    &auth_token_clone,
-                    envelope_metadata_clone.as_ref(),
-                    serde_json::json!({
-                        "query_name":        finding.query_name,
-                        "query_pack":        finding.query_pack,
-                        "mitre_technique":   finding.mitre_technique,
-                        "severity":          finding.severity,
-                        "raw_data":          finding.raw_data,
-                        "event_fingerprint": finding.event_fingerprint,
-                    }),
-                );
-                publish_or_cache(&publisher_clone, &cache_clone, "security", security_payload).await;
+    // ── osquery security scan scheduler (configurable; disabled by default) ─
+    let osquery_scheduler_seconds = std::env::var("AGENT_OSQUERY_SCHEDULER_SECONDS")
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .or_else(|| {
+            std::env::var("AGENT_OSQUERY_INTERVAL_SECONDS")
+                .ok()
+                .and_then(|raw| raw.parse::<u64>().ok())
+        })
+        .unwrap_or(0);
+
+    if osquery_scheduler_seconds > 0 {
+        let publisher_clone = publisher.clone();
+        let cache_clone = cache.clone();
+        let device_id_clone = device_id_str.clone();
+        let hostname_clone = hostname.clone();
+        let mac_clone = mac_address.clone();
+        let auth_token_clone = auth_token.clone();
+        let envelope_metadata_clone = envelope_metadata.clone();
+        tokio::spawn(async move {
+            let mut runner = osquery_runner::OsqueryRunner::new();
+            let mut scan_interval = interval(Duration::from_secs(osquery_scheduler_seconds.max(30)));
+            loop {
+                scan_interval.tick().await;
+                let findings = runner.scan_due().await;
+                for finding in findings {
+                    let security_payload = build_event_envelope(
+                        "security",
+                        1,
+                        &device_id_clone,
+                        &hostname_clone,
+                        &mac_clone,
+                        &auth_token_clone,
+                        envelope_metadata_clone.as_ref(),
+                        serde_json::json!({
+                            "query_name":        finding.query_name,
+                            "query_pack":        finding.query_pack,
+                            "mitre_technique":   finding.mitre_technique,
+                            "severity":          finding.severity,
+                            "raw_data":          finding.raw_data,
+                            "event_fingerprint": finding.event_fingerprint,
+                        }),
+                    );
+                    publish_or_cache(&publisher_clone, &cache_clone, "security", security_payload).await;
+                }
             }
-        }
-    });
+        });
+        tracing::info!("✅ osquery security scheduler enabled ({}s tick; per-query cadence managed internally)", osquery_scheduler_seconds.max(30));
+    } else {
+        tracing::info!("ℹ️ osquery security scan disabled (set AGENT_OSQUERY_SCHEDULER_SECONDS>0 to enable)");
+    }
 
     // Retry unsynced cached events in FIFO order
     let publisher_clone = publisher.clone();
@@ -855,7 +871,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     
     tracing::info!("✅ Agent started successfully");
-    tracing::info!("📊 Monitoring: focus-activity (2s) | heartbeat (15s) | open apps (20s) | USB (30s) | USB-copy-detect (45s) | WiFi (60s) | inventory (12h) | input summary (60s) | osquery (5min)");
+    tracing::info!("📊 Monitoring: focus-activity (2s) | heartbeat (15s) | open apps (20s) | USB (30s) | USB-copy-detect (45s) | WiFi (60s) | inventory (12h) | input summary (60s) | osquery (configurable)");
     
     // Keep agent running
     loop {

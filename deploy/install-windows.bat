@@ -21,6 +21,9 @@ set NSSM_PATH=%~dp0\nssm.exe
 set CONFIG_DIR=%PROGRAMDATA%\ActivityMonitor
 set LOG_DIR=%PROGRAMDATA%\ActivityMonitor\logs
 set ENV_FILE=%CONFIG_DIR%\.env
+set OSQUERY_VERSION=5.12.1
+set OSQUERY_MSI_URL=https://github.com/osquery/osquery/releases/download/%OSQUERY_VERSION%/osquery-%OSQUERY_VERSION%.msi
+set OSQUERY_MSI_PATH=%TEMP%\osquery-%OSQUERY_VERSION%.msi
 set AGENT_AUTH_TOKEN=dev-agent-token
 set AGENT_OFFLINE_CACHE_KEY=replace-with-32-byte-cache-key!!
 
@@ -61,6 +64,28 @@ if not exist "%AGENT_PATH%" (
     exit /b 1
 )
 echo [+] Found agent binary: %AGENT_PATH%
+
+REM Install osquery if not present
+if not exist "C:\Program Files\osquery\osqueryi.exe" (
+    echo [*] osquery not found. Installing osquery %OSQUERY_VERSION%...
+    powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -Uri '%OSQUERY_MSI_URL%' -OutFile '%OSQUERY_MSI_PATH%'"
+    if not exist "%OSQUERY_MSI_PATH%" (
+        echo [-] Failed to download osquery MSI
+        pause
+        exit /b 1
+    )
+
+    msiexec /i "%OSQUERY_MSI_PATH%" /qn /norestart
+    if %errorLevel% neq 0 (
+        echo [-] osquery installation failed
+        pause
+        exit /b 1
+    )
+
+    echo [+] osquery installed successfully
+) else (
+    echo [+] osquery already installed
+)
 
 REM Download NSSM if not present
 if not exist "%NSSM_PATH%" (
