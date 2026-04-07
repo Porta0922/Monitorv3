@@ -213,6 +213,13 @@ impl RabbitMQConsumer {
                 e
             })?;
 
+        Self::setup_queue(&channel, "security_queue", "monitoring.security", db.clone(), config.clone(), error_tx.clone()).await
+            .map_err(|e| {
+                error!("❌ Failed to setup security_queue: {}", e);
+                println!("ERROR CRÍTICO: security_queue falló");
+                e
+            })?;;
+
         println!("");
         println!("✅ RabbitMQ Queues initialized");
         println!("========================================");
@@ -365,6 +372,11 @@ impl RabbitMQConsumer {
                                     "running_apps_queue" => {
                                         if let Err(e) = Self::handle_running_apps_event(&event, &db_clone).await {
                                             warn!("Failed to process running_apps event: {}", e);
+                                        }
+                                    }
+                                    "security_queue" => {
+                                        if let Err(e) = Self::handle_security_event(&event, &db_clone).await {
+                                            warn!("Failed to process security event: {}", e);
                                         }
                                     }
                                     _ => {}
@@ -646,6 +658,46 @@ impl RabbitMQConsumer {
 
         db.replace_running_apps_snapshot(device_id.clone(), apps).await?;
         info!("✅ Running apps snapshot processed: {}", device_id);
+        Ok(())
+    }
+
+    async fn handle_security_event(event: &Value, db: &Database) -> Result<(), Box<dyn std::error::Error>> {
+        let payload = event.get("payload").unwrap_or(event);
+        let device_id = event["device_id"].as_str().unwrap_or("unknown").to_string();
+        let hostname   = event["hostname"].as_str().unwrap_or(&device_id).to_string();
+        let mac_address = event["mac_address"].as_str().map(str::to_string);
+
+        let _ = db.register_device(hostname, device_id.clone(), mac_address, None).await;
+
+        let query_name = payload["query_name"].as_str().unwrap_or("unknown_query").to_string();
+        let query_pack = payload["query_pack"].as_str().map(str::to_string);
+        let mitre_technique = payload["mitre_technique"].as_str().map(str::to_string);
+        let severity = payload["severity"].as_str().unwrap_or("LOW").to_uppercase();
+        let raw_data = payload["raw_data"].clone();
+        let event_fingerprint = payload["event_fingerprint"].as_str().map(str::to_string);
+
+        let timestamp = event
+            .get("timestamp")
+            .and_then(|v| v.as_str())
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+            .unwrap_or_else(chrono::Utc::now);
+
+        match db.insert_security_event(
+            device_id.clone(),
+            query_name.clone(),
+            query_pack,
+            mitre_technique.clone(),
+            severity.clone(),
+            raw_data,
+            event_fingerprint,
+            timestamp,
+        ).await {
+            Ok(ev) => info!("✅ Security event stored: id={} query={} technique={:?} severity={}",
+                ev.id, query_name, mitre_technique, severity),
+            Err(e) => warn!("Failed to store security event for {}: {}", device_id, e),
+        }
+
         Ok(())
     }
 }

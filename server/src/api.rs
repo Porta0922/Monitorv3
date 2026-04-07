@@ -79,6 +79,11 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/alerts/:device_id", get(list_device_alerts))
         .route("/alerts/:alert_id/resolve", patch(resolve_alert))
         .route("/alerts/process-protection", post(record_termination_attempt))
+
+        // Security Events (osquery + MITRE ATT&CK)
+        .route("/security", get(list_security_events))
+        .route("/security/summary", get(get_security_summary))
+        .route("/security/:device_id", get(list_device_security_events))
         
         // Apply JWT middleware to protected routes only
         .layer(axum::middleware::from_fn(verify_jwt_middleware))
@@ -1291,6 +1296,151 @@ async fn export_csv(
                 "error": "Failed to export csv"
             }))
             .into_response()
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct SecurityEventFilters {
+    device_id:        Option<String>,
+    from:             Option<String>,
+    to:               Option<String>,
+    hours:            Option<i64>,
+    severity:         Option<String>,
+    mitre_technique:  Option<String>,
+    limit:            Option<i64>,
+}
+
+fn parse_security_time_bounds(
+    filters: &SecurityEventFilters,
+) -> (Option<chrono::DateTime<Utc>>, Option<chrono::DateTime<Utc>>) {
+    let from = filters
+        .from
+        .as_deref()
+        .and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())
+        .map(|v| v.with_timezone(&Utc));
+    let to = filters
+        .to
+        .as_deref()
+        .and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())
+        .map(|v| v.with_timezone(&Utc));
+    if from.is_none() {
+        if let Some(h) = filters.hours {
+            if h > 0 {
+                return (Some(Utc::now() - Duration::hours(h)), to);
+            }
+        }
+    }
+    (from, to)
+}
+
+async fn list_security_events(
+    State(state): State<Arc<AppState>>,
+    Query(filters): Query<SecurityEventFilters>,
+) -> impl IntoResponse {
+    let (from, to) = parse_security_time_bounds(&filters);
+    let device_uuid = filters
+        .device_id
+        .as_deref()
+        .and_then(|v| Uuid::parse_str(v).ok());
+    let limit = filters.limit.unwrap_or(200).min(1000);
+    match state
+        .db
+        .get_security_events(device_uuid, from, to, filters.severity.as_deref(), filters.mitre_technique.as_deref(), limit)
+        .await
+    {
+        Ok(events) => Json(json!({
+            "success": true,
+            "events": events.iter().map(|e| json!({
+                "id":               e.id,
+                "timestamp":        e.timestamp.to_rfc3339(),
+                "device_id":        e.device_id,
+                "query_name":       e.query_name,
+                "query_pack":       e.query_pack,
+                "mitre_technique":  e.mitre_technique,
+                "severity":         e.severity,
+                "raw_data":         e.raw_data,
+                "created_at":       e.created_at.to_rfc3339(),
+            })).collect::<Vec<_>>(),
+            "total":  events.len(),
+        })).into_response(),
+        Err(e) => {
+            tracing::error!("Failed to fetch security events: {}", e);
+            Json(json!({ "success": false, "error": "Failed to fetch security events", "events": [] })).into_response()
+        }
+    }
+}
+
+async fn list_device_security_events(
+    State(state): State<Arc<AppState>>,
+    Path(device_id): Path<Uuid>,
+    Query(filters): Query<SecurityEventFilters>,
+) -> impl IntoResponse {
+    let (from, to) = parse_security_time_bounds(&filters);
+    let limit = filters.limit.unwrap_or(200).min(1000);
+    match state
+        .db
+        .get_security_events(Some(device_id), from, to, filters.severity.as_deref(), filters.mitre_technique.as_deref(), limit)
+        .await
+    {
+        Ok(events) => Json(json!({
+            "success":   true,
+            "device_id": device_id,
+            "events":    events.iter().map(|e| json!({
+                "id":               e.id,
+                "timestamp":        e.timestamp.to_rfc3339(),
+                "device_id":        e.device_id,
+                "query_name":       e.query_name,
+                "query_pack":       e.query_pack,
+                "mitre_technique":  e.mitre_technique,
+                "severity":         e.severity,
+                "raw_data":         e.raw_data,
+                "created_at":       e.created_at.to_rfc3339(),
+            })).collect::<Vec<_>>(),
+            "total":     events.len(),
+        })).into_response(),
+        Err(e) => {
+            tracing::error!("Failed to fetch device security events: {}", e);
+            Json(json!({ "success": false, "error": "Failed to fetch security events", "events": [] })).into_response()
+        }
+    }
+}
+
+async fn get_security_summary(
+    State(state): State<Arc<AppState>>,
+    Query(filters): Query<SecurityEventFilters>,
+) -> impl IntoResponse {
+    let (from, to) = parse_security_time_bounds(&filters);
+    let device_uuid = filters
+        .device_id
+        .as_deref()
+        .and_then(|v| Uuid::parse_str(v).ok());
+    match state.db.get_security_summary(device_uuid, from, to).await {
+        Ok(rows) => {
+            let total_today: i64 = {
+                let today_start = Utc::now().date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
+                match state.db.get_security_events(device_uuid, Some(today_start), None, None, None, 10_000).await {
+                    Ok(events) => events.len() as i64,
+                    Err(_) => 0,
+                }
+            };
+            let critical: i64 = rows.iter().filter(|r| r.severity == "CRITICAL").map(|r| r.event_count).sum();
+            let top_technique = rows.first().map(|r| r.mitre_technique.as_str()).unwrap_or("-").to_string();
+            Json(json!({
+                "success":        true,
+                "total_today":    total_today,
+                "critical_count": critical,
+                "top_technique":  top_technique,
+                "by_severity_and_technique": rows.iter().map(|r| json!({
+                    "severity":         r.severity,
+                    "mitre_technique":  r.mitre_technique,
+                    "count":            r.event_count,
+                })).collect::<Vec<_>>(),
+            })).into_response()
+        },
+        Err(e) => {
+            tracing::error!("Failed to fetch security summary: {}", e);
+            Json(json!({ "success": false, "error": "Failed to fetch security summary" })).into_response()
         }
     }
 }

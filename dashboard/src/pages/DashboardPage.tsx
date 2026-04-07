@@ -23,6 +23,7 @@ export function DashboardPage() {
   const [liveDevices, setLiveDevices] = useState<LiveDeviceItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [deviceFilter, setDeviceFilter] = useState('');
 
   const formatDuration = (seconds?: number) => {
     const safeSeconds = Math.max(0, seconds || 0);
@@ -122,14 +123,38 @@ export function DashboardPage() {
         </section>
 
         <section className="overflow-hidden rounded-2xl border border-[#1a2748] bg-[linear-gradient(165deg,#0f1d43_0%,#0b1329_70%)] shadow-[0_14px_30px_rgba(0,0,0,0.35)]">
-          <div className="flex items-center justify-between border-b border-[#20315a] px-5 py-3">
-            <div className="flex items-center gap-3">
-              <h2 className="font-display text-base font-bold text-[#e4e6eb]">Dispositivos Conocidos</h2>
-              <span className="rounded-full border border-[#00d9ff]/40 bg-[#00d9ff]/10 px-2.5 py-0.5 font-mono text-[10px] text-[#00d9ff]">
-                {devices.length} nodos
-              </span>
+          <div className="flex flex-col gap-2 border-b border-[#20315a] px-5 py-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <h2 className="font-display text-base font-bold text-[#e4e6eb]">Dispositivos Conocidos</h2>
+                <span className="rounded-full border border-[#00d9ff]/40 bg-[#00d9ff]/10 px-2.5 py-0.5 font-mono text-[10px] text-[#00d9ff]">
+                  {devices.length} nodos
+                </span>
+              </div>
+              <p className="font-mono text-[11px] text-[#7f93c7]">Activo/Inactivo medido por teclado y mouse</p>
             </div>
-            <p className="font-mono text-[11px] text-[#7f93c7]">Activo/Inactivo medido por teclado y mouse</p>
+            <div className="relative max-w-sm">
+              <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-[#4a5d8a]">
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+                </svg>
+              </span>
+              <input
+                type="text"
+                value={deviceFilter}
+                onChange={e => setDeviceFilter(e.target.value)}
+                placeholder="Buscar por MAC, hostname, apodo o Device ID…"
+                className="w-full rounded-lg border border-[#1e2d52] bg-[#080f26] py-1.5 pl-8 pr-3 font-mono text-[11px] text-[#c5d3f0] placeholder-[#3d4f73] focus:border-[#00d9ff]/60 focus:outline-none"
+              />
+              {deviceFilter && (
+                <button
+                  onClick={() => setDeviceFilter('')}
+                  className="absolute inset-y-0 right-2 flex items-center font-mono text-[11px] text-[#4a5d8a] hover:text-[#c5d3f0]"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           </div>
 
           {error && (
@@ -165,7 +190,18 @@ export function DashboardPage() {
                     </td>
                   </tr>
                 ) : (
-                  devices.map((device) => (
+                  devices
+                  .filter(d => {
+                    if (!deviceFilter.trim()) return true;
+                    const q = deviceFilter.trim().toLowerCase();
+                    return (
+                      d.mac_address?.toLowerCase().includes(q) ||
+                      d.device_id.toLowerCase().includes(q) ||
+                      d.hostname?.toLowerCase().includes(q) ||
+                      (d.nickname ?? '').toLowerCase().includes(q)
+                    );
+                  })
+                  .map((device) => (
                     <tr key={device.device_id}>
                       <td>
                         <div className="flex flex-col">
@@ -173,7 +209,14 @@ export function DashboardPage() {
                           <span className="font-mono text-[10px] text-[#7387bc]">{device.hostname}</span>
                         </div>
                       </td>
-                      <td className="font-mono text-[10px] text-[#8ea0cf]">{device.device_id.slice(0, 8)}...{device.device_id.slice(-4)}</td>
+                      <td>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-mono text-[10px] text-[#8ea0cf]">{device.device_id.slice(0, 8)}…{device.device_id.slice(-4)}</span>
+                          {device.mac_address && (
+                            <span className="font-mono text-[10px] text-[#4e6bab]">{device.mac_address}</span>
+                          )}
+                        </div>
+                      </td>
                       <td>
                         <div className="flex items-center gap-2">
                           <span

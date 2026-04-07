@@ -6,6 +6,7 @@ import { ActivityPage } from './pages/ActivityPage';
 import { InventoryPage } from './pages/InventoryPage';
 import { USBPage } from './pages/USBPage';
 import { AlertsPage } from './pages/AlertsPage';
+import { SecurityPage } from './pages/SecurityPage';
 import { DeviceDetailPage } from './pages/DeviceDetailPage';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -64,6 +65,14 @@ function App() {
           element={
             <PrivateRoute>
               <USBPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/security"
+          element={
+            <PrivateRoute>
+              <SecurityPage />
             </PrivateRoute>
           }
         />

@@ -1,7 +1,7 @@
 // API client for the dashboard
 import axios from 'axios';
 import type { AxiosInstance } from 'axios';
-import type { Device, ActivityLog, AppInfo, RunningAppInfo, USBEvent, WifiEvent, SecurityAlert, LoginResponse } from '../types';
+import type { Device, ActivityLog, AppInfo, RunningAppInfo, USBEvent, WifiEvent, SecurityAlert, SecurityEvent, LoginResponse } from '../types';
 
 const BASE_URL = 'http://localhost:3000/api';
 
@@ -182,6 +182,69 @@ class ApiClient {
   async resolveAlert(alertId: number): Promise<SecurityAlert> {
     const response = await this.client.patch<SecurityAlert>(`/alerts/${alertId}`, {
       resolved: true,
+    });
+    return response.data;
+  }
+
+  // Security Events (osquery + MITRE ATT&CK)
+  async getSecurityEvents(params: {
+    deviceId?: string;
+    from?: string;
+    to?: string;
+    hours?: number;
+    severity?: string;
+    mitreFilter?: string;
+    limit?: number;
+  } = {}): Promise<SecurityEvent[]> {
+    const response = await this.client.get<{ events: SecurityEvent[] }>('/security', {
+      params: {
+        ...(params.deviceId       ? { device_id:        params.deviceId }       : {}),
+        ...(params.from           ? { from:             params.from }           : {}),
+        ...(params.to             ? { to:               params.to }             : {}),
+        ...(params.hours          ? { hours:            params.hours }          : {}),
+        ...(params.severity       ? { severity:         params.severity }       : {}),
+        ...(params.mitreFilter    ? { mitre_technique:  params.mitreFilter }    : {}),
+        ...(params.limit          ? { limit:            params.limit }          : {}),
+      },
+    });
+    return response.data.events || [];
+  }
+
+  async getSecurityEventsByDevice(deviceId: string, params: {
+    from?: string;
+    to?: string;
+    severity?: string;
+    mitreFilter?: string;
+    limit?: number;
+  } = {}): Promise<SecurityEvent[]> {
+    const response = await this.client.get<{ events: SecurityEvent[] }>(`/security/${deviceId}`, {
+      params: {
+        ...(params.from        ? { from:            params.from }        : {}),
+        ...(params.to          ? { to:              params.to }          : {}),
+        ...(params.severity    ? { severity:        params.severity }    : {}),
+        ...(params.mitreFilter ? { mitre_technique: params.mitreFilter } : {}),
+        ...(params.limit       ? { limit:           params.limit }       : {}),
+      },
+    });
+    return response.data.events || [];
+  }
+
+  async getSecuritySummary(params: {
+    deviceId?: string;
+    from?: string;
+    to?: string;
+  } = {}): Promise<{
+    total_today: number;
+    critical_count: number;
+    top_technique: string;
+    by_severity_and_technique: Array<{ severity: string; mitre_technique: string; count: number }>;
+  }> {
+    const response = await this.client.get('/security/summary', {
+      params: {
+        ...(params.deviceId ? { device_id: params.deviceId } : {}),
+        ...(params.from     ? { from:      params.from }     : {}),
+        ...(params.to       ? { to:        params.to }       : {}),
+      },
     });
     return response.data;
   }

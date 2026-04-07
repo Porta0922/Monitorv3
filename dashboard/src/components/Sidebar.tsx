@@ -21,6 +21,7 @@ export function Sidebar({ currentPage }: { currentPage: string }) {
   const navItems: NavItem[] = [
     { path: '/dashboard', label: 'Overview', icon: '◆', current: 'dashboard' },
     { path: '/activity', label: 'En Vivo', icon: '◉', current: 'activity' },
+    { path: '/security', label: 'Seguridad', icon: '⬢', current: 'security' },
     { path: '/alerts', label: 'Historial', icon: '◌', current: 'alerts' },
   ];
 
@@ -76,7 +77,7 @@ export function Sidebar({ currentPage }: { currentPage: string }) {
           >
             <span className="text-xs w-4 flex-shrink-0">{item.icon}</span>
             <span className="font-mono text-xs tracking-wide">{item.label}</span>
-            {item.current === 'alerts' && newAlertsCount > 0 && (
+            {item.current === 'security' && newAlertsCount > 0 && (
               <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-red-500/40 bg-red-500/15 px-2 py-[2px] font-mono text-[9px] text-red-300">
                 <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-400"></span>
                 {newAlertsCount}

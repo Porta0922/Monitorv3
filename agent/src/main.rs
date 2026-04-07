@@ -8,6 +8,7 @@ mod wifi_detection;
 mod input_tracking;
 mod keystroke_tracker;
 mod process_protection;
+mod osquery_runner;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -723,6 +724,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // ── osquery security scan (every 5 minutes) ──────────────────────────────
+    let publisher_clone = publisher.clone();
+    let cache_clone = cache.clone();
+    let device_id_clone = device_id_str.clone();
+    let hostname_clone = hostname.clone();
+    let mac_clone = mac_address.clone();
+    let auth_token_clone = auth_token.clone();
+    let envelope_metadata_clone = envelope_metadata.clone();
+    tokio::spawn(async move {
+        let mut scan_interval = interval(Duration::from_secs(300));
+        loop {
+            scan_interval.tick().await;
+            let findings = osquery_runner::OsqueryRunner::scan_once().await;
+            for finding in findings {
+                let security_payload = build_event_envelope(
+                    "security",
+                    1,
+                    &device_id_clone,
+                    &hostname_clone,
+                    &mac_clone,
+                    &auth_token_clone,
+                    envelope_metadata_clone.as_ref(),
+                    serde_json::json!({
+                        "query_name":        finding.query_name,
+                        "query_pack":        finding.query_pack,
+                        "mitre_technique":   finding.mitre_technique,
+                        "severity":          finding.severity,
+                        "raw_data":          finding.raw_data,
+                        "event_fingerprint": finding.event_fingerprint,
+                    }),
+                );
+                publish_or_cache(&publisher_clone, &cache_clone, "security", security_payload).await;
+            }
+        }
+    });
+
     // Retry unsynced cached events in FIFO order
     let publisher_clone = publisher.clone();
     let cache_clone = cache.clone();
@@ -763,7 +800,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     
     tracing::info!("✅ Agent started successfully");
-    tracing::info!("📊 Monitoring: focus-activity (2s) | heartbeat (15s) | open apps (20s) | USB (30s) | WiFi (60s) | inventory (12h) | input summary (60s)");
+    tracing::info!("📊 Monitoring: focus-activity (2s) | heartbeat (15s) | open apps (20s) | USB (30s) | WiFi (60s) | inventory (12h) | input summary (60s) | osquery (5min)");
     
     // Keep agent running
     loop {

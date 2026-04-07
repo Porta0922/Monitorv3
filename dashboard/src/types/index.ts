@@ -78,6 +78,18 @@ export interface SecurityAlert {
   created_at: string;
 }
 
+export interface SecurityEvent {
+  id: number;
+  timestamp: string;
+  device_id: string;
+  query_name: string;
+  query_pack?: string;
+  mitre_technique?: string;
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  raw_data: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface User {
   id: number;
   username: string;

@@ -141,6 +141,27 @@ pub struct Database {
     pool: PgPool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityEvent {
+    pub id: i64,
+    pub timestamp: DateTime<Utc>,
+    pub device_id: Uuid,
+    pub query_name: String,
+    pub query_pack: Option<String>,
+    pub mitre_technique: Option<String>,
+    pub severity: String,
+    pub raw_data: serde_json::Value,
+    pub event_fingerprint: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecuritySummaryRow {
+    pub severity: String,
+    pub mitre_technique: String,
+    pub event_count: i64,
+}
+
 impl Database {
     /// Create connection pool to PostgreSQL
     pub async fn connect(database_url: &str) -> Result<Self, sqlx::Error> {
@@ -376,6 +397,42 @@ impl Database {
         )
         .execute(pool)
         .await?;
+
+        // security_events table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS security_events (
+                id                BIGSERIAL PRIMARY KEY,
+                timestamp         TIMESTAMPTZ NOT NULL,
+                device_id         UUID        NOT NULL REFERENCES devices(device_id),
+                query_name        TEXT        NOT NULL,
+                query_pack        TEXT,
+                mitre_technique   VARCHAR(20),
+                severity          VARCHAR(20) NOT NULL,
+                raw_data          JSONB       NOT NULL DEFAULT '{}',
+                event_fingerprint VARCHAR(128),
+                created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_security_events_device_ts ON security_events(device_id, timestamp DESC)"
+        ).execute(pool).await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_security_events_timestamp ON security_events(timestamp DESC)"
+        ).execute(pool).await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_security_events_severity ON security_events(severity)"
+        ).execute(pool).await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_security_events_technique ON security_events(mitre_technique)"
+        ).execute(pool).await?;
+        sqlx::query(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_security_events_fingerprint ON security_events(event_fingerprint) WHERE event_fingerprint IS NOT NULL"
+        ).execute(pool).await?;
 
         Ok(())
     }
@@ -1471,6 +1528,133 @@ impl Database {
     }
 
     /// Get top 6 most used applications in the last N days
+    // -------------------------------------------------------------------------
+    // Security Events
+    // -------------------------------------------------------------------------
+
+    pub async fn insert_security_event(
+        &self,
+        device_id: String,
+        query_name: String,
+        query_pack: Option<String>,
+        mitre_technique: Option<String>,
+        severity: String,
+        raw_data: serde_json::Value,
+        event_fingerprint: Option<String>,
+        timestamp: DateTime<Utc>,
+    ) -> Result<SecurityEvent, sqlx::Error> {
+        let device_uuid = Uuid::parse_str(&device_id)
+            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+
+        let row = sqlx::query_as::<_, (i64, DateTime<Utc>, Uuid, String, Option<String>, Option<String>, String, serde_json::Value, Option<String>, DateTime<Utc>)>(
+            r#"
+            INSERT INTO security_events
+                (timestamp, device_id, query_name, query_pack, mitre_technique, severity, raw_data, event_fingerprint)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (event_fingerprint) WHERE event_fingerprint IS NOT NULL DO NOTHING
+            RETURNING id, timestamp, device_id, query_name, query_pack, mitre_technique, severity, raw_data, event_fingerprint, created_at
+            "#,
+        )
+        .bind(timestamp)
+        .bind(device_uuid)
+        .bind(&query_name)
+        .bind(&query_pack)
+        .bind(&mitre_technique)
+        .bind(&severity)
+        .bind(&raw_data)
+        .bind(&event_fingerprint)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some((id, ts, did, qn, qp, mt, sev, rd, fp, ca)) = row {
+            return Ok(SecurityEvent {
+                id, timestamp: ts, device_id: did,
+                query_name: qn, query_pack: qp, mitre_technique: mt,
+                severity: sev, raw_data: rd, event_fingerprint: fp, created_at: ca,
+            });
+        }
+
+        // Event was deduplicated (ON CONFLICT DO NOTHING)
+        sqlx::query_as::<_, (i64, DateTime<Utc>, Uuid, String, Option<String>, Option<String>, String, serde_json::Value, Option<String>, DateTime<Utc>)>(
+            "SELECT id, timestamp, device_id, query_name, query_pack, mitre_technique, severity, raw_data, event_fingerprint, created_at FROM security_events WHERE event_fingerprint = $1"
+        )
+        .bind(&event_fingerprint)
+        .fetch_one(&self.pool)
+        .await
+        .map(|(id, ts, did, qn, qp, mt, sev, rd, fp, ca)| SecurityEvent {
+            id, timestamp: ts, device_id: did,
+            query_name: qn, query_pack: qp, mitre_technique: mt,
+            severity: sev, raw_data: rd, event_fingerprint: fp, created_at: ca,
+        })
+    }
+
+    pub async fn get_security_events(
+        &self,
+        device_id: Option<Uuid>,
+        from: Option<DateTime<Utc>>,
+        to: Option<DateTime<Utc>>,
+        severity: Option<&str>,
+        mitre_technique: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<SecurityEvent>, sqlx::Error> {
+        let mut qb = sqlx::QueryBuilder::<sqlx::Postgres>::new(
+            "SELECT id, timestamp, device_id, query_name, query_pack, mitre_technique, severity, raw_data, event_fingerprint, created_at FROM security_events WHERE 1=1"
+        );
+        if let Some(did) = device_id {
+            qb.push(" AND device_id = ").push_bind(did);
+        }
+        if let Some(f) = from {
+            qb.push(" AND timestamp >= ").push_bind(f);
+        }
+        if let Some(t) = to {
+            qb.push(" AND timestamp <= ").push_bind(t);
+        }
+        if let Some(sev) = severity {
+            qb.push(" AND severity = ").push_bind(sev.to_uppercase());
+        }
+        if let Some(tech) = mitre_technique {
+            qb.push(" AND mitre_technique ILIKE ").push_bind(format!("%{}%", tech));
+        }
+        qb.push(" ORDER BY timestamp DESC LIMIT ").push_bind(limit.max(1));
+
+        qb.build_query_as::<(i64, DateTime<Utc>, Uuid, String, Option<String>, Option<String>, String, serde_json::Value, Option<String>, DateTime<Utc>)>()
+            .fetch_all(&self.pool)
+            .await
+            .map(|rows| rows.into_iter().map(|(id, ts, did, qn, qp, mt, sev, rd, fp, ca)| SecurityEvent {
+                id, timestamp: ts, device_id: did,
+                query_name: qn, query_pack: qp, mitre_technique: mt,
+                severity: sev, raw_data: rd, event_fingerprint: fp, created_at: ca,
+            }).collect())
+    }
+
+    pub async fn get_security_summary(
+        &self,
+        device_id: Option<Uuid>,
+        from: Option<DateTime<Utc>>,
+        to: Option<DateTime<Utc>>,
+    ) -> Result<Vec<SecuritySummaryRow>, sqlx::Error> {
+        let mut qb = sqlx::QueryBuilder::<sqlx::Postgres>::new(
+            "SELECT severity, COALESCE(mitre_technique, 'UNKNOWN') AS mitre_technique, COUNT(*)::BIGINT FROM security_events WHERE 1=1"
+        );
+        if let Some(did) = device_id {
+            qb.push(" AND device_id = ").push_bind(did);
+        }
+        if let Some(f) = from {
+            qb.push(" AND timestamp >= ").push_bind(f);
+        }
+        if let Some(t) = to {
+            qb.push(" AND timestamp <= ").push_bind(t);
+        }
+        qb.push(" GROUP BY severity, mitre_technique ORDER BY 3 DESC");
+
+        qb.build_query_as::<(String, String, i64)>()
+            .fetch_all(&self.pool)
+            .await
+            .map(|rows| rows.into_iter().map(|(severity, mitre_technique, event_count)| SecuritySummaryRow {
+                severity, mitre_technique, event_count,
+            }).collect())
+    }
+
     pub async fn get_top_apps(&self, days: i64) -> Result<Vec<TopApp>, sqlx::Error> {
         let apps = sqlx::query_as::<_, (String, i64)>(
             "SELECT app_name, COALESCE(SUM(duration_seconds), 0)::BIGINT as total_duration FROM activity_logs 
