@@ -21,7 +21,7 @@ set NSSM_PATH=%~dp0\nssm.exe
 set CONFIG_DIR=%PROGRAMDATA%\ActivityMonitor
 set LOG_DIR=%PROGRAMDATA%\ActivityMonitor\logs
 set ENV_FILE=%CONFIG_DIR%\.env
-set OSQUERY_VERSION=5.12.1
+set OSQUERY_VERSION=5.22.1
 set OSQUERY_MSI_URL=https://github.com/osquery/osquery/releases/download/%OSQUERY_VERSION%/osquery-%OSQUERY_VERSION%.msi
 set OSQUERY_MSI_PATH=%TEMP%\osquery-%OSQUERY_VERSION%.msi
 set AGENT_AUTH_TOKEN=dev-agent-token
@@ -67,17 +67,32 @@ echo [+] Found agent binary: %AGENT_PATH%
 
 REM Install osquery if not present
 if not exist "C:\Program Files\osquery\osqueryi.exe" (
-    echo [*] osquery not found. Installing osquery %OSQUERY_VERSION%...
-    powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -Uri '%OSQUERY_MSI_URL%' -OutFile '%OSQUERY_MSI_PATH%'"
-    if not exist "%OSQUERY_MSI_PATH%" (
-        echo [-] Failed to download osquery MSI
+    echo [*] osquery not found. Installing...
+
+    where choco >nul 2>&1
+    if !errorLevel! equ 0 (
+        echo [*] Chocolatey detected. Installing osquery from Chocolatey repository...
+        choco install osquery -y --no-progress
+    ) else (
+        echo [!] Chocolatey not found. Falling back to direct MSI download (%OSQUERY_VERSION%)...
+        powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -Uri '%OSQUERY_MSI_URL%' -OutFile '%OSQUERY_MSI_PATH%'"
+        if not exist "%OSQUERY_MSI_PATH%" (
+            echo [-] Failed to download osquery MSI
+            pause
+            exit /b 1
+        )
+
+        msiexec /i "%OSQUERY_MSI_PATH%" /qn /norestart
+    )
+
+    if !errorLevel! neq 0 (
+        echo [-] osquery installation command failed
         pause
         exit /b 1
     )
 
-    msiexec /i "%OSQUERY_MSI_PATH%" /qn /norestart
-    if %errorLevel% neq 0 (
-        echo [-] osquery installation failed
+    if not exist "C:\Program Files\osquery\osqueryi.exe" (
+        echo [-] osquery installation did not produce osqueryi.exe
         pause
         exit /b 1
     )
