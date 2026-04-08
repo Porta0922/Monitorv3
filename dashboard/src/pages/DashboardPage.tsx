@@ -92,7 +92,6 @@ export function DashboardPage() {
       currentPage="dashboard"
       title="Centro de Mando AME"
       subtitle="Visibilidad operativa de actividad por dispositivo"
-      noScroll
       actions={
         <button
           onClick={loadDevices}
@@ -102,7 +101,7 @@ export function DashboardPage() {
         </button>
       }
     >
-      <div className="h-[calc(100vh-190px)] grid grid-rows-[minmax(0,0.9fr)_minmax(0,2.2fr)_minmax(0,1.2fr)] gap-4 overflow-hidden">
+      <div className="grid min-h-[calc(100vh-190px)] grid-rows-[auto_auto_auto] gap-4">
         <section className="grid grid-cols-6 gap-3">
           {[
             { label: 'Dispositivos', value: devices.length.toString(), note: 'registrados', color: '#00d9ff' },
@@ -114,10 +113,10 @@ export function DashboardPage() {
           ].map((kpi) => (
             <article
               key={kpi.label}
-              className="rounded-2xl border border-[#1a2748] bg-[radial-gradient(circle_at_top_left,#132554,#0b1329_65%)] px-4 py-3 shadow-[0_10px_22px_rgba(0,0,0,0.35)]"
+              className="h-[98px] rounded-2xl border border-[#1a2748] bg-[radial-gradient(circle_at_top_left,#132554,#0b1329_65%)] px-4 py-3 shadow-[0_10px_22px_rgba(0,0,0,0.35)]"
             >
               <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#8ea0cf]">{kpi.label}</p>
-              <p className="mt-2 font-display text-[22px] font-bold leading-none" style={{ color: kpi.color }}>
+              <p className="mt-2 font-display text-[20px] font-bold leading-none" style={{ color: kpi.color }}>
                 {kpi.value}
               </p>
               <p className="mt-1 font-mono text-[10px] text-[#6f82b1]">{kpi.note}</p>
@@ -125,7 +124,7 @@ export function DashboardPage() {
           ))}
         </section>
 
-        <section className="overflow-hidden rounded-2xl border border-[#1a2748] bg-[linear-gradient(165deg,#0f1d43_0%,#0b1329_70%)] shadow-[0_14px_30px_rgba(0,0,0,0.35)]">
+        <section className="rounded-2xl border border-[#1a2748] bg-[linear-gradient(165deg,#0f1d43_0%,#0b1329_70%)] shadow-[0_14px_30px_rgba(0,0,0,0.35)]">
           <div className="flex flex-col gap-2 border-b border-[#20315a] px-5 py-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -166,7 +165,7 @@ export function DashboardPage() {
             </div>
           )}
 
-          <div className="h-[calc(100%-56px)] overflow-auto px-3 py-2">
+          <div className="px-3 py-2">
             <table>
               <thead>
                 <tr>
@@ -265,15 +264,15 @@ export function DashboardPage() {
           </div>
         </section>
 
-        <section className="grid grid-cols-1 gap-4 overflow-hidden lg:grid-cols-3">
-          <article className="rounded-2xl border border-[#1a2748] bg-[linear-gradient(155deg,#0f1d43,#0b1329)] px-4 py-4 min-h-0 shadow-[0_10px_24px_rgba(0,0,0,0.32)]">
+        <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <article className="rounded-2xl border border-[#1a2748] bg-[linear-gradient(155deg,#0f1d43,#0b1329)] px-4 py-4 shadow-[0_10px_24px_rgba(0,0,0,0.32)]">
             <div className="mb-3 flex items-center justify-between">
               <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#8ea0cf]">Live Devices</p>
               <span className="rounded-full border border-[#00ff88]/40 bg-[#00ff88]/10 px-2 py-0.5 font-mono text-[10px] text-[#00ff88]">
                 {liveDevices.filter((d) => d.is_live).length}
               </span>
             </div>
-            <div className="space-y-2 overflow-auto">
+            <div className="space-y-2">
               {liveDevices.slice(0, 7).map((live) => (
                 <button
                   key={live.device_id}
@@ -293,14 +292,14 @@ export function DashboardPage() {
             </div>
           </article>
 
-          <article className="rounded-2xl border border-[#1a2748] bg-[linear-gradient(155deg,#0f1d43,#0b1329)] px-4 py-4 min-h-0 shadow-[0_10px_24px_rgba(0,0,0,0.32)]">
+          <article className="rounded-2xl border border-[#1a2748] bg-[linear-gradient(155deg,#0f1d43,#0b1329)] px-4 py-4 shadow-[0_10px_24px_rgba(0,0,0,0.32)]">
             <div className="mb-3 flex items-center justify-between">
               <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#8ea0cf]">Picos CPU/RAM (hoy)</p>
               <span className="rounded-full border border-[#ffd54a]/40 bg-[#ffd54a]/10 px-2 py-0.5 font-mono text-[10px] text-[#ffd54a]">
                 {resourcePeaks.length}
               </span>
             </div>
-            <div className="space-y-2 overflow-auto">
+            <div className="space-y-2">
               {resourcePeaks.slice(0, 7).map((peak) => (
                 <button
                   key={peak.device_id}
@@ -342,14 +341,14 @@ export function DashboardPage() {
             </div>
           </article>
 
-          <article className="rounded-2xl border border-[#1a2748] bg-[linear-gradient(155deg,#0f1d43,#0b1329)] px-4 py-4 min-h-0 shadow-[0_10px_24px_rgba(0,0,0,0.32)]">
+          <article className="rounded-2xl border border-[#1a2748] bg-[linear-gradient(155deg,#0f1d43,#0b1329)] px-4 py-4 shadow-[0_10px_24px_rgba(0,0,0,0.32)]">
             <div className="mb-3 flex items-center justify-between">
               <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#8ea0cf]">Alertas activas</p>
               <span className="rounded-full border border-[#ff5f7a]/40 bg-[#ff5f7a]/10 px-2 py-0.5 font-mono text-[10px] text-[#ff8ea0]">
                 {alerts.length}
               </span>
             </div>
-            <div className="space-y-2 overflow-auto">
+            <div className="space-y-2">
               {alerts.slice(0, 6).map((alert) => (
                 <div key={alert.id} className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2">
                   <p className="font-mono text-xs text-red-200">{alert.alert_type}</p>

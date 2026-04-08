@@ -13,11 +13,6 @@ export function Sidebar({ currentPage }: { currentPage: string }) {
   const navigate = useNavigate();
   const [newAlertsCount, setNewAlertsCount] = useState(0);
 
-  const handleLogout = () => {
-    apiClient.logout();
-    navigate('/login');
-  };
-
   const navItems: NavItem[] = [
     { path: '/dashboard', label: 'Resumen', icon: '◆', current: 'dashboard' },
     { path: '/activity', label: 'En Vivo', icon: '◉', current: 'activity' },
@@ -89,14 +84,11 @@ export function Sidebar({ currentPage }: { currentPage: string }) {
       </nav>
 
       {/* Footer */}
-      <div className="p-4 border-t border-[#1e2339]">
-        <button
-          onClick={handleLogout}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-[#111c3b] hover:bg-[#163059] text-[#8a97ba] hover:text-[#00d9ff] rounded-md transition-all text-xs"
-        >
-          <span>◌</span>
-          Cerrar sesion
-        </button>
+      <div className="border-t border-[#1e2339] p-4">
+        <div className="rounded-md border border-[#152243] bg-[#0a1228] px-3 py-2">
+          <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-[#5f719c]">Centro de mando</p>
+          <p className="mt-1 font-mono text-[10px] text-[#8a97ba]">Monitoreo operativo en tiempo real.</p>
+        </div>
       </div>
     </div>
   );

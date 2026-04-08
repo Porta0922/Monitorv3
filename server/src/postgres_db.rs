@@ -681,17 +681,18 @@ impl Database {
         device_id: Uuid,
         date: NaiveDate,
         tz_offset_minutes: i32,
-    ) -> Result<Vec<(i32, String, i64, i64)>, sqlx::Error> {
-        sqlx::query_as::<_, (i32, String, i64, i64)>(
+    ) -> Result<Vec<(i32, String, String, i64, i64)>, sqlx::Error> {
+        sqlx::query_as::<_, (i32, String, String, i64, i64)>(
             "SELECT EXTRACT(HOUR FROM (timestamp + ($3 * INTERVAL '1 minute')))::INT,
                     app_name,
+                    COALESCE(window_title, ''),
                     COALESCE(SUM(duration_seconds), 0)::BIGINT,
                     COUNT(*)::BIGINT
              FROM activity_logs
              WHERE device_id = $1
                AND DATE(timestamp + ($3 * INTERVAL '1 minute')) = $2
-             GROUP BY 1, 2
-             ORDER BY 1 ASC, 3 DESC"
+               GROUP BY 1, 2, 3
+               ORDER BY 1 ASC, 4 DESC"
         )
         .bind(device_id)
         .bind(date)

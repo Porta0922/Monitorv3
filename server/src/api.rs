@@ -1125,15 +1125,24 @@ async fn get_history_hourly_programs(
         .await
     {
         Ok(rows) => {
-            let mut grouped: std::collections::BTreeMap<i32, HashMap<(String, bool), (i64, i64)>> = std::collections::BTreeMap::new();
+            let mut grouped: std::collections::BTreeMap<i32, HashMap<(String, bool), (i64, i64, HashMap<String, (i64, i64)>)>> = std::collections::BTreeMap::new();
 
-            for (hour, app_name, seconds, intervals) in rows {
-                let resolved_app = normalize_activity_name(&app_name, &app_name);
-                let is_idle = is_idle_activity(&resolved_app, &app_name);
+            for (hour, app_name, window_title, seconds, intervals) in rows {
+                let resolved_app = normalize_activity_name(&app_name, &window_title);
+                let is_idle = is_idle_activity(&resolved_app, &window_title);
                 let by_app = grouped.entry(hour).or_default();
-                let entry = by_app.entry((resolved_app, is_idle)).or_insert((0, 0));
+                let entry = by_app
+                    .entry((resolved_app.clone(), is_idle))
+                    .or_insert_with(|| (0, 0, HashMap::new()));
                 entry.0 += seconds;
                 entry.1 += intervals;
+
+                let title = window_title.trim();
+                if !is_idle && !is_unknown_like(title) {
+                    let window_entry = entry.2.entry(title.to_string()).or_insert((0, 0));
+                    window_entry.0 += seconds;
+                    window_entry.1 += intervals;
+                }
             }
 
             let groups: Vec<serde_json::Value> = grouped
@@ -1141,13 +1150,40 @@ async fn get_history_hourly_programs(
                 .map(|(hour, programs)| {
                     let mut program_rows: Vec<serde_json::Value> = programs
                         .into_iter()
-                        .map(|((app, is_idle), (seconds, intervals))| {
+                        .map(|((app, is_idle), (seconds, intervals, windows))| {
+                            let mut window_rows: Vec<serde_json::Value> = windows
+                                .into_iter()
+                                .map(|(title, (window_seconds, window_intervals))| {
+                                    json!({
+                                        "title": title,
+                                        "seconds": window_seconds,
+                                        "duration": format_duration(window_seconds),
+                                        "intervals": window_intervals,
+                                    })
+                                })
+                                .filter(|window| {
+                                    window
+                                        .get("seconds")
+                                        .and_then(|value| value.as_i64())
+                                        .unwrap_or(0)
+                                        >= 30
+                                })
+                                .collect();
+
+                            window_rows.sort_by(|a, b| {
+                                let seconds_a = a.get("seconds").and_then(|value| value.as_i64()).unwrap_or(0);
+                                let seconds_b = b.get("seconds").and_then(|value| value.as_i64()).unwrap_or(0);
+                                seconds_b.cmp(&seconds_a)
+                            });
+
                             json!({
                                 "app": app,
                                 "seconds": seconds,
                                 "duration": format_duration(seconds),
                                 "intervals": intervals,
                                 "is_idle": is_idle,
+                                "window_count": window_rows.len(),
+                                "windows": window_rows,
                             })
                         })
                         .filter(|program| {

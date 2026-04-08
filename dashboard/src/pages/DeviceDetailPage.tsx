@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import { AppShell } from '../components/AppShell';
@@ -29,6 +29,13 @@ interface HourlyProgramItem {
   duration: string;
   intervals: number;
   is_idle: boolean;
+  window_count?: number;
+  windows?: Array<{
+    title: string;
+    seconds: number;
+    duration: string;
+    intervals: number;
+  }>;
 }
 
 interface HourlyProgramsGroup {
@@ -61,6 +68,7 @@ export function DeviceDetailPage() {
   const [device, setDevice] = useState<Device | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [hourlyPrograms, setHourlyPrograms] = useState<HourlyProgramsGroup[]>([]);
+  const [expandedHourlyPrograms, setExpandedHourlyPrograms] = useState<Record<string, boolean>>({});
   const [hourly, setHourly] = useState<HourlyItem[]>([]);
   const [resourceMetrics, setResourceMetrics] = useState<NodeResourceMetric[]>([]);
 
@@ -159,6 +167,16 @@ export function DeviceDetailPage() {
 
     const normalizedPath = cleaned.replace(/\\/g, '/');
     const lastSegment = normalizedPath.split('/').pop() || cleaned;
+    const aliasMap: Record<string, string> = {
+      'chrome.exe': 'Google Chrome',
+      'msedge.exe': 'Microsoft Edge',
+      'firefox.exe': 'Mozilla Firefox',
+      'code.exe': 'Visual Studio Code',
+    };
+    const mapped = aliasMap[lastSegment.toLowerCase()];
+    if (mapped) {
+      return mapped;
+    }
     return lastSegment.length > 38 ? `${lastSegment.slice(0, 35)}...` : lastSegment;
   };
 
@@ -170,6 +188,13 @@ export function DeviceDetailPage() {
     }`;
 
   const maxHourlyValue = Math.max(1, ...hourly.map((item) => item.active_seconds + item.idle_seconds));
+
+  const toggleHourlyProgram = (key: string) => {
+    setExpandedHourlyPrograms((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
 
   const resourcePeak = useMemo(() => {
     if (resourceMetrics.length === 0) {
@@ -533,18 +558,53 @@ export function DeviceDetailPage() {
                           </thead>
                           <tbody>
                             {group.programs.map((program, idx) => (
-                              <tr key={`${group.hour}-${program.app}-${idx}`}>
-                                <td className="max-w-[420px] truncate font-mono text-[12px] text-[#dce6ff]" title={program.app}>
-                                  {shortAppName(program.app)}
-                                </td>
-                                <td className="whitespace-nowrap font-mono text-[11px] text-[#00ff88]">{program.duration}</td>
-                                <td className="whitespace-nowrap font-mono text-[11px] text-[#9eb0dc]">{program.intervals}</td>
-                                <td>
-                                  <span className={`inline-flex rounded-full px-2.5 py-1 font-mono text-[10px] ${program.is_idle ? 'border border-[#ff9f1a]/40 bg-[#ff9f1a]/10 text-[#ff9f1a]' : 'border border-[#00d9ff]/40 bg-[#00d9ff]/10 text-[#00d9ff]'}`}>
-                                    {program.is_idle ? 'IDLE' : 'ACTIVE'}
-                                  </span>
-                                </td>
-                              </tr>
+                              <Fragment key={`${group.hour}-${program.app}-${idx}`}>
+                                <tr>
+                                  <td className="max-w-[420px] truncate font-mono text-[12px] text-[#dce6ff]" title={program.app}>
+                                    <div className="flex items-center gap-2">
+                                      <span className="truncate">{shortAppName(program.app)}</span>
+                                      {!!program.windows?.length && (
+                                        <button
+                                          onClick={() => toggleHourlyProgram(`${group.hour}-${program.app}-${idx}`)}
+                                          className="rounded-full border border-[#223462] bg-[#111a35] px-2 py-[2px] font-mono text-[9px] text-[#8ea0cf] hover:border-[#00d9ff]/50 hover:text-[#dce6ff]"
+                                        >
+                                          {expandedHourlyPrograms[`${group.hour}-${program.app}-${idx}`]
+                                            ? 'Ocultar ventanas'
+                                            : `Ver ventanas (${program.window_count ?? program.windows?.length ?? 0})`}
+                                        </button>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="whitespace-nowrap font-mono text-[11px] text-[#00ff88]">{program.duration}</td>
+                                  <td className="whitespace-nowrap font-mono text-[11px] text-[#9eb0dc]">{program.intervals}</td>
+                                  <td>
+                                    <span className={`inline-flex rounded-full px-2.5 py-1 font-mono text-[10px] ${program.is_idle ? 'border border-[#ff9f1a]/40 bg-[#ff9f1a]/10 text-[#ff9f1a]' : 'border border-[#00d9ff]/40 bg-[#00d9ff]/10 text-[#00d9ff]'}`}>
+                                      {program.is_idle ? 'IDLE' : 'ACTIVE'}
+                                    </span>
+                                  </td>
+                                </tr>
+                                {expandedHourlyPrograms[`${group.hour}-${program.app}-${idx}`] && !!program.windows?.length && (
+                                  <tr>
+                                    <td colSpan={4} className="bg-[#0b1734] px-4 py-2">
+                                      <div className="space-y-1.5">
+                                        {program.windows.map((windowItem, windowIdx) => (
+                                          <div
+                                            key={`${group.hour}-${program.app}-${idx}-${windowIdx}`}
+                                            className="flex items-center justify-between rounded-md border border-[#1f2d53] bg-[#0a122a] px-3 py-1.5"
+                                          >
+                                            <span className="truncate font-mono text-[11px] text-[#cdd9f8]" title={windowItem.title}>
+                                              {windowItem.title}
+                                            </span>
+                                            <span className="ml-3 whitespace-nowrap font-mono text-[10px] text-[#8ea0cf]">
+                                              {windowItem.duration} · {windowItem.intervals} intervalos
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </Fragment>
                             ))}
                           </tbody>
                         </table>
