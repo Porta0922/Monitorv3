@@ -48,6 +48,24 @@ Lo que harás:
 
 **Este es un sistema COMPLETO y funcional en ~1 hora.**
 
+### Opción Recomendada: Scripts Automáticos
+
+Si quieres levantar todo más rápido, ahora puedes usar estos scripts desde la raíz del proyecto:
+
+```powershell
+# Levanta Docker, server, agent y dashboard en ventanas separadas
+.\levantar_todo_demo.ps1
+
+# Hace reinicio forzado completo, recompila y vuelve a levantar todo
+.\reinicio_forzado_demo.ps1
+```
+
+**Cuándo usar cada uno:**
+
+- Usa `./levantar_todo_demo.ps1` si vas a iniciar la demo desde cero.
+- Usa `./reinicio_forzado_demo.ps1` si algo quedó colgado, hay procesos bloqueados, o quieres forzar una recompilación y relanzar todo.
+- Para `reinicio_forzado_demo.ps1`, conviene abrir PowerShell como Administrador.
+
 ---
 
 ## RECORRIDO PASO A PASO
@@ -223,6 +241,66 @@ Una vez logueado, deberías ver:
 
 ---
 
+## ⚡ ARRANQUE RÁPIDO CON SCRIPTS
+
+Si no quieres ejecutar cada paso manualmente, puedes usar una de estas opciones.
+
+### Levantar Todo con Un Solo Comando
+
+```powershell
+# Abre PowerShell en la raíz del proyecto
+cd C:\dev\Monitor_nuevo\ActivityMonitor-Enterprise-v3
+
+# Levanta Docker, servidor, agente y dashboard
+.\levantar_todo_demo.ps1
+```
+
+**Qué hace este script:**
+
+- Inicia Docker Desktop si hace falta
+- Levanta PostgreSQL y RabbitMQ con `docker-compose`
+- Abre ventanas separadas para server, agent y dashboard
+- Instala dependencias del dashboard si faltan
+- Puede abrir automáticamente el navegador en `http://localhost:5173`
+
+### Reinicio Forzado Completo
+
+Úsalo si ves binarios bloqueados, procesos colgados, puertos ocupados o si quieres relanzar toda la demo en limpio.
+
+```powershell
+# Recomendado: PowerShell como Administrador
+cd C:\dev\Monitor_nuevo\ActivityMonitor-Enterprise-v3
+
+.\reinicio_forzado_demo.ps1
+```
+
+**Qué hace este script:**
+
+- Intenta detener procesos locales del server, agent y dashboard
+- Intenta detener el servicio `ActivityMonitor` si existe
+- Reinicia Docker Desktop
+- Recompila server y agent en modo release
+- Relanza server, agent y dashboard
+- Puede abrir nuevamente el navegador
+
+**Parámetros útiles:**
+
+```powershell
+# Reinicia todo pero sin recompilar Rust
+.\reinicio_forzado_demo.ps1 -SkipBuild
+
+# Reinicia sin ejecutar npm install
+.\reinicio_forzado_demo.ps1 -SkipNpmInstall
+
+# Reinicia sin abrir el navegador
+.\reinicio_forzado_demo.ps1 -NoBrowser
+
+# Reinicia sin apagar Docker si ya está bien
+.\reinicio_forzado_demo.ps1 -KeepDockerRunning
+```
+
+---
+
 ## ✅ LISTA DE VERIFICACIÓN DE ÉXITO
 
 Marca cada paso conforme lo completes:
@@ -300,6 +378,18 @@ docker-compose up -d rabbitmq
 3. Espera 10 segundos y actualiza el dashboard (F5)
 4. Si aún no hay datos, revisa los logs del servidor y agente
 
+### Binarios bloqueados o procesos colgados
+
+**Problema**: No puedes recompilar, aparece acceso denegado, o quedó una ejecución vieja viva
+
+**Solución recomendada**:
+```powershell
+# Abre PowerShell como Administrador en la raíz del proyecto
+.\reinicio_forzado_demo.ps1
+```
+
+Si el problema persiste, cierra manualmente las ventanas PowerShell viejas, verifica Docker Desktop y vuelve a correr el script.
+
 ### Puerto ya en uso
 
 **Problema**: `Address already in use`
@@ -321,6 +411,12 @@ taskkill /PID XXXX /F
 ## 📝 COMANDOS RÁPIDOS DE REFERENCIA
 
 ```powershell
+# Levantar toda la demo automáticamente
+.\levantar_todo_demo.ps1
+
+# Reinicio forzado completo
+.\reinicio_forzado_demo.ps1
+
 # Iniciar servicios Docker
 docker-compose up -d
 
@@ -383,6 +479,11 @@ Si encuentras problemas:
    ```
 
 3. **Reinicia todo**:
+   ```powershell
+   .\reinicio_forzado_demo.ps1
+   ```
+
+4. **Si prefieres reiniciar manualmente**:
    ```powershell
    docker-compose down
    docker-compose up -d
