@@ -63,6 +63,8 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/history", get(get_history))
         .route("/history_hourly_programs", get(get_history_hourly_programs))
         .route("/hourly", get(get_hourly))
+        .route("/resources/:device_id", get(get_device_resources))
+        .route("/resources_peaks", get(get_resources_peaks))
         .route("/available_dates", get(get_available_dates))
         .route("/active_vs_idle", get(get_active_vs_idle))
         .route("/live_devices", get(get_live_devices))
@@ -548,6 +550,18 @@ struct ExportCsvQuery {
     from: Option<String>,
     to: Option<String>,
     tz_offset_minutes: Option<i32>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct DeviceResourcesQuery {
+    date: Option<String>,
+    tz_offset_minutes: Option<i32>,
+    limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ResourcePeaksQuery {
+    limit: Option<i64>,
 }
 
 fn format_duration(seconds: i64) -> String {
@@ -1092,6 +1106,98 @@ async fn get_history_hourly_programs(
                 "success": false,
                 "error": "Failed to fetch hourly program history",
                 "groups": []
+            }))
+        }
+    }
+}
+
+async fn get_device_resources(
+    State(state): State<Arc<AppState>>,
+    Path(device_id): Path<Uuid>,
+    Query(query): Query<DeviceResourcesQuery>,
+) -> impl IntoResponse {
+    let tz_offset_minutes = query.tz_offset_minutes.unwrap_or(0);
+    let selected_date = parse_iso_date(query.date.as_deref()).unwrap_or_else(|| {
+        (Utc::now() + Duration::minutes(tz_offset_minutes as i64)).date_naive()
+    });
+    let limit = query.limit.unwrap_or(2880).clamp(60, 10000);
+
+    match state
+        .db
+        .get_device_resource_metrics_for_date(device_id, selected_date, tz_offset_minutes, limit)
+        .await
+    {
+        Ok(rows) => {
+            let metrics: Vec<serde_json::Value> = rows
+                .into_iter()
+                .map(|row| {
+                    json!({
+                        "timestamp": row.timestamp.to_rfc3339(),
+                        "cpu_percent": row.cpu_percent,
+                        "memory_used_mb": row.memory_used_mb,
+                        "memory_percent": row.memory_percent,
+                        "top_process_name": row.top_process_name,
+                        "top_process_cpu_percent": row.top_process_cpu_percent,
+                        "top_process_memory_mb": row.top_process_memory_mb,
+                    })
+                })
+                .collect();
+
+            Json(json!({
+                "success": true,
+                "device_id": device_id,
+                "date": selected_date.to_string(),
+                "tz_offset_minutes": tz_offset_minutes,
+                "metrics": metrics,
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch resource metrics for {}: {}", device_id, e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch resource metrics",
+                "metrics": [],
+            }))
+        }
+    }
+}
+
+async fn get_resources_peaks(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ResourcePeaksQuery>,
+) -> impl IntoResponse {
+    let limit = query.limit.unwrap_or(20).clamp(1, 200);
+
+    match state.db.get_resource_peaks_today(limit).await {
+        Ok(peaks) => {
+            let peaks_json: Vec<serde_json::Value> = peaks
+                .into_iter()
+                .map(|peak| {
+                    json!({
+                        "device_id": peak.device_id,
+                        "peak_cpu_percent": peak.peak_cpu_percent,
+                        "peak_memory_percent": peak.peak_memory_percent,
+                        "last_cpu_percent": peak.last_cpu_percent,
+                        "last_memory_percent": peak.last_memory_percent,
+                        "top_process_name": peak.top_process_name,
+                        "top_process_cpu_percent": peak.top_process_cpu_percent,
+                        "top_process_memory_mb": peak.top_process_memory_mb,
+                        "last_seen": peak.last_seen.to_rfc3339(),
+                    })
+                })
+                .collect();
+
+            Json(json!({
+                "success": true,
+                "peaks": peaks_json,
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch resource peaks: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch resource peaks",
+                "peaks": [],
             }))
         }
     }

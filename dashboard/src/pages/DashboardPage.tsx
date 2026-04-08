@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import { AppShell } from '../components/AppShell';
-import type { Device, SecurityAlert } from '../types';
+import type { Device, SecurityAlert, DeviceResourcePeak } from '../types';
 
 interface LiveDeviceItem {
   device_id: string;
@@ -21,6 +21,7 @@ export function DashboardPage() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [alerts, setAlerts] = useState<SecurityAlert[]>([]);
   const [liveDevices, setLiveDevices] = useState<LiveDeviceItem[]>([]);
+  const [resourcePeaks, setResourcePeaks] = useState<DeviceResourcePeak[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [deviceFilter, setDeviceFilter] = useState('');
@@ -45,6 +46,8 @@ export function DashboardPage() {
     return device.nickname || device.hostname || `${device.device_id.slice(0, 8)}...`;
   };
 
+  const formatPct = (value?: number) => `${Math.round(Math.max(0, value || 0))}%`;
+
   useEffect(() => {
     loadDevices();
     const interval = setInterval(loadDevices, 30000);
@@ -54,15 +57,17 @@ export function DashboardPage() {
   const loadDevices = async () => {
     try {
       setIsLoading(true);
-      const [devicesData, alertsData, liveData] = await Promise.all([
+      const [devicesData, alertsData, liveData, peaksData] = await Promise.all([
         apiClient.getDevices(),
         apiClient.getAlerts(undefined, false).catch(() => []),
         apiClient.getLiveDevices().catch(() => []),
+        apiClient.getResourcePeaks(20).catch(() => []),
       ]);
 
       setDevices(devicesData);
       setAlerts(alertsData);
       setLiveDevices(liveData as LiveDeviceItem[]);
+      setResourcePeaks(peaksData as DeviceResourcePeak[]);
       setError('');
     } catch (err: any) {
       setError(err.message || 'Error al cargar dispositivos');
@@ -262,7 +267,7 @@ export function DashboardPage() {
           </div>
         </section>
 
-        <section className="grid grid-cols-2 gap-4 overflow-hidden">
+        <section className="grid grid-cols-1 gap-4 overflow-hidden lg:grid-cols-3">
           <article className="rounded-2xl border border-[#1a2748] bg-[linear-gradient(155deg,#0f1d43,#0b1329)] px-4 py-4 min-h-0 shadow-[0_10px_24px_rgba(0,0,0,0.32)]">
             <div className="mb-3 flex items-center justify-between">
               <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#8ea0cf]">Live Devices</p>
@@ -287,6 +292,42 @@ export function DashboardPage() {
                 </button>
               ))}
               {liveDevices.length === 0 && <p className="font-mono text-xs text-[#5f6e95]">No hay telemetria en vivo.</p>}
+            </div>
+          </article>
+
+          <article className="rounded-2xl border border-[#1a2748] bg-[linear-gradient(155deg,#0f1d43,#0b1329)] px-4 py-4 min-h-0 shadow-[0_10px_24px_rgba(0,0,0,0.32)]">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#8ea0cf]">Picos CPU/RAM (hoy)</p>
+              <span className="rounded-full border border-[#ffd54a]/40 bg-[#ffd54a]/10 px-2 py-0.5 font-mono text-[10px] text-[#ffd54a]">
+                {resourcePeaks.length}
+              </span>
+            </div>
+            <div className="space-y-2 overflow-auto">
+              {resourcePeaks.slice(0, 7).map((peak) => (
+                <button
+                  key={peak.device_id}
+                  onClick={() => navigate(`/devices/${peak.device_id}`)}
+                  className="w-full rounded-xl border border-[#21325d] bg-[#0a122a] px-3 py-2 text-left hover:border-[#ffd54a]/70"
+                >
+                  <p className="truncate font-mono text-xs text-[#dce6ff]">
+                    {nameByDeviceId.get(peak.device_id) || `${peak.device_id.slice(0, 8)}...`}
+                  </p>
+                  <div className="mt-1 flex items-center justify-between font-mono text-[10px]">
+                    <span className="text-[#ff8ea0]">CPU pico: {formatPct(peak.peak_cpu_percent)}</span>
+                    <span className="text-[#00d9ff]">RAM pico: {formatPct(peak.peak_memory_percent)}</span>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between font-mono text-[10px] text-[#8ea0cf]">
+                    <span>Actual: {formatPct(peak.last_cpu_percent)} / {formatPct(peak.last_memory_percent)}</span>
+                    <span>{new Date(peak.last_seen).toLocaleTimeString()}</span>
+                  </div>
+                  {peak.top_process_name && (
+                    <p className="mt-1 truncate font-mono text-[10px] text-[#7c90c1]" title={peak.top_process_name}>
+                      Top proceso: {peak.top_process_name}
+                    </p>
+                  )}
+                </button>
+              ))}
+              {resourcePeaks.length === 0 && <p className="font-mono text-xs text-[#5f6e95]">Sin datos de recursos del dia.</p>}
             </div>
           </article>
 

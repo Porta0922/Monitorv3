@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration, interval};
 use device_id::{load_or_create_device_identity, get_device_nickname};
-use monitoring::MonitoringLoop;
+use monitoring::{MonitoringLoop, ResourceMonitor};
 use usb_detection::UsbMonitor;
 use wifi_detection::WifiMonitor;
 use input_tracking::InputTracker;
@@ -802,11 +802,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let auth_token_clone = auth_token.clone();
     let envelope_metadata_clone = envelope_metadata.clone();
     tokio::spawn(async move {
+        let mut resource_monitor = ResourceMonitor::new();
         let mut interval = interval(Duration::from_secs(60));
         loop {
             interval.tick().await;
 
             let key_stats = keystroke_tracker_clone.get_stats().await;
+            let resources = resource_monitor.capture_snapshot();
             let summary_payload = build_event_envelope(
                 "input_summary",
                 1,
@@ -822,6 +824,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "idle_seconds": if key_stats.is_idle { 60 } else { 0 },
                     "active_seconds": if key_stats.is_idle { 0 } else { 60 },
                     "status": if key_stats.is_idle { "idle" } else { "active" },
+                    "cpu_percent": resources.cpu_percent,
+                    "memory_used_mb": resources.memory_used_mb,
+                    "memory_percent": resources.memory_percent,
+                    "top_process_name": resources.top_process_name,
+                    "top_process_cpu_percent": resources.top_process_cpu_percent,
+                    "top_process_memory_mb": resources.top_process_memory_mb,
                 }),
             );
 

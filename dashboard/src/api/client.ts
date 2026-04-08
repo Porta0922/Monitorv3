@@ -1,7 +1,19 @@
 // API client for the dashboard
 import axios from 'axios';
 import type { AxiosInstance } from 'axios';
-import type { Device, ActivityLog, AppInfo, RunningAppInfo, USBEvent, WifiEvent, SecurityAlert, SecurityEvent, LoginResponse } from '../types';
+import type {
+  Device,
+  ActivityLog,
+  AppInfo,
+  RunningAppInfo,
+  USBEvent,
+  WifiEvent,
+  SecurityAlert,
+  SecurityEvent,
+  LoginResponse,
+  NodeResourceMetric,
+  DeviceResourcePeak,
+} from '../types';
 
 const BASE_URL = 'http://localhost:3000/api';
 
@@ -356,6 +368,24 @@ class ApiClient {
   async getMetricsSummary(): Promise<any> {
     const response = await this.client.get<{ success: boolean; metrics: any }>('/metrics/summary');
     return response.data;
+  }
+
+  async getDeviceResources(deviceId: string, date?: string, limit = 2880): Promise<NodeResourceMetric[]> {
+    const response = await this.client.get<{ success: boolean; metrics: NodeResourceMetric[] }>(`/resources/${deviceId}`, {
+      params: {
+        ...(date ? { date } : {}),
+        limit,
+        tz_offset_minutes: getClientUtcOffsetMinutes(),
+      },
+    });
+    return response.data.metrics || [];
+  }
+
+  async getResourcePeaks(limit = 20): Promise<DeviceResourcePeak[]> {
+    const response = await this.client.get<{ success: boolean; peaks: DeviceResourcePeak[] }>('/resources_peaks', {
+      params: { limit },
+    });
+    return response.data.peaks || [];
   }
 
   async getAuditEvents(limit = 100): Promise<any[]> {

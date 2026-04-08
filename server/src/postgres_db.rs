@@ -137,6 +137,30 @@ pub struct OperationalMetrics {
     pub newest_activity_age_seconds: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeResourceMetric {
+    pub timestamp: DateTime<Utc>,
+    pub cpu_percent: f64,
+    pub memory_used_mb: f64,
+    pub memory_percent: f64,
+    pub top_process_name: Option<String>,
+    pub top_process_cpu_percent: Option<f64>,
+    pub top_process_memory_mb: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceResourcePeak {
+    pub device_id: Uuid,
+    pub peak_cpu_percent: f64,
+    pub peak_memory_percent: f64,
+    pub last_cpu_percent: f64,
+    pub last_memory_percent: f64,
+    pub top_process_name: Option<String>,
+    pub top_process_cpu_percent: Option<f64>,
+    pub top_process_memory_mb: Option<f64>,
+    pub last_seen: DateTime<Utc>,
+}
+
 pub struct Database {
     pool: PgPool,
 }
@@ -354,6 +378,37 @@ impl Database {
         sqlx::query("ALTER TABLE input_activity_metrics ADD COLUMN IF NOT EXISTS clicks_count BIGINT NOT NULL DEFAULT 0")
             .execute(pool)
             .await?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS node_resource_metrics (
+                id BIGSERIAL PRIMARY KEY,
+                device_id UUID NOT NULL REFERENCES devices(device_id),
+                timestamp TIMESTAMPTZ NOT NULL,
+                cpu_percent DOUBLE PRECISION NOT NULL DEFAULT 0,
+                memory_used_mb DOUBLE PRECISION NOT NULL DEFAULT 0,
+                memory_percent DOUBLE PRECISION NOT NULL DEFAULT 0,
+                top_process_name TEXT,
+                top_process_cpu_percent DOUBLE PRECISION,
+                top_process_memory_mb DOUBLE PRECISION,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_node_resource_metrics_device_timestamp ON node_resource_metrics(device_id, timestamp DESC)"
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_node_resource_metrics_timestamp ON node_resource_metrics(timestamp DESC)"
+        )
+        .execute(pool)
+        .await?;
 
         // Create processed events table for idempotency (dedupe retries)
         sqlx::query(
@@ -901,6 +956,193 @@ impl Database {
                 duration_seconds,
                 timestamp,
             })
+            .collect())
+    }
+
+    pub async fn insert_node_resource_metric(
+        &self,
+        device_id: String,
+        timestamp: DateTime<Utc>,
+        cpu_percent: f64,
+        memory_used_mb: f64,
+        memory_percent: f64,
+        top_process_name: Option<String>,
+        top_process_cpu_percent: Option<f64>,
+        top_process_memory_mb: Option<f64>,
+    ) -> Result<(), sqlx::Error> {
+        let device_uuid = Uuid::parse_str(&device_id)
+            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO node_resource_metrics (
+                device_id,
+                timestamp,
+                cpu_percent,
+                memory_used_mb,
+                memory_percent,
+                top_process_name,
+                top_process_cpu_percent,
+                top_process_memory_mb
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            "#,
+        )
+        .bind(device_uuid)
+        .bind(timestamp)
+        .bind(cpu_percent.max(0.0))
+        .bind(memory_used_mb.max(0.0))
+        .bind(memory_percent.clamp(0.0, 100.0))
+        .bind(top_process_name)
+        .bind(top_process_cpu_percent.map(|v| v.max(0.0)))
+        .bind(top_process_memory_mb.map(|v| v.max(0.0)))
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_device_resource_metrics_for_date(
+        &self,
+        device_id: Uuid,
+        date: NaiveDate,
+        tz_offset_minutes: i32,
+        limit: i64,
+    ) -> Result<Vec<NodeResourceMetric>, sqlx::Error> {
+        let rows = sqlx::query_as::<_, (DateTime<Utc>, f64, f64, f64, Option<String>, Option<f64>, Option<f64>)>(
+            "SELECT timestamp,
+                    COALESCE(cpu_percent, 0),
+                    COALESCE(memory_used_mb, 0),
+                    COALESCE(memory_percent, 0),
+                    top_process_name,
+                    top_process_cpu_percent,
+                    top_process_memory_mb
+             FROM node_resource_metrics
+             WHERE device_id = $1
+               AND DATE(timestamp + ($3 * INTERVAL '1 minute')) = $2
+             ORDER BY timestamp ASC
+             LIMIT $4"
+        )
+        .bind(device_id)
+        .bind(date)
+        .bind(tz_offset_minutes)
+        .bind(limit.max(1))
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(
+                |(
+                    timestamp,
+                    cpu_percent,
+                    memory_used_mb,
+                    memory_percent,
+                    top_process_name,
+                    top_process_cpu_percent,
+                    top_process_memory_mb,
+                )| NodeResourceMetric {
+                    timestamp,
+                    cpu_percent,
+                    memory_used_mb,
+                    memory_percent,
+                    top_process_name,
+                    top_process_cpu_percent,
+                    top_process_memory_mb,
+                },
+            )
+            .collect())
+    }
+
+    pub async fn get_resource_peaks_today(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<DeviceResourcePeak>, sqlx::Error> {
+        let rows = sqlx::query_as::<
+            _,
+            (
+                Uuid,
+                f64,
+                f64,
+                f64,
+                f64,
+                Option<String>,
+                Option<f64>,
+                Option<f64>,
+                DateTime<Utc>,
+            ),
+        >(
+            r#"
+            WITH today AS (
+                SELECT *
+                FROM node_resource_metrics
+                WHERE timestamp >= date_trunc('day', NOW())
+            ),
+            peaks AS (
+                SELECT
+                    device_id,
+                    MAX(COALESCE(cpu_percent, 0)) AS peak_cpu_percent,
+                    MAX(COALESCE(memory_percent, 0)) AS peak_memory_percent
+                FROM today
+                GROUP BY device_id
+            ),
+            latest AS (
+                SELECT DISTINCT ON (device_id)
+                    device_id,
+                    COALESCE(cpu_percent, 0) AS last_cpu_percent,
+                    COALESCE(memory_percent, 0) AS last_memory_percent,
+                    top_process_name,
+                    top_process_cpu_percent,
+                    top_process_memory_mb,
+                    timestamp
+                FROM today
+                ORDER BY device_id, timestamp DESC
+            )
+            SELECT
+                p.device_id,
+                p.peak_cpu_percent,
+                p.peak_memory_percent,
+                l.last_cpu_percent,
+                l.last_memory_percent,
+                l.top_process_name,
+                l.top_process_cpu_percent,
+                l.top_process_memory_mb,
+                l.timestamp
+            FROM peaks p
+            JOIN latest l ON l.device_id = p.device_id
+            ORDER BY p.peak_cpu_percent DESC, p.peak_memory_percent DESC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit.max(1))
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(
+                |(
+                    device_id,
+                    peak_cpu_percent,
+                    peak_memory_percent,
+                    last_cpu_percent,
+                    last_memory_percent,
+                    top_process_name,
+                    top_process_cpu_percent,
+                    top_process_memory_mb,
+                    last_seen,
+                )| DeviceResourcePeak {
+                    device_id,
+                    peak_cpu_percent,
+                    peak_memory_percent,
+                    last_cpu_percent,
+                    last_memory_percent,
+                    top_process_name,
+                    top_process_cpu_percent,
+                    top_process_memory_mb,
+                    last_seen,
+                },
+            )
             .collect())
     }
 

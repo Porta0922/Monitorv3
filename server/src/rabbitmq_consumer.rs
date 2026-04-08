@@ -542,6 +542,12 @@ impl RabbitMQConsumer {
         let keys_count = payload["keys_count"].as_i64().unwrap_or(0);
         let mouse_moves_count = payload["mouse_moves_count"].as_i64().unwrap_or(0);
         let clicks_count = payload["clicks_count"].as_i64().unwrap_or(0);
+        let cpu_percent = payload["cpu_percent"].as_f64();
+        let memory_used_mb = payload["memory_used_mb"].as_f64();
+        let memory_percent = payload["memory_percent"].as_f64();
+        let top_process_name = payload["top_process_name"].as_str().map(|value| value.to_string());
+        let top_process_cpu_percent = payload["top_process_cpu_percent"].as_f64();
+        let top_process_memory_mb = payload["top_process_memory_mb"].as_f64();
 
         if event_type == "input_summary"
             && (active_seconds > 0 || idle_seconds > 0 || keys_count > 0 || mouse_moves_count > 0 || clicks_count > 0)
@@ -557,6 +563,21 @@ impl RabbitMQConsumer {
                     clicks_count,
                     status.to_string(),
                     config.input_bucket_max_seconds,
+                )
+                .await;
+        }
+
+        if event_type == "input_summary" && (cpu_percent.is_some() || memory_used_mb.is_some() || memory_percent.is_some()) {
+            let _ = db
+                .insert_node_resource_metric(
+                    device_id.clone(),
+                    event_timestamp,
+                    cpu_percent.unwrap_or(0.0),
+                    memory_used_mb.unwrap_or(0.0),
+                    memory_percent.unwrap_or(0.0),
+                    top_process_name,
+                    top_process_cpu_percent,
+                    top_process_memory_mb,
                 )
                 .await;
         }

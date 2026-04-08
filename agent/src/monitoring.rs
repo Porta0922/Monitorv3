@@ -1,6 +1,6 @@
 // Process and window monitoring module
 use chrono::Utc;
-use sysinfo::{System, SystemExt, ProcessExt, PidExt};
+use sysinfo::{System, SystemExt, ProcessExt, PidExt, CpuExt};
 use sha2::{Sha256, Digest};
 use std::collections::HashMap;
 
@@ -26,6 +26,20 @@ pub struct OpenAppSnapshot {
     pub window_count: u32,
     pub exe_path: Option<String>,
     pub exe_hash: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NodeResourceSnapshot {
+    pub cpu_percent: f64,
+    pub memory_used_mb: f64,
+    pub memory_percent: f64,
+    pub top_process_name: Option<String>,
+    pub top_process_cpu_percent: Option<f64>,
+    pub top_process_memory_mb: Option<f64>,
+}
+
+pub struct ResourceMonitor {
+    sys: System,
 }
 
 pub struct MonitoringLoop {
@@ -117,6 +131,62 @@ impl MonitoringLoop {
             // TODO: Send events to RabbitMQ or offline cache
             
             tokio::time::sleep(interval).await;
+        }
+    }
+}
+
+impl ResourceMonitor {
+    pub fn new() -> Self {
+        let mut sys = System::new_all();
+        sys.refresh_cpu();
+        sys.refresh_memory();
+        sys.refresh_processes();
+        Self { sys }
+    }
+
+    pub fn capture_snapshot(&mut self) -> NodeResourceSnapshot {
+        self.sys.refresh_cpu();
+        self.sys.refresh_memory();
+        self.sys.refresh_processes();
+
+        let cpu_percent = f64::from(self.sys.global_cpu_info().cpu_usage()).max(0.0);
+        let total_memory_kb = self.sys.total_memory();
+        let used_memory_kb = self.sys.used_memory();
+
+        let memory_used_mb = (used_memory_kb as f64) / 1024.0;
+        let memory_percent = if total_memory_kb > 0 {
+            ((used_memory_kb as f64) / (total_memory_kb as f64) * 100.0).clamp(0.0, 100.0)
+        } else {
+            0.0
+        };
+
+        let top_process = self
+            .sys
+            .processes()
+            .values()
+            .max_by(|a, b| {
+                a.cpu_usage()
+                    .partial_cmp(&b.cpu_usage())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+        let (top_process_name, top_process_cpu_percent, top_process_memory_mb) = if let Some(p) = top_process {
+            (
+                Some(p.name().to_string()),
+                Some(f64::from(p.cpu_usage()).max(0.0)),
+                Some((p.memory() as f64) / 1024.0),
+            )
+        } else {
+            (None, None, None)
+        };
+
+        NodeResourceSnapshot {
+            cpu_percent,
+            memory_used_mb,
+            memory_percent,
+            top_process_name,
+            top_process_cpu_percent,
+            top_process_memory_mb,
         }
     }
 }
@@ -349,8 +419,6 @@ mod tests {
 
     #[test]
     fn test_hash_calculation() {
-        // Create a temporary test file
-        let test_content = b"test content for hashing";
         let result = calculate_file_hash("/tmp/test.txt");
         // Will fail if file doesn't exist, which is ok for this test
         let _ = result;

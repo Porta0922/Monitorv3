@@ -66,6 +66,28 @@ export interface WifiEvent {
   signal_percent?: number;
 }
 
+export interface NodeResourceMetric {
+  timestamp: string;
+  cpu_percent: number;
+  memory_used_mb: number;
+  memory_percent: number;
+  top_process_name?: string;
+  top_process_cpu_percent?: number;
+  top_process_memory_mb?: number;
+}
+
+export interface DeviceResourcePeak {
+  device_id: string;
+  peak_cpu_percent: number;
+  peak_memory_percent: number;
+  last_cpu_percent: number;
+  last_memory_percent: number;
+  top_process_name?: string;
+  top_process_cpu_percent?: number;
+  top_process_memory_mb?: number;
+  last_seen: string;
+}
+
 export interface SecurityAlert {
   id: number;
   device_id: string;

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import { AppShell } from '../components/AppShell';
-import type { AppInfo, Device, RunningAppInfo, USBEvent, WifiEvent } from '../types';
+import type { AppInfo, Device, RunningAppInfo, USBEvent, WifiEvent, NodeResourceMetric } from '../types';
 
 type TabKey = 'activity' | 'inventory' | 'usb' | 'wifi';
 type WifiStateFilter = 'all' | 'connected' | 'disconnected';
@@ -63,6 +63,7 @@ export function DeviceDetailPage() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [hourlyPrograms, setHourlyPrograms] = useState<HourlyProgramsGroup[]>([]);
   const [hourly, setHourly] = useState<HourlyItem[]>([]);
+  const [resourceMetrics, setResourceMetrics] = useState<NodeResourceMetric[]>([]);
 
   const [inventory, setInventory] = useState<AppInfo[]>([]);
   const [runningApps, setRunningApps] = useState<RunningAppInfo[]>([]);
@@ -86,12 +87,13 @@ export function DeviceDetailPage() {
       setError('');
 
       try {
-        const [devices, apps, openApps, usb, wifi] = await Promise.all([
+        const [devices, apps, openApps, usb, wifi, resources] = await Promise.all([
           apiClient.getDevices(),
           apiClient.getApps(deviceId).catch(() => []),
           apiClient.getRunningApps(deviceId).catch(() => []),
           apiClient.getUsbHistory(deviceId, 250).catch(() => []),
           apiClient.getWifiHistory(deviceId, 250).catch(() => []),
+          apiClient.getDeviceResources(deviceId, selectedDate, 2880).catch(() => []),
         ]);
 
         const selected = devices.find((d) => d.device_id === deviceId) || null;
@@ -100,6 +102,7 @@ export function DeviceDetailPage() {
         setRunningApps(openApps);
         setUsbEvents(usb);
         setWifiEvents(wifi);
+        setResourceMetrics(resources);
 
         const [historyData, hourlyData] = await Promise.all([
           apiClient.getHistory(deviceId, selectedDate).catch(() => []),
@@ -158,6 +161,35 @@ export function DeviceDetailPage() {
     }`;
 
   const maxHourlyValue = Math.max(1, ...hourly.map((item) => item.active_seconds + item.idle_seconds));
+
+  const resourceHourly = useMemo(() => {
+    const rows = Array.from({ length: 24 }, (_, hour) => ({
+      hour,
+      cpu_peak: 0,
+      memory_peak: 0,
+    }));
+
+    for (const item of resourceMetrics) {
+      const h = new Date(item.timestamp).getHours();
+      rows[h].cpu_peak = Math.max(rows[h].cpu_peak, item.cpu_percent || 0);
+      rows[h].memory_peak = Math.max(rows[h].memory_peak, item.memory_percent || 0);
+    }
+
+    return rows;
+  }, [resourceMetrics]);
+
+  const resourcePeak = useMemo(() => {
+    if (resourceMetrics.length === 0) {
+      return null;
+    }
+
+    return resourceMetrics.reduce((best, current) => {
+      if (!best) return current;
+      const bestScore = (best.cpu_percent || 0) + (best.memory_percent || 0);
+      const currentScore = (current.cpu_percent || 0) + (current.memory_percent || 0);
+      return currentScore > bestScore ? current : best;
+    }, resourceMetrics[0] as NodeResourceMetric);
+  }, [resourceMetrics]);
 
   const usbSummaryRows = useMemo<UsbSummaryRow[]>(() => {
     const normalized = (value?: string) => (value || '').trim();
@@ -464,6 +496,57 @@ export function DeviceDetailPage() {
               );
             })}
           </div>
+        </section>
+      )}
+
+      {tab === 'activity' && !isLoading && (
+        <section className="rounded-2xl border border-[#1b2b56] bg-[linear-gradient(160deg,#0f1d43,#0b1329)] p-4 shadow-[0_12px_26px_rgba(0,0,0,0.32)]">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#8ea0cf]">CPU y RAM por hora (picos)</p>
+            <span className="font-mono text-[10px] text-[#7c90c1]">{resourceMetrics.length} muestras</span>
+          </div>
+
+          {resourceMetrics.length === 0 ? (
+            <div className="rounded-xl border border-[#20315a] bg-[#0a122a] px-4 py-6 text-center font-mono text-xs text-[#8fa0c9]">
+              Sin muestras de CPU/RAM para esta fecha.
+            </div>
+          ) : (
+            <>
+              <div className="flex h-32 items-end gap-1 overflow-hidden rounded-xl border border-[#20315a] bg-[#0a122a] p-2">
+                {resourceHourly.map((item) => (
+                  <div key={item.hour} className="flex min-w-[22px] flex-1 flex-col items-center justify-end gap-1">
+                    <div className="relative flex h-20 w-3 flex-col justify-end overflow-hidden rounded-full bg-[#1b2a4f]">
+                      <div className="w-full bg-[#00d9ff]" style={{ height: `${Math.min(100, Math.round(item.memory_peak))}%` }} />
+                      <div className="w-full bg-[#ff5f7a]" style={{ height: `${Math.min(100, Math.round(item.cpu_peak))}%` }} />
+                    </div>
+                    <span className="font-mono text-[9px] text-[#7c90c1]">{item.hour}</span>
+                  </div>
+                ))}
+              </div>
+
+              {resourcePeak && (
+                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <div className="rounded-xl border border-[#ff5f7a]/40 bg-[#ff5f7a]/10 px-3 py-2">
+                    <p className="font-mono text-[10px] text-[#ff8ea0]">CPU pico</p>
+                    <p className="mt-1 font-mono text-lg text-[#ffd8df]">{Math.round(resourcePeak.cpu_percent || 0)}%</p>
+                  </div>
+                  <div className="rounded-xl border border-[#00d9ff]/40 bg-[#00d9ff]/10 px-3 py-2">
+                    <p className="font-mono text-[10px] text-[#7deeff]">RAM pico</p>
+                    <p className="mt-1 font-mono text-lg text-[#d3f6ff]">{Math.round(resourcePeak.memory_percent || 0)}%</p>
+                  </div>
+                  <div className="rounded-xl border border-[#223462] bg-[#0a122a] px-3 py-2">
+                    <p className="font-mono text-[10px] text-[#8ea0cf]">Proceso dominante</p>
+                    <p className="mt-1 truncate font-mono text-[12px] text-[#dce6ff]" title={resourcePeak.top_process_name || 'N/A'}>
+                      {resourcePeak.top_process_name || 'N/A'}
+                    </p>
+                    <p className="mt-1 font-mono text-[10px] text-[#8ea0cf]">
+                      CPU {Math.round(resourcePeak.top_process_cpu_percent || 0)}% | RAM {Math.round(resourcePeak.top_process_memory_mb || 0)} MB
+                    </p>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </section>
       )}
 
