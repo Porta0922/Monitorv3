@@ -274,10 +274,12 @@ async fn register_device(
 
 async fn list_devices(
     State(state): State<Arc<AppState>>,
+    Query(tz): Query<TzQuery>,
 ) -> impl IntoResponse {
     match state.db.get_devices().await {
         Ok(devices) => {
-            let totals_map: HashMap<Uuid, (i64, i64, i64, i64, i64)> = match state.db.get_device_time_totals_today().await {
+            let tz_offset = tz.tz_offset_minutes.unwrap_or(0);
+            let totals_map: HashMap<Uuid, (i64, i64, i64, i64, i64)> = match state.db.get_device_time_totals_today(tz_offset).await {
                 Ok(totals) => totals
                     .into_iter()
                     .map(|item| {
@@ -339,11 +341,13 @@ async fn list_devices(
 async fn get_device(
     State(state): State<Arc<AppState>>,
     Path(device_id): Path<Uuid>,
+    Query(tz): Query<TzQuery>,
 ) -> impl IntoResponse {
     match state.db.get_devices().await {
         Ok(devices) => {
             if let Some(device) = devices.into_iter().find(|device| device.device_id == device_id) {
-                let (active_seconds, idle_seconds, keys_count, mouse_moves_count, clicks_count) = match state.db.get_single_device_time_totals_today(device_id).await {
+                let tz_offset = tz.tz_offset_minutes.unwrap_or(0);
+                let (active_seconds, idle_seconds, keys_count, mouse_moves_count, clicks_count) = match state.db.get_single_device_time_totals_today(device_id, tz_offset).await {
                     Ok(totals) => (
                         totals.active_seconds,
                         totals.idle_seconds,
@@ -517,8 +521,10 @@ struct ActivityLogFilters {
 }
 
 #[derive(Debug, Deserialize, Default)]
-struct ListLimitQuery {
+struct DateLimitQuery {
     limit: Option<i64>,
+    date: Option<String>,
+    tz_offset_minutes: Option<i32>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -549,6 +555,11 @@ struct ExportCsvQuery {
     device_id: Option<String>,
     from: Option<String>,
     to: Option<String>,
+    tz_offset_minutes: Option<i32>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct TzQuery {
     tz_offset_minutes: Option<i32>,
 }
 
@@ -597,6 +608,25 @@ fn is_unknown_like(value: &str) -> bool {
 }
 
 fn normalize_activity_name(app_name: &str, window_title: &str) -> String {
+    let app_trimmed = app_name.trim();
+    let app_lower = app_trimmed.to_lowercase();
+
+    // Some legacy agent captures on Windows can report the monitor executable path.
+    // In those cases, use the window title as human-readable app source.
+    if app_lower.contains("activity-monitor-agent.exe") {
+        if !is_unknown_like(window_title) {
+            let title = window_title.trim();
+            if let Some((_, app_hint)) = title.rsplit_once(" - ") {
+                let hint = app_hint.trim();
+                if !hint.is_empty() {
+                    return hint.to_string();
+                }
+            }
+            return title.to_string();
+        }
+        return "Sin identificar".to_string();
+    }
+
     if is_unknown_like(app_name) {
         if !is_unknown_like(window_title) {
             return window_title.trim().to_string();
@@ -605,6 +635,10 @@ fn normalize_activity_name(app_name: &str, window_title: &str) -> String {
     }
 
     app_name.trim().to_string()
+}
+
+fn is_idle_activity(app_name: &str, window_title: &str) -> bool {
+    app_name.to_lowercase().contains("idle") || window_title.to_lowercase().contains("idle")
 }
 
 fn parse_time_bounds(filters: &ActivityLogFilters) -> (Option<chrono::DateTime<Utc>>, Option<chrono::DateTime<Utc>>) {
@@ -753,9 +787,11 @@ async fn list_device_running_apps(
 
 async fn list_usb_events(
     State(state): State<Arc<AppState>>,
-    Query(query): Query<ListLimitQuery>,
+    Query(query): Query<DateLimitQuery>,
 ) -> impl IntoResponse {
-    match state.db.get_usb_events(None, query.limit).await {
+    let date = parse_iso_date(query.date.as_deref());
+    let tz_offset = query.tz_offset_minutes.unwrap_or(0);
+    match state.db.get_usb_events(None, query.limit, date, tz_offset).await {
         Ok(events) => {
             let events_json: Vec<serde_json::Value> = events
                 .into_iter()
@@ -791,11 +827,13 @@ async fn list_usb_events(
 async fn list_device_usb_events(
     State(state): State<Arc<AppState>>,
     Path(device_id): Path<Uuid>,
-    Query(query): Query<ListLimitQuery>,
+    Query(query): Query<DateLimitQuery>,
 ) -> impl IntoResponse {
     let device_id_str = device_id.to_string();
+    let date = parse_iso_date(query.date.as_deref());
+    let tz_offset = query.tz_offset_minutes.unwrap_or(0);
 
-    match state.db.get_usb_events(Some(device_id), query.limit).await {
+    match state.db.get_usb_events(Some(device_id), query.limit, date, tz_offset).await {
         Ok(events) => {
             let events_json: Vec<serde_json::Value> = events
                 .into_iter()
@@ -832,9 +870,11 @@ async fn list_device_usb_events(
 
 async fn list_wifi_events(
     State(state): State<Arc<AppState>>,
-    Query(query): Query<ListLimitQuery>,
+    Query(query): Query<DateLimitQuery>,
 ) -> impl IntoResponse {
-    match state.db.get_wifi_events(None, query.limit).await {
+    let date = parse_iso_date(query.date.as_deref());
+    let tz_offset = query.tz_offset_minutes.unwrap_or(0);
+    match state.db.get_wifi_events(None, query.limit, date, tz_offset).await {
         Ok(events) => {
             let events_json: Vec<serde_json::Value> = events
                 .into_iter()
@@ -870,11 +910,13 @@ async fn list_wifi_events(
 async fn list_device_wifi_events(
     State(state): State<Arc<AppState>>,
     Path(device_id): Path<Uuid>,
-    Query(query): Query<ListLimitQuery>,
+    Query(query): Query<DateLimitQuery>,
 ) -> impl IntoResponse {
     let device_id_str = device_id.to_string();
+    let date = parse_iso_date(query.date.as_deref());
+    let tz_offset = query.tz_offset_minutes.unwrap_or(0);
 
-    match state.db.get_wifi_events(Some(device_id), query.limit).await {
+    match state.db.get_wifi_events(Some(device_id), query.limit, date, tz_offset).await {
         Ok(events) => {
             let events_json: Vec<serde_json::Value> = events
                 .into_iter()
@@ -938,15 +980,30 @@ async fn get_history(
         .await
     {
         Ok(rows) => {
-            let history: Vec<serde_json::Value> = rows
+            let mut grouped: HashMap<(String, bool), (i64, i64)> = HashMap::new();
+
+            for (app_name, window_title, seconds, intervals) in rows {
+                let resolved_app = normalize_activity_name(&app_name, &window_title);
+                let is_idle = is_idle_activity(&resolved_app, &window_title);
+                let entry = grouped.entry((resolved_app, is_idle)).or_insert((0, 0));
+                entry.0 += seconds;
+                entry.1 += intervals;
+            }
+
+            let mut history_rows: Vec<(String, i64, i64, bool)> = grouped
                 .into_iter()
-                .map(|(app_name, window_title, seconds, intervals)| {
-                    let resolved_app = normalize_activity_name(&app_name, &window_title);
-                    let is_idle = resolved_app.to_lowercase().contains("idle")
-                        || window_title.to_lowercase().contains("idle");
+                .map(|((app, is_idle), (seconds, intervals))| (app, seconds, intervals, is_idle))
+                .filter(|(_, seconds, _, _)| *seconds >= 60)
+                .collect();
+
+            history_rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+
+            let history: Vec<serde_json::Value> = history_rows
+                .into_iter()
+                .map(|(app, seconds, intervals, is_idle)| {
                     json!({
-                        "app": resolved_app,
-                        "title": window_title,
+                        "app": app.clone(),
+                        "title": app,
                         "seconds": seconds,
                         "duration": format_duration(seconds),
                         "intervals": intervals,
@@ -1068,27 +1125,58 @@ async fn get_history_hourly_programs(
         .await
     {
         Ok(rows) => {
-            let mut grouped: std::collections::BTreeMap<i32, Vec<serde_json::Value>> = std::collections::BTreeMap::new();
+            let mut grouped: std::collections::BTreeMap<i32, HashMap<(String, bool), (i64, i64)>> = std::collections::BTreeMap::new();
 
             for (hour, app_name, seconds, intervals) in rows {
                 let resolved_app = normalize_activity_name(&app_name, &app_name);
-                grouped.entry(hour).or_default().push(json!({
-                    "app": resolved_app,
-                    "seconds": seconds,
-                    "duration": format_duration(seconds),
-                    "intervals": intervals,
-                    "is_idle": resolved_app.to_lowercase().contains("idle"),
-                }));
+                let is_idle = is_idle_activity(&resolved_app, &app_name);
+                let by_app = grouped.entry(hour).or_default();
+                let entry = by_app.entry((resolved_app, is_idle)).or_insert((0, 0));
+                entry.0 += seconds;
+                entry.1 += intervals;
             }
 
             let groups: Vec<serde_json::Value> = grouped
                 .into_iter()
                 .map(|(hour, programs)| {
+                    let mut program_rows: Vec<serde_json::Value> = programs
+                        .into_iter()
+                        .map(|((app, is_idle), (seconds, intervals))| {
+                            json!({
+                                "app": app,
+                                "seconds": seconds,
+                                "duration": format_duration(seconds),
+                                "intervals": intervals,
+                                "is_idle": is_idle,
+                            })
+                        })
+                        .filter(|program| {
+                            program
+                                .get("seconds")
+                                .and_then(|value| value.as_i64())
+                                .unwrap_or(0)
+                                >= 60
+                        })
+                        .collect();
+
+                    program_rows.sort_by(|a, b| {
+                        let seconds_a = a.get("seconds").and_then(|value| value.as_i64()).unwrap_or(0);
+                        let seconds_b = b.get("seconds").and_then(|value| value.as_i64()).unwrap_or(0);
+                        seconds_b.cmp(&seconds_a)
+                    });
+
                     json!({
                         "hour": hour,
                         "label": format!("{:02}:00 - {:02}:59", hour, hour),
-                        "programs": programs,
+                        "programs": program_rows,
                     })
+                })
+                .filter(|group| {
+                    group
+                        .get("programs")
+                        .and_then(|value| value.as_array())
+                        .map(|programs| !programs.is_empty())
+                        .unwrap_or(false)
                 })
                 .collect();
 

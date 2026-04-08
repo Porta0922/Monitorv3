@@ -994,8 +994,11 @@ impl Database {
         .bind(memory_used_mb.max(0.0))
         .bind(memory_percent.clamp(0.0, 100.0))
         .bind(top_process_name)
-        .bind(top_process_cpu_percent.map(|v| v.max(0.0)))
-        .bind(top_process_memory_mb.map(|v| v.max(0.0)))
+        .bind(top_process_cpu_percent.map(|v| v.clamp(0.0, 100.0)))
+        .bind(top_process_memory_mb.map(|v| {
+            // Backward compatibility: older agent builds sent KB-as-MB values.
+            if v > 8192.0 { (v / 1024.0).max(0.0) } else { v.max(0.0) }
+        }))
         .execute(&self.pool)
         .await?;
 
@@ -1015,8 +1018,15 @@ impl Database {
                     COALESCE(memory_used_mb, 0),
                     COALESCE(memory_percent, 0),
                     top_process_name,
-                    top_process_cpu_percent,
-                    top_process_memory_mb
+                    CASE
+                        WHEN top_process_cpu_percent IS NULL THEN NULL
+                        ELSE LEAST(100.0, GREATEST(0.0, top_process_cpu_percent))
+                    END,
+                    CASE
+                        WHEN top_process_memory_mb IS NULL THEN NULL
+                        WHEN top_process_memory_mb > 8192 THEN top_process_memory_mb / 1024.0
+                        ELSE GREATEST(0.0, top_process_memory_mb)
+                    END
              FROM node_resource_metrics
              WHERE device_id = $1
                AND DATE(timestamp + ($3 * INTERVAL '1 minute')) = $2
@@ -1092,8 +1102,15 @@ impl Database {
                     COALESCE(cpu_percent, 0) AS last_cpu_percent,
                     COALESCE(memory_percent, 0) AS last_memory_percent,
                     top_process_name,
-                    top_process_cpu_percent,
-                    top_process_memory_mb,
+                    CASE
+                        WHEN top_process_cpu_percent IS NULL THEN NULL
+                        ELSE LEAST(100.0, GREATEST(0.0, top_process_cpu_percent))
+                    END AS top_process_cpu_percent,
+                    CASE
+                        WHEN top_process_memory_mb IS NULL THEN NULL
+                        WHEN top_process_memory_mb > 8192 THEN top_process_memory_mb / 1024.0
+                        ELSE GREATEST(0.0, top_process_memory_mb)
+                    END AS top_process_memory_mb,
                     timestamp
                 FROM today
                 ORDER BY device_id, timestamp DESC
@@ -1364,38 +1381,24 @@ impl Database {
         &self,
         device_id: Option<Uuid>,
         limit: Option<i64>,
+        date: Option<NaiveDate>,
+        tz_offset_minutes: i32,
     ) -> Result<Vec<UsbEvent>, sqlx::Error> {
-        let rows = if let Some(did) = device_id {
-            if let Some(limit_value) = limit {
-                sqlx::query_as::<_, (Uuid, Uuid, String, String, String, Option<String>, Option<String>, DateTime<Utc>)>(
-                    "SELECT id, device_id, action, hardware_id, device_name, serial_number, volume_label, timestamp FROM usb_events WHERE device_id = $1 ORDER BY timestamp DESC LIMIT $2"
-                )
-                .bind(did)
-                .bind(limit_value.max(1))
-                .fetch_all(&self.pool)
-                .await?
-            } else {
-                sqlx::query_as::<_, (Uuid, Uuid, String, String, String, Option<String>, Option<String>, DateTime<Utc>)>(
-                    "SELECT id, device_id, action, hardware_id, device_name, serial_number, volume_label, timestamp FROM usb_events WHERE device_id = $1 ORDER BY timestamp DESC"
-                )
-                .bind(did)
-                .fetch_all(&self.pool)
-                .await?
-            }
-        } else if let Some(limit_value) = limit {
-            sqlx::query_as::<_, (Uuid, Uuid, String, String, String, Option<String>, Option<String>, DateTime<Utc>)>(
-                "SELECT id, device_id, action, hardware_id, device_name, serial_number, volume_label, timestamp FROM usb_events ORDER BY timestamp DESC LIMIT $1"
-            )
-            .bind(limit_value.max(1))
-            .fetch_all(&self.pool)
-            .await?
-        } else {
-            sqlx::query_as::<_, (Uuid, Uuid, String, String, String, Option<String>, Option<String>, DateTime<Utc>)>(
-                "SELECT id, device_id, action, hardware_id, device_name, serial_number, volume_label, timestamp FROM usb_events ORDER BY timestamp DESC"
-            )
-            .fetch_all(&self.pool)
-            .await?
-        };
+        let limit_value = limit.unwrap_or(1_000_000).max(1);
+        let rows = sqlx::query_as::<_, (Uuid, Uuid, String, String, String, Option<String>, Option<String>, DateTime<Utc>)>(
+            "SELECT id, device_id, action, hardware_id, device_name, serial_number, volume_label, timestamp
+             FROM usb_events
+             WHERE ($1::uuid IS NULL OR device_id = $1)
+               AND ($2::date IS NULL OR DATE(timestamp + ($3 * INTERVAL '1 minute')) = $2)
+             ORDER BY timestamp DESC
+             LIMIT $4"
+        )
+        .bind(device_id)
+        .bind(date)
+        .bind(tz_offset_minutes)
+        .bind(limit_value)
+        .fetch_all(&self.pool)
+        .await?;
 
         Ok(rows
             .into_iter()
@@ -1459,38 +1462,24 @@ impl Database {
         &self,
         device_id: Option<Uuid>,
         limit: Option<i64>,
+        date: Option<NaiveDate>,
+        tz_offset_minutes: i32,
     ) -> Result<Vec<WifiEvent>, sqlx::Error> {
-        let rows = if let Some(did) = device_id {
-            if let Some(limit_value) = limit {
-                sqlx::query_as::<_, (Uuid, Uuid, String, String, Option<String>, Option<String>, Option<i32>, DateTime<Utc>)>(
-                    "SELECT id, device_id, interface_name, state, ssid, bssid, signal_percent, timestamp FROM wifi_events WHERE device_id = $1 ORDER BY timestamp DESC LIMIT $2"
-                )
-                .bind(did)
-                .bind(limit_value.max(1))
-                .fetch_all(&self.pool)
-                .await?
-            } else {
-                sqlx::query_as::<_, (Uuid, Uuid, String, String, Option<String>, Option<String>, Option<i32>, DateTime<Utc>)>(
-                    "SELECT id, device_id, interface_name, state, ssid, bssid, signal_percent, timestamp FROM wifi_events WHERE device_id = $1 ORDER BY timestamp DESC"
-                )
-                .bind(did)
-                .fetch_all(&self.pool)
-                .await?
-            }
-        } else if let Some(limit_value) = limit {
-            sqlx::query_as::<_, (Uuid, Uuid, String, String, Option<String>, Option<String>, Option<i32>, DateTime<Utc>)>(
-                "SELECT id, device_id, interface_name, state, ssid, bssid, signal_percent, timestamp FROM wifi_events ORDER BY timestamp DESC LIMIT $1"
-            )
-            .bind(limit_value.max(1))
-            .fetch_all(&self.pool)
-            .await?
-        } else {
-            sqlx::query_as::<_, (Uuid, Uuid, String, String, Option<String>, Option<String>, Option<i32>, DateTime<Utc>)>(
-                "SELECT id, device_id, interface_name, state, ssid, bssid, signal_percent, timestamp FROM wifi_events ORDER BY timestamp DESC"
-            )
-            .fetch_all(&self.pool)
-            .await?
-        };
+        let limit_value = limit.unwrap_or(1_000_000).max(1);
+        let rows = sqlx::query_as::<_, (Uuid, Uuid, String, String, Option<String>, Option<String>, Option<i32>, DateTime<Utc>)>(
+            "SELECT id, device_id, interface_name, state, ssid, bssid, signal_percent, timestamp
+             FROM wifi_events
+             WHERE ($1::uuid IS NULL OR device_id = $1)
+               AND ($2::date IS NULL OR DATE(timestamp + ($3 * INTERVAL '1 minute')) = $2)
+             ORDER BY timestamp DESC
+             LIMIT $4"
+        )
+        .bind(device_id)
+        .bind(date)
+        .bind(tz_offset_minutes)
+        .bind(limit_value)
+        .fetch_all(&self.pool)
+        .await?;
 
         Ok(rows
             .into_iter()
@@ -1557,7 +1546,9 @@ impl Database {
         Ok(())
     }
 
-    pub async fn get_device_time_totals_today(&self) -> Result<Vec<DeviceTimeTotals>, sqlx::Error> {
+    pub async fn get_device_time_totals_today(&self, tz_offset_minutes: i32) -> Result<Vec<DeviceTimeTotals>, sqlx::Error> {
+        // tz_offset_minutes = client's UTC offset in minutes (e.g. UTC-3 => -180, UTC+5 => 300)
+        // local midnight in UTC = date_trunc('day', NOW() + offset) - offset
         let rows = sqlx::query_as::<_, (Uuid, i64, i64, i64, i64, i64)>(
             "SELECT device_id,
                     COALESCE(SUM(active_seconds), 0)::BIGINT,
@@ -1566,10 +1557,11 @@ impl Database {
                     COALESCE(SUM(mouse_moves_count), 0)::BIGINT,
                     COALESCE(SUM(clicks_count), 0)::BIGINT
                          FROM input_activity_metrics
-                         WHERE timestamp >= date_trunc('day', NOW())
+                         WHERE timestamp >= date_trunc('day', NOW() + make_interval(mins => $1)) - make_interval(mins => $1)
                              AND (active_seconds + idle_seconds) <= 60
              GROUP BY device_id"
         )
+        .bind(tz_offset_minutes)
         .fetch_all(&self.pool)
         .await?;
 
@@ -1589,6 +1581,7 @@ impl Database {
     pub async fn get_single_device_time_totals_today(
         &self,
         device_id: Uuid,
+        tz_offset_minutes: i32,
     ) -> Result<DeviceTimeTotals, sqlx::Error> {
         let row = sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
             "SELECT COALESCE(SUM(active_seconds), 0)::BIGINT,
@@ -1598,10 +1591,11 @@ impl Database {
                     COALESCE(SUM(clicks_count), 0)::BIGINT
                          FROM input_activity_metrics
                          WHERE device_id = $1
-                             AND timestamp >= date_trunc('day', NOW())
+                             AND timestamp >= date_trunc('day', NOW() + make_interval(mins => $2)) - make_interval(mins => $2)
                              AND (active_seconds + idle_seconds) <= 60"
         )
         .bind(device_id)
+        .bind(tz_offset_minutes)
         .fetch_one(&self.pool)
         .await?;
 

@@ -170,11 +170,14 @@ impl ResourceMonitor {
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
 
+        let num_cpus = self.sys.cpus().len().max(1) as f64;
         let (top_process_name, top_process_cpu_percent, top_process_memory_mb) = if let Some(p) = top_process {
             (
                 Some(p.name().to_string()),
-                Some(f64::from(p.cpu_usage()).max(0.0)),
-                Some((p.memory() as f64) / 1024.0),
+                // Normalize by number of logical CPUs so the value stays in 0-100 range
+                Some((f64::from(p.cpu_usage()) / num_cpus).clamp(0.0, 100.0)),
+                // sysinfo::Process::memory() returns bytes; convert to MB
+                Some((p.memory() as f64) / (1024.0 * 1024.0)),
             )
         } else {
             (None, None, None)
@@ -353,7 +356,13 @@ pub fn calculate_file_hash(file_path: &str) -> Result<String, Box<dyn std::error
 // Windows implementation using winapi
 #[cfg(target_os = "windows")]
 fn capture_active_window_windows() -> Option<WindowCapture> {
-    use winapi::um::winuser::{GetForegroundWindow, GetWindowTextW, GetWindowModuleFileNameW};
+    use std::path::Path;
+    use winapi::shared::minwindef::DWORD;
+    use winapi::um::handleapi::CloseHandle;
+    use winapi::um::processthreadsapi::OpenProcess;
+    use winapi::um::winbase::QueryFullProcessImageNameW;
+    use winapi::um::winnt::PROCESS_QUERY_LIMITED_INFORMATION;
+    use winapi::um::winuser::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId};
 
     unsafe {
         let hwnd = GetForegroundWindow();
@@ -371,15 +380,36 @@ fn capture_active_window_windows() -> Option<WindowCapture> {
             "Unknown".to_string()
         };
 
-        // Get window class/app name
-        let mut class_buffer = [0u16; 256];
-        let class_len = GetWindowModuleFileNameW(hwnd, class_buffer.as_mut_ptr(), class_buffer.len() as u32);
-        
-        let app_name = if class_len > 0 {
-            String::from_utf16_lossy(&class_buffer[..class_len as usize]).to_string()
-        } else {
-            "Unknown".to_string()
-        };
+        // Resolve executable from the foreground window process id.
+        let mut app_name = "Unknown".to_string();
+        let mut process_id: DWORD = 0;
+        GetWindowThreadProcessId(hwnd, &mut process_id);
+
+        if process_id != 0 {
+            let process_handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id);
+            if !process_handle.is_null() {
+                let mut exe_buffer = [0u16; 512];
+                let mut exe_len: DWORD = exe_buffer.len() as DWORD;
+
+                if QueryFullProcessImageNameW(
+                    process_handle,
+                    0,
+                    exe_buffer.as_mut_ptr(),
+                    &mut exe_len,
+                ) != 0
+                    && exe_len > 0
+                {
+                    let exe_path = String::from_utf16_lossy(&exe_buffer[..exe_len as usize]);
+                    app_name = Path::new(&exe_path)
+                        .file_name()
+                        .and_then(|value| value.to_str())
+                        .map(|value| value.to_string())
+                        .unwrap_or(exe_path);
+                }
+
+                let _ = CloseHandle(process_handle);
+            }
+        }
 
         Some(WindowCapture {
             app_name,

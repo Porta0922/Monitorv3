@@ -1,21 +1,31 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '../api/client';
 import { AppShell } from '../components/AppShell';
-import type { SecurityAlert } from '../types';
+import type { SecurityAlert, DeviceResourcePeak } from '../types';
+import { useNavigate } from 'react-router-dom';
 
 export function AlertsPage() {
+  const navigate = useNavigate();
   const [alerts, setAlerts] = useState<SecurityAlert[]>([]);
+  const [resourcePeaks, setResourcePeaks] = useState<DeviceResourcePeak[]>([]);
+  const [deviceNames, setDeviceNames] = useState<Map<string, string>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    loadAlerts();
+    load();
   }, []);
 
-  const loadAlerts = async () => {
+  const load = async () => {
     try {
       setIsLoading(true);
-      const data = await apiClient.getAlerts(undefined, false);
-      setAlerts(data);
+      const [alertsData, peaksData, devicesData] = await Promise.all([
+        apiClient.getAlerts(undefined, false).catch(() => [] as SecurityAlert[]),
+        apiClient.getResourcePeaks(50).catch(() => [] as DeviceResourcePeak[]),
+        apiClient.getDevices().catch(() => []),
+      ]);
+      setAlerts(alertsData);
+      setResourcePeaks(peaksData as DeviceResourcePeak[]);
+      setDeviceNames(new Map(devicesData.map((d) => [d.device_id, d.nickname || d.hostname])));
     } catch (err) {
       console.error('Error loading alerts:', err);
     } finally {
@@ -26,117 +36,138 @@ export function AlertsPage() {
   const handleResolveAlert = async (alertId: number) => {
     try {
       await apiClient.resolveAlert(alertId);
-      loadAlerts();
+      load();
     } catch (err) {
       console.error('Error resolving alert:', err);
     }
   };
 
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'CRITICAL':
-        return '#c33';
-      case 'HIGH':
-        return '#f80';
-      case 'MEDIUM':
-        return '#fc0';
-      case 'LOW':
-        return '#0066cc';
-      default:
-        return '#666';
-    }
+  const severityBadge = (severity: string) => {
+    const map: Record<string, string> = {
+      CRITICAL: 'border-red-500/50 bg-red-500/10 text-red-300',
+      HIGH:     'border-[#ff9f1a]/50 bg-[#ff9f1a]/10 text-[#ff9f1a]',
+      MEDIUM:   'border-[#ffd54a]/50 bg-[#ffd54a]/10 text-[#ffd54a]',
+      LOW:      'border-[#00d9ff]/50 bg-[#00d9ff]/10 text-[#00d9ff]',
+    };
+    return `inline-flex rounded-full border px-2.5 py-0.5 font-mono text-[10px] ${map[severity] ?? 'border-[#223462] text-[#8ea0cf]'}`;
   };
 
-  const getAlertIcon = (alertType: string) => {
-    switch (alertType) {
-      case 'PROCESS_TERMINATION_ATTEMPTED':
-        return '⚠️ ';
-      case 'HASH_MISMATCH':
-        return '🔒 ';
-      case 'UNAUTHORIZED_ACCESS':
-        return '🚫 ';
-      default:
-        return '🔔 ';
-    }
-  };
-
-  // Filter for critical process termination alerts
-  const criticalAlerts = alerts.filter(a => a.alert_type === 'PROCESS_TERMINATION_ATTEMPTED');
-
+  // Resource peaks above threshold (CPU >80% or RAM >88%)
+  const hotPeaks = resourcePeaks.filter(
+    (p) => (p.peak_cpu_percent || 0) > 80 || (p.peak_memory_percent || 0) > 88
+  );
 
   return (
     <AppShell
       currentPage="alerts"
       title="Alertas de Seguridad"
-      subtitle="Eventos criticos, hash mismatch y alertas operativas"
+      subtitle="Seguridad y picos de recursos por nodo"
+      noScroll
       actions={
         <button
-          onClick={loadAlerts}
-          className="rounded-lg border border-[#00d9ff]/40 bg-[#00d9ff]/10 px-4 py-2 text-sm font-medium text-[#00d9ff] hover:border-[#00d9ff] hover:bg-[#00d9ff]/20"
+          onClick={load}
+          className="rounded-full border border-[#00d9ff]/50 bg-[#00d9ff]/10 px-3 py-1.5 font-mono text-[10px] text-[#00d9ff] hover:border-[#00d9ff]"
         >
           Actualizar
         </button>
       }
     >
-      {criticalAlerts.length > 0 && (
-        <section className="rounded-xl border border-red-500/40 bg-red-500/10 p-5 shadow-xl">
-          <h3 className="text-lg font-semibold text-red-300">CRITICO: Intentos de terminacion de proceso</h3>
-          <p className="mt-1 text-sm text-red-200/90">
-            Se detectaron {criticalAlerts.length} intentos de terminacion de agente.
-          </p>
-        </section>
-      )}
+      <div className="flex h-[calc(100vh-190px)] flex-col gap-4 overflow-hidden">
 
-      {isLoading ? (
-        <section className="rounded-xl border border-[#1e2339] bg-gradient-to-br from-[#131829] to-[#0a0e27] px-6 py-10 text-center text-[#a0a5b2] shadow-2xl">
-          Cargando alertas...
-        </section>
-      ) : alerts.length === 0 ? (
-        <section className="rounded-xl border border-[#1e2339] bg-gradient-to-br from-[#131829] to-[#0a0e27] px-6 py-10 text-center text-[#00ff88] shadow-2xl">
-          Sin alertas activas.
-        </section>
-      ) : (
-        <section className="grid gap-4">
-          {alerts.map((alert) => (
-            <article
-              key={alert.id}
-              className="rounded-xl border border-[#1e2339] bg-gradient-to-br from-[#131829] to-[#0a0e27] p-5 shadow-xl"
-              style={{ borderLeftColor: getSeverityColor(alert.severity), borderLeftWidth: 4 }}
-            >
-              <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-base font-semibold text-[#e4e6eb]">
-                    {getAlertIcon(alert.alert_type)} {alert.alert_type}
-                  </h3>
-                  <p className="mt-1 text-xs text-[#a0a5b2]">
-                    {alert.app_name ? `Aplicacion: ${alert.app_name}` : 'Alerta del sistema'}
-                  </p>
-                </div>
-                <span
-                  className="rounded-full border px-3 py-1 text-xs font-semibold"
-                  style={{ color: getSeverityColor(alert.severity), borderColor: `${getSeverityColor(alert.severity)}88` }}
+        {/* Resource peaks strip */}
+        {hotPeaks.length > 0 && (
+          <section className="shrink-0 rounded-2xl border border-[#ff5f7a]/30 bg-[linear-gradient(160deg,#1f0a14,#0b1329)] p-4 shadow-[0_10px_22px_rgba(0,0,0,0.3)]">
+            <div className="mb-3 flex items-center gap-3">
+              <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#ff8ea0]">Picos de recursos — hoy</p>
+              <span className="rounded-full border border-[#ff5f7a]/40 bg-[#ff5f7a]/10 px-2.5 py-0.5 font-mono text-[10px] text-[#ff8ea0]">
+                {hotPeaks.length} nodos
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {hotPeaks.map((peak) => (
+                <button
+                  key={peak.device_id}
+                  onClick={() => navigate(`/devices/${peak.device_id}`)}
+                  className="flex flex-col gap-1.5 rounded-xl border border-[#ff5f7a]/30 bg-[#0a122a] px-3 py-2 text-left hover:border-[#ff5f7a]/60"
                 >
-                  {alert.severity}
-                </span>
-              </div>
+                  <p className="font-mono text-[11px] text-[#dce6ff]">
+                    {deviceNames.get(peak.device_id) || peak.device_id.slice(0, 8)}
+                  </p>
+                  <div className="flex gap-3">
+                    <span className="flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-[#ff5f7a]" />
+                      <span className="font-mono text-[10px] text-[#ff8ea0]">CPU {Math.round(peak.peak_cpu_percent || 0)}%</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-[#00d9ff]" />
+                      <span className="font-mono text-[10px] text-[#7deeff]">RAM {Math.round(peak.peak_memory_percent || 0)}%</span>
+                    </span>
+                  </div>
+                  {peak.top_process_name && (
+                    <p className="font-mono text-[9px] text-[#5a6a90]">▸ {peak.top_process_name}</p>
+                  )}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
 
-              <p className="mb-3 text-sm text-[#a0a5b2]">{alert.description}</p>
+        {/* Security alerts table */}
+        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-[#1a2748] bg-[linear-gradient(165deg,#0f1d43,#0b1329)] shadow-[0_14px_30px_rgba(0,0,0,0.35)]">
+          <div className="flex shrink-0 items-center justify-between border-b border-[#20315a] px-5 py-3">
+            <div className="flex items-center gap-3">
+              <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#8ea0cf]">Alertas de seguridad</p>
+              <span className="rounded-full border border-[#ff5f7a]/40 bg-[#ff5f7a]/10 px-2.5 py-0.5 font-mono text-[10px] text-[#ff8ea0]">
+                {alerts.length}
+              </span>
+            </div>
+          </div>
 
-              <div className="mb-4 space-y-1 text-xs text-[#717579]">
-                <p>Creada: {new Date(alert.created_at).toLocaleString()}</p>
-                {alert.exe_hash && <p className="font-mono">Hash: {alert.exe_hash.slice(0, 32)}...</p>}
-              </div>
-
-              <button
-                onClick={() => handleResolveAlert(alert.id)}
-                className="rounded-lg border border-[#00d9ff]/40 bg-[#00d9ff]/10 px-4 py-2 text-xs font-semibold text-[#00d9ff] hover:border-[#00d9ff] hover:bg-[#00d9ff]/20"
-              >
-                Marcar como resuelta
-              </button>
-            </article>
-          ))}
+          <div className="flex-1 overflow-auto">
+            {isLoading ? (
+              <p className="py-10 text-center font-mono text-[11px] text-[#5a6a90]">Cargando alertas...</p>
+            ) : alerts.length === 0 ? (
+              <p className="py-10 text-center font-mono text-[11px] text-[#00ff88]">Sin alertas activas.</p>
+            ) : (
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="sticky top-0 z-10 border-b border-[#20315a] bg-[#0a122a]">
+                    <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Severidad</th>
+                    <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Tipo</th>
+                    <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Descripcion</th>
+                    <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">App</th>
+                    <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Fecha</th>
+                    <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Accion</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {alerts.map((alert) => (
+                    <tr key={alert.id} className="border-b border-[#1a2748] hover:bg-[#0f1c3a]">
+                      <td className="px-5 py-2.5">
+                        <span className={severityBadge(alert.severity)}>{alert.severity}</span>
+                      </td>
+                      <td className="px-5 py-2.5 font-mono text-[10px] text-[#8ea0cf]">{alert.alert_type}</td>
+                      <td className="max-w-[320px] truncate px-5 py-2.5 font-mono text-[11px] text-[#dce6ff]">{alert.description}</td>
+                      <td className="px-5 py-2.5 font-mono text-[10px] text-[#8ea0cf]">{alert.app_name || '—'}</td>
+                      <td className="px-5 py-2.5 font-mono text-[10px] text-[#7c90c1]">
+                        {new Date(alert.created_at).toLocaleString()}
+                      </td>
+                      <td className="px-5 py-2.5">
+                        <button
+                          onClick={() => handleResolveAlert(alert.id)}
+                          className="rounded-full border border-[#00ff88]/40 bg-[#00ff88]/10 px-3 py-1 font-mono text-[10px] text-[#00ff88] hover:border-[#00ff88]"
+                        >
+                          Resolver
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </section>
-      )}
+      </div>
     </AppShell>
   );
 }

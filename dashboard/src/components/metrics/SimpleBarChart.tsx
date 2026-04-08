@@ -57,8 +57,8 @@ export function SimpleBarChart({
   }
 
   return (
-    <div className="flex justify-center">
-      <svg width={width} height={height} className="bg-[#0d1029]/30 rounded">
+    <div className="h-full w-full">
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="h-full w-full rounded bg-[#0a122a]/60">
         {/* Grid */}
         {gridLines}
 

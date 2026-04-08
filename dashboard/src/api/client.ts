@@ -84,12 +84,16 @@ class ApiClient {
 
   // Devices
   async getDevices(): Promise<Device[]> {
-    const response = await this.client.get<{ devices: Device[] }>('/devices');
+    const response = await this.client.get<{ devices: Device[] }>('/devices', {
+      params: { tz_offset_minutes: getClientUtcOffsetMinutes() },
+    });
     return response.data.devices || [];
   }
 
   async getDevice(deviceId: string): Promise<Device> {
-    const response = await this.client.get<Device>(`/devices/${deviceId}`);
+    const response = await this.client.get<Device>(`/devices/${deviceId}`, {
+      params: { tz_offset_minutes: getClientUtcOffsetMinutes() },
+    });
     return response.data;
   }
 
@@ -158,8 +162,12 @@ class ApiClient {
   }
 
   // USB Events
-  async getUsbHistory(deviceId?: string, limit = 100): Promise<USBEvent[]> {
-    const params = { limit };
+  async getUsbHistory(deviceId?: string, limit = 100, date?: string): Promise<USBEvent[]> {
+    const params = {
+      limit,
+      tz_offset_minutes: getClientUtcOffsetMinutes(),
+      ...(date ? { date } : {}),
+    };
     if (deviceId) {
       const response = await this.client.get<{ events: USBEvent[] }>(`/usb/${deviceId}`, {
         params,
@@ -171,8 +179,12 @@ class ApiClient {
   }
 
   // WiFi Events
-  async getWifiHistory(deviceId?: string, limit = 100): Promise<WifiEvent[]> {
-    const params = { limit };
+  async getWifiHistory(deviceId?: string, limit = 100, date?: string): Promise<WifiEvent[]> {
+    const params = {
+      limit,
+      tz_offset_minutes: getClientUtcOffsetMinutes(),
+      ...(date ? { date } : {}),
+    };
     if (deviceId) {
       const response = await this.client.get<{ events: WifiEvent[] }>(`/wifi/${deviceId}`, {
         params,

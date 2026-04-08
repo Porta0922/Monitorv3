@@ -46,8 +46,6 @@ export function DashboardPage() {
     return device.nickname || device.hostname || `${device.device_id.slice(0, 8)}...`;
   };
 
-  const formatPct = (value?: number) => `${Math.round(Math.max(0, value || 0))}%`;
-
   useEffect(() => {
     loadDevices();
     const interval = setInterval(loadDevices, 30000);
@@ -307,22 +305,35 @@ export function DashboardPage() {
                 <button
                   key={peak.device_id}
                   onClick={() => navigate(`/devices/${peak.device_id}`)}
-                  className="w-full rounded-xl border border-[#21325d] bg-[#0a122a] px-3 py-2 text-left hover:border-[#ffd54a]/70"
+                  className="w-full rounded-xl border border-[#21325d] bg-[#0a122a] px-3 py-2.5 text-left hover:border-[#ffd54a]/70"
                 >
-                  <p className="truncate font-mono text-xs text-[#dce6ff]">
-                    {nameByDeviceId.get(peak.device_id) || `${peak.device_id.slice(0, 8)}...`}
-                  </p>
-                  <div className="mt-1 flex items-center justify-between font-mono text-[10px]">
-                    <span className="text-[#ff8ea0]">CPU pico: {formatPct(peak.peak_cpu_percent)}</span>
-                    <span className="text-[#00d9ff]">RAM pico: {formatPct(peak.peak_memory_percent)}</span>
+                  <div className="flex items-center justify-between">
+                    <p className="truncate font-mono text-xs text-[#dce6ff]">
+                      {nameByDeviceId.get(peak.device_id) || `${peak.device_id.slice(0, 8)}...`}
+                    </p>
+                    <span className="ml-2 shrink-0 font-mono text-[9px] text-[#5a6a90]">
+                      {new Date(peak.last_seen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
                   </div>
-                  <div className="mt-1 flex items-center justify-between font-mono text-[10px] text-[#8ea0cf]">
-                    <span>Actual: {formatPct(peak.last_cpu_percent)} / {formatPct(peak.last_memory_percent)}</span>
-                    <span>{new Date(peak.last_seen).toLocaleTimeString()}</span>
+                  <div className="mt-2 space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="w-7 font-mono text-[9px] text-[#ff8ea0]">CPU</span>
+                      <div className="flex-1 overflow-hidden rounded-full bg-[#1b2a4f]" style={{ height: '5px' }}>
+                        <div className="h-full rounded-full bg-[#ff5f7a] transition-all" style={{ width: `${Math.min(100, peak.peak_cpu_percent || 0)}%` }} />
+                      </div>
+                      <span className="w-7 text-right font-mono text-[9px] text-[#ff8ea0]">{Math.round(peak.peak_cpu_percent || 0)}%</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-7 font-mono text-[9px] text-[#7deeff]">RAM</span>
+                      <div className="flex-1 overflow-hidden rounded-full bg-[#1b2a4f]" style={{ height: '5px' }}>
+                        <div className="h-full rounded-full bg-[#00d9ff] transition-all" style={{ width: `${Math.min(100, peak.peak_memory_percent || 0)}%` }} />
+                      </div>
+                      <span className="w-7 text-right font-mono text-[9px] text-[#7deeff]">{Math.round(peak.peak_memory_percent || 0)}%</span>
+                    </div>
                   </div>
                   {peak.top_process_name && (
-                    <p className="mt-1 truncate font-mono text-[10px] text-[#7c90c1]" title={peak.top_process_name}>
-                      Top proceso: {peak.top_process_name}
+                    <p className="mt-1.5 truncate font-mono text-[9px] text-[#5a6a90]" title={peak.top_process_name}>
+                      ▸ {peak.top_process_name}
                     </p>
                   )}
                 </button>

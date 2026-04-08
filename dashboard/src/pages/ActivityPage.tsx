@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import { AppShell } from '../components/AppShell';
 import type { Device } from '../types';
@@ -16,6 +17,7 @@ interface LiveDeviceItem {
 }
 
 export function ActivityPage() {
+  const navigate = useNavigate();
   const [devices, setDevices] = useState<Device[]>([]);
   const [liveDevices, setLiveDevices] = useState<LiveDeviceItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -56,7 +58,7 @@ export function ActivityPage() {
     try {
       setIsLoading(true);
       const [devicesData, liveData] = await Promise.all([
-        apiClient.getDevices(),
+        apiClient.getDevices().catch(() => [] as Device[]),
         apiClient.getLiveDevices({ limit: 100 }).catch(() => []),
       ]);
       setDevices(devicesData);
@@ -75,71 +77,82 @@ export function ActivityPage() {
     <AppShell
       currentPage="activity"
       title="En Vivo"
-      subtitle="Ultima aplicacion detectada por nodo (estado actual)"
+      subtitle="Ultima aplicacion detectada por nodo"
+      noScroll
       actions={
-        <button
-          onClick={loadLiveSnapshot}
-          className="rounded-lg border border-[#00d9ff]/40 bg-[#00d9ff]/10 px-4 py-2 text-sm font-medium text-[#00d9ff] hover:border-[#00d9ff] hover:bg-[#00d9ff]/20"
-        >
-          Actualizar
-        </button>
+        <div className="flex items-center gap-3">
+          <span className="font-mono text-[10px] text-[#5a6a90]">
+            {lastUpdatedAt ? `Actualizado ${new Date(lastUpdatedAt).toLocaleTimeString()}` : ''}
+          </span>
+          <button
+            onClick={loadLiveSnapshot}
+            className="rounded-full border border-[#00d9ff]/50 bg-[#00d9ff]/10 px-3 py-1.5 font-mono text-[10px] text-[#00d9ff] hover:border-[#00d9ff]"
+          >
+            Actualizar
+          </button>
+        </div>
       }
     >
-      <section className="rounded-xl border border-[#1e2339] bg-gradient-to-br from-[#131829] to-[#0a0e27] shadow-2xl overflow-hidden">
-        <div className="border-b border-[#1e2339] bg-[#0a0e27] px-6 py-4">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-lg font-semibold text-[#e4e6eb]">Estado actual por nodo ({currentByDevice.length})</h2>
-            <span className="font-mono text-[11px] text-[#8ea0cf]">
-              {lastUpdatedAt ? `Actualizado: ${new Date(lastUpdatedAt).toLocaleTimeString()}` : 'Sin actualizacion aun'}
+      <div className="h-[calc(100vh-190px)] overflow-hidden rounded-2xl border border-[#1a2748] bg-[linear-gradient(165deg,#0f1d43,#0b1329)] shadow-[0_14px_30px_rgba(0,0,0,0.35)] flex flex-col">
+        {/* Header */}
+        <div className="flex shrink-0 items-center justify-between border-b border-[#20315a] px-5 py-3">
+          <div className="flex items-center gap-3">
+            <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#8ea0cf]">Nodos activos</p>
+            <span className="rounded-full border border-[#00d9ff]/40 bg-[#00d9ff]/10 px-2.5 py-0.5 font-mono text-[10px] text-[#00d9ff]">
+              {currentByDevice.length} nodos
             </span>
           </div>
+          {error && <p className="font-mono text-[10px] text-red-300">{error}</p>}
         </div>
 
-        {error && (
-          <div className="mx-6 mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3">
-            <p className="font-mono text-xs text-red-300">{error}</p>
-          </div>
-        )}
-
-        {isLoading ? (
-          <div className="px-6 py-10 text-center text-[#a0a5b2]">Cargando estado en vivo...</div>
-        ) : currentByDevice.length === 0 ? (
-          <div className="px-6 py-10 text-center text-[#a0a5b2]">
-            No hay telemetria en vivo. Verifica que el agente este ejecutandose y el nodo tenga actividad reciente.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+        {/* Table */}
+        <div className="flex-1 overflow-auto">
+          {isLoading ? (
+            <p className="py-10 text-center font-mono text-[11px] text-[#5a6a90]">Cargando telemetria...</p>
+          ) : currentByDevice.length === 0 ? (
+            <p className="py-10 text-center font-mono text-[11px] text-[#5a6a90]">Sin telemetria en vivo. Verifica que el agente este ejecutandose.</p>
+          ) : (
+            <table className="w-full border-collapse">
               <thead>
-                <tr className="border-b border-[#1e2339] bg-[#0a0e27]">
-                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Nodo</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Estado</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Aplicacion</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Ventana</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Hace</th>
+                <tr className="sticky top-0 z-10 border-b border-[#20315a] bg-[#0a122a]">
+                  <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Nodo</th>
+                  <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Estado</th>
+                  <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Aplicacion</th>
+                  <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Ventana activa</th>
+                  <th className="px-5 py-2.5 text-right font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Hace</th>
                 </tr>
               </thead>
               <tbody>
                 {currentByDevice.map((live) => (
-                  <tr key={live.device_id} className="border-b border-[#1e2339] hover:bg-[#131829]">
-                    <td className="px-6 py-3 font-mono text-xs text-[#a0a5b2]">
-                      {getNodeName(live.device_id)}
+                  <tr
+                    key={live.device_id}
+                    onClick={() => navigate(`/devices/${live.device_id}`)}
+                    className="cursor-pointer border-b border-[#1a2748] hover:bg-[#0f1c3a]"
+                  >
+                    <td className="px-5 py-2.5">
+                      <p className="font-mono text-[11px] text-[#dce6ff]">{getNodeName(live.device_id)}</p>
                     </td>
-                    <td className="px-6 py-3">
-                      <span className={`rounded-full px-2 py-1 font-mono text-[10px] ${live.is_stale ? 'text-red-400' : (live.is_idle ? 'text-[#ff9f1a]' : 'text-[#00ff88]')}`}>
-                        {live.is_stale ? 'STALE' : (live.is_idle ? 'IDLE' : 'ACTIVE')}
+                    <td className="px-5 py-2.5">
+                      <span className={`inline-flex rounded-full px-2.5 py-0.5 font-mono text-[10px] ${
+                        live.is_stale
+                          ? 'border border-red-500/40 bg-red-500/10 text-red-300'
+                          : live.is_idle
+                          ? 'border border-[#ff9f1a]/40 bg-[#ff9f1a]/10 text-[#ff9f1a]'
+                          : 'border border-[#00ff88]/40 bg-[#00ff88]/10 text-[#00ff88]'
+                      }`}>
+                        {live.is_stale ? 'STALE' : live.is_idle ? 'IDLE' : 'ACTIVE'}
                       </span>
                     </td>
-                    <td className="px-6 py-3 font-medium text-[#e4e6eb]">{live.app || '-'}</td>
-                    <td className="max-w-[360px] truncate px-6 py-3 text-[#a0a5b2]">{live.title || '(sin titulo)'}</td>
-                    <td className="px-6 py-3 font-mono text-[#00d9ff]">{live.ago_sec}s</td>
+                    <td className="px-5 py-2.5 font-mono text-[11px] text-[#dce6ff]">{live.app || '—'}</td>
+                    <td className="max-w-[380px] truncate px-5 py-2.5 font-mono text-[10px] text-[#8ea0cf]">{live.title || '(sin titulo)'}</td>
+                    <td className="px-5 py-2.5 text-right font-mono text-[11px] text-[#00d9ff]">{live.ago_sec}s</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
-        )}
-      </section>
+          )}
+        </div>
+      </div>
     </AppShell>
   );
 }

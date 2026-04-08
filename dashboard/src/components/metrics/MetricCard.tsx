@@ -9,8 +9,7 @@ interface MetricCardProps {
   title: string;
   value: number;
   unit: string;
-  color: 'cyan' | 'green' | 'blue' | 'red' | 'yellow';
-  icon: string;
+  color: 'cyan' | 'green' | 'orange' | 'red' | 'yellow';
   trend?: MetricTrend;
 }
 
@@ -19,67 +18,40 @@ export function MetricCard({
   value,
   unit,
   color,
-  icon,
   trend,
 }: MetricCardProps) {
-  const colorMap = {
-    cyan: {
-      bg: 'bg-cyan-900/20',
-      border: 'border-cyan-500/30',
-      text: 'text-cyan-400',
-      value: 'text-cyan-300',
-    },
-    green: {
-      bg: 'bg-green-900/20',
-      border: 'border-green-500/30',
-      text: 'text-green-400',
-      value: 'text-green-300',
-    },
-    blue: {
-      bg: 'bg-blue-900/20',
-      border: 'border-blue-500/30',
-      text: 'text-blue-400',
-      value: 'text-blue-300',
-    },
-    red: {
-      bg: 'bg-red-900/20',
-      border: 'border-red-500/30',
-      text: 'text-red-400',
-      value: 'text-red-300',
-    },
-    yellow: {
-      bg: 'bg-yellow-900/20',
-      border: 'border-yellow-500/30',
-      text: 'text-yellow-400',
-      value: 'text-yellow-300',
-    },
+  const colorMap: Record<string, { border: string; accent: string; value: string }> = {
+    cyan:   { border: 'border-[#00d9ff]/30', accent: 'text-[#8ea0cf]', value: 'text-[#00d9ff]' },
+    green:  { border: 'border-[#00ff88]/30', accent: 'text-[#8ea0cf]', value: 'text-[#00ff88]' },
+    orange: { border: 'border-[#ff9f1a]/30', accent: 'text-[#8ea0cf]', value: 'text-[#ff9f1a]' },
+    red:    { border: 'border-[#ff5f7a]/30', accent: 'text-[#8ea0cf]', value: 'text-[#ff8ea0]' },
+    yellow: { border: 'border-[#ffd54a]/30', accent: 'text-[#8ea0cf]', value: 'text-[#ffd54a]' },
   };
 
-  const styles = colorMap[color];
+  const styles = colorMap[color] ?? colorMap['cyan'];
   const trendChange = trend ? trend.current - trend.previous : 0;
-  const trendPercent = trend ? Math.round(((trendChange / trend.previous) * 100)) : 0;
+  const trendPercent = trend && trend.previous > 0 ? Math.round((trendChange / trend.previous) * 100) : 0;
   const isPositive = trendChange >= 0;
 
   return (
-    <div className={`${styles.bg} border ${styles.border} rounded-lg p-4 transition hover:shadow-lg`}>
-      <div className="flex items-start justify-between">
-        <div>
-          <p className={`text-sm font-medium ${styles.text} mb-2`}>{title}</p>
-          <div className="flex items-baseline gap-2">
-            <span className={`text-2xl font-bold ${styles.value}`}>{value.toLocaleString()}</span>
-            <span className={`text-xs ${styles.text}`}>{unit}</span>
-          </div>
-          {trend && (
-            <div className="mt-3 flex items-center gap-1">
-              <span className={`text-xs font-semibold ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
-                {isPositive ? '↑' : '↓'} {Math.abs(trendPercent)}%
-              </span>
-              <span className="text-xs text-[#8899bb]">vs ayer</span>
-            </div>
-          )}
-        </div>
-        <span className="text-3xl opacity-60">{icon}</span>
+    <article className={`rounded-2xl border ${styles.border} bg-[linear-gradient(160deg,#0f1d43,#0b1329)] px-4 py-3 shadow-[0_10px_22px_rgba(0,0,0,0.35)]`}>
+      <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#8ea0cf]">{title}</p>
+      <div className="mt-2 flex items-baseline gap-1.5">
+        <span className={`font-display text-[22px] font-bold leading-none ${styles.value}`}>
+          {value.toLocaleString()}
+        </span>
+        <span className="font-mono text-[10px] text-[#5a6a90]">{unit}</span>
       </div>
-    </div>
+      {trend ? (
+        <div className="mt-1.5 flex items-center gap-1">
+          <span className={`font-mono text-[10px] ${isPositive ? 'text-[#00ff88]' : 'text-[#ff5f7a]'}`}>
+            {isPositive ? '↑' : '↓'} {Math.abs(trendPercent)}%
+          </span>
+          <span className="font-mono text-[10px] text-[#5a6a90]">vs ayer</span>
+        </div>
+      ) : (
+        <div className="mt-1.5 h-[18px]" />
+      )}
+    </article>
   );
 }

@@ -94,7 +94,6 @@ export function MetricsPage() {
           });
         }
       } catch (err: any) {
-        setError(err.message || 'No se pudieron cargar las metricas');
         console.error('Error loading metrics:', err);
       } finally {
         setIsLoading(false);
@@ -102,7 +101,6 @@ export function MetricsPage() {
     };
 
     fetchMetrics();
-    // Refresh every 60 seconds
     const interval = setInterval(fetchMetrics, 60000);
     return () => clearInterval(interval);
   }, []);
@@ -111,139 +109,74 @@ export function MetricsPage() {
     <AppShell
       currentPage="metrics"
       title="Metricas"
-      subtitle="Indicadores y graficos operativos en tiempo real"
+      subtitle="Indicadores operativos en tiempo real"
+      noScroll
       actions={
         <button
           onClick={() => window.location.reload()}
-          className="rounded-full border border-[#00d9ff]/50 bg-[#00d9ff]/10 px-4 py-2 font-mono text-xs font-semibold tracking-wide text-[#00d9ff] hover:border-[#00d9ff] hover:bg-[#00d9ff]/20"
+          className="rounded-full border border-[#00d9ff]/50 bg-[#00d9ff]/10 px-3 py-1.5 font-mono text-[10px] text-[#00d9ff] hover:border-[#00d9ff]"
         >
           Actualizar
         </button>
       }
     >
-      {isLoading && (
-        <div className="rounded-xl border border-[#1e2339] bg-gradient-to-br from-[#131829] to-[#0a0e27] px-6 py-10 text-center text-[#a0a5b2]">
-          Cargando metricas...
-        </div>
-      )}
-
-      {error && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3">
-          <p className="font-mono text-xs text-red-300">{error}</p>
-        </div>
-      )}
-
-      {!isLoading && (
-        <>
-          <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MetricCard
-              title="Dispositivos activos"
-              value={overview?.devices_today || 0}
-              unit="dispositivos"
-              color="cyan"
-              icon="🖥️"
-            />
-            <MetricCard
-              title="Pulsaciones hoy"
-              value={trends.keystrokes?.current || 0}
-              unit="teclas"
-              color="green"
-              icon="⌨️"
-              trend={trends.keystrokes}
-            />
-            <MetricCard
-              title="Actividad de mouse"
-              value={trends.mouseClicks?.current || 0}
-              unit="clics"
-              color="blue"
-              icon="🖱️"
-              trend={trends.mouseClicks}
-            />
-            {securitySummary && (
+      <div className="flex h-[calc(100vh-190px)] flex-col gap-4 overflow-hidden">
+        {/* KPI strip */}
+        <section className="grid shrink-0 grid-cols-2 gap-3 md:grid-cols-4">
+          {isLoading ? (
+            [...Array(4)].map((_, i) => (
+              <div key={i} className="h-[72px] animate-pulse rounded-2xl border border-[#1a2748] bg-[#0b1329]" />
+            ))
+          ) : (
+            <>
+              <MetricCard title="Dispositivos activos" value={overview?.devices_today || 0} unit="hoy" color="cyan" />
               <MetricCard
                 title="Eventos de seguridad"
-                value={securitySummary.total_events}
+                value={securitySummary?.total_events ?? 0}
                 unit="eventos"
-                color={securitySummary.high_severity > 0 ? 'red' : 'yellow'}
-                icon="🔒"
+                color={(securitySummary?.high_severity ?? 0) > 0 ? 'red' : 'yellow'}
               />
-            )}
-          </section>
-
-          <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <div className="rounded-xl border border-[#1e2339] bg-gradient-to-br from-[#131829] to-[#0a0e27] p-5 shadow-2xl">
-              <h2 className="mb-3 text-lg font-semibold text-[#00d9ff]">Actividad por hora (24h)</h2>
-              {hourlyData.length > 0 ? (
-                <SimpleLineChart data={hourlyData} dataKey="active_seconds" label="Segundos activos" />
-              ) : (
-                <div className="py-8 text-center text-[#8899bb]">No hay datos horarios disponibles</div>
-              )}
-            </div>
-
-            <div className="rounded-xl border border-[#1e2339] bg-gradient-to-br from-[#131829] to-[#0a0e27] p-5 shadow-2xl">
-              <h2 className="mb-3 text-lg font-semibold text-[#00d9ff]">Dispositivos por hora</h2>
-              {hourlyData.length > 0 ? (
-                <SimpleLineChart data={hourlyData} dataKey="device_count" label="Dispositivos" color="#4CAF50" />
-              ) : (
-                <div className="py-8 text-center text-[#8899bb]">No hay datos de dispositivos</div>
-              )}
-            </div>
-          </section>
-
-          <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <div className="rounded-xl border border-[#1e2339] bg-gradient-to-br from-[#131829] to-[#0a0e27] p-5 shadow-2xl">
-              <h2 className="mb-3 text-lg font-semibold text-[#00d9ff]">Pulsaciones por hora</h2>
-              {hourlyData.length > 0 ? (
-                <SimpleBarChart data={hourlyData} dataKey="keystrokes" label="Teclas" color="#FFB74D" />
-              ) : (
-                <div className="py-8 text-center text-[#8899bb]">Sin datos</div>
-              )}
-            </div>
-
-            <div className="rounded-xl border border-[#1e2339] bg-gradient-to-br from-[#131829] to-[#0a0e27] p-5 shadow-2xl">
-              <h2 className="mb-3 text-lg font-semibold text-[#00d9ff]">Clics por hora</h2>
-              {hourlyData.length > 0 ? (
-                <SimpleBarChart data={hourlyData} dataKey="mouse_clicks" label="Clics" color="#29B6F6" />
-              ) : (
-                <div className="py-8 text-center text-[#8899bb]">Sin datos</div>
-              )}
-            </div>
-
-            <div className="rounded-xl border border-[#1e2339] bg-gradient-to-br from-[#131829] to-[#0a0e27] p-5 shadow-2xl">
-              <h2 className="mb-3 text-lg font-semibold text-[#00d9ff]">Movimientos por hora</h2>
-              {hourlyData.length > 0 ? (
-                <SimpleBarChart data={hourlyData} dataKey="mouse_moves" label="Movimientos" color="#AB47BC" />
-              ) : (
-                <div className="py-8 text-center text-[#8899bb]">Sin datos</div>
-              )}
-            </div>
-          </section>
-
-          {securitySummary && (
-            <section className="rounded-xl border border-[#1e2339] bg-gradient-to-br from-[#131829] to-[#0a0e27] p-5 shadow-2xl">
-              <h2 className="mb-3 text-lg font-semibold text-[#00d9ff]">Eventos de seguridad por severidad</h2>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-                <div className="rounded-lg border border-[#1a90ff]/30 bg-[#0d1029]/50 p-4">
-                  <div className="mb-2 text-sm text-[#8899bb]">Total de eventos</div>
-                  <div className="text-2xl font-bold text-[#00d9ff]">{securitySummary.total_events}</div>
-                </div>
-                <div className="rounded-lg border border-red-500/30 bg-red-900/20 p-4">
-                  <div className="mb-2 text-sm text-red-400">Alta</div>
-                  <div className="text-2xl font-bold text-red-400">{securitySummary.high_severity}</div>
-                </div>
-                <div className="rounded-lg border border-yellow-500/30 bg-yellow-900/20 p-4">
-                  <div className="mb-2 text-sm text-yellow-400">Media</div>
-                  <div className="text-2xl font-bold text-yellow-400">{securitySummary.medium_severity}</div>
-                </div>
-                <div className="rounded-lg border border-green-500/30 bg-green-900/20 p-4">
-                  <div className="mb-2 text-sm text-green-400">Baja</div>
-                  <div className="text-2xl font-bold text-green-400">{securitySummary.low_severity}</div>
-                </div>
-              </div>
-            </section>
+              <MetricCard title="Pulsaciones hoy" value={trends.keystrokes?.current || 0} unit="teclas" color="green" trend={trends.keystrokes} />
+              <MetricCard title="Clics de mouse" value={trends.mouseClicks?.current || 0} unit="clics" color="cyan" trend={trends.mouseClicks} />
+            </>
           )}
-        </>
-      )}
+        </section>
+
+        {error && (
+          <div className="shrink-0 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2">
+            <p className="font-mono text-[10px] text-red-300">{error}</p>
+          </div>
+        )}
+
+        {/* 2x2 charts grid */}
+        <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-2 gap-4 overflow-hidden">
+          {[
+            { title: 'Actividad por hora', key: 'active_seconds', type: 'line', color: '#00d9ff' },
+            { title: 'Dispositivos por hora', key: 'device_count', type: 'line', color: '#00ff88' },
+            { title: 'Pulsaciones por hora', key: 'keystrokes', type: 'bar', color: '#ffd54a' },
+            { title: 'Clics de mouse por hora', key: 'mouse_clicks', type: 'bar', color: '#00d9ff' },
+          ].map(({ title, key, type, color }) => (
+            <div key={key} className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[#1a2748] bg-[linear-gradient(160deg,#0f1d43,#0b1329)] p-4 shadow-[0_10px_22px_rgba(0,0,0,0.32)]">
+              <p className="mb-2 shrink-0 font-mono text-[11px] uppercase tracking-[0.18em] text-[#8ea0cf]">{title}</p>
+              <div className="min-h-0 flex-1 overflow-hidden">
+                {isLoading ? (
+                  <div className="flex h-full items-center justify-center">
+                    <p className="font-mono text-[10px] text-[#5a6a90]">Cargando...</p>
+                  </div>
+                ) : hourlyData.length > 0 ? (
+                  type === 'line'
+                    ? <SimpleLineChart data={hourlyData} dataKey={key} label={title} color={color} />
+                    : <SimpleBarChart data={hourlyData} dataKey={key} label={title} color={color} />
+                ) : (
+                  <div className="flex h-full items-center justify-center">
+                    <p className="font-mono text-[10px] text-[#5a6a90]">Sin datos disponibles</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </AppShell>
   );
 }

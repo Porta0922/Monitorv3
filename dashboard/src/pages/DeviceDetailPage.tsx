@@ -6,7 +6,6 @@ import type { AppInfo, Device, RunningAppInfo, USBEvent, WifiEvent, NodeResource
 
 type TabKey = 'activity' | 'inventory' | 'usb' | 'wifi';
 type WifiStateFilter = 'all' | 'connected' | 'disconnected';
-type WifiDateFilter = 'all' | 'today' | 'selected';
 
 interface HistoryItem {
   app: string;
@@ -71,7 +70,6 @@ export function DeviceDetailPage() {
   const [wifiEvents, setWifiEvents] = useState<WifiEvent[]>([]);
   const [tab, setTab] = useState<TabKey>('activity');
   const [wifiStateFilter, setWifiStateFilter] = useState<WifiStateFilter>('all');
-  const [wifiDateFilter, setWifiDateFilter] = useState<WifiDateFilter>('today');
   const [isLoading, setIsLoading] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState('');
@@ -91,8 +89,8 @@ export function DeviceDetailPage() {
           apiClient.getDevices(),
           apiClient.getApps(deviceId).catch(() => []),
           apiClient.getRunningApps(deviceId).catch(() => []),
-          apiClient.getUsbHistory(deviceId, 250).catch(() => []),
-          apiClient.getWifiHistory(deviceId, 250).catch(() => []),
+          apiClient.getUsbHistory(deviceId, 250, selectedDate).catch(() => []),
+          apiClient.getWifiHistory(deviceId, 250, selectedDate).catch(() => []),
           apiClient.getDeviceResources(deviceId, selectedDate, 2880).catch(() => []),
         ]);
 
@@ -141,6 +139,17 @@ export function DeviceDetailPage() {
     return `${minutes}m ${remSeconds}s`;
   };
 
+  const formatTopProcessCpu = (value?: number) => {
+    return Math.round(Math.min(100, Math.max(0, value || 0)));
+  };
+
+  const formatTopProcessMemoryMb = (value?: number) => {
+    const raw = Math.max(0, value || 0);
+    // Backward compatibility for legacy rows persisted as KB-as-MB.
+    const normalized = raw > 8192 ? raw / 1024 : raw;
+    return Math.round(normalized);
+  };
+
   const shortAppName = (rawName: string) => {
     const cleaned = (rawName || '').trim();
     const normalized = cleaned.toLowerCase();
@@ -161,22 +170,6 @@ export function DeviceDetailPage() {
     }`;
 
   const maxHourlyValue = Math.max(1, ...hourly.map((item) => item.active_seconds + item.idle_seconds));
-
-  const resourceHourly = useMemo(() => {
-    const rows = Array.from({ length: 24 }, (_, hour) => ({
-      hour,
-      cpu_peak: 0,
-      memory_peak: 0,
-    }));
-
-    for (const item of resourceMetrics) {
-      const h = new Date(item.timestamp).getHours();
-      rows[h].cpu_peak = Math.max(rows[h].cpu_peak, item.cpu_percent || 0);
-      rows[h].memory_peak = Math.max(rows[h].memory_peak, item.memory_percent || 0);
-    }
-
-    return rows;
-  }, [resourceMetrics]);
 
   const resourcePeak = useMemo(() => {
     if (resourceMetrics.length === 0) {
@@ -292,14 +285,11 @@ export function DeviceDetailPage() {
         wifiStateFilter === 'all' ? true : event.state.toLowerCase() === wifiStateFilter;
 
       const eventDate = new Date(event.timestamp).toISOString().slice(0, 10);
-      const dateMatches =
-        wifiDateFilter === 'all'
-          ? true
-          : eventDate === dateToday;
+      const dateMatches = eventDate === selectedDate;
 
       return stateMatches && dateMatches;
     });
-  }, [wifiEventsWithDuration, wifiStateFilter, wifiDateFilter, dateToday]);
+  }, [wifiEventsWithDuration, wifiStateFilter, selectedDate]);
 
   const currentWifiEvent = useMemo(() => {
     return wifiEventsWithDuration[0] || null;
@@ -429,7 +419,7 @@ export function DeviceDetailPage() {
           </button>
         </div>
 
-        {tab === 'activity' && (
+        {(tab === 'activity' || tab === 'usb' || tab === 'wifi') && (
           <div className="flex items-center gap-2">
             <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Fecha</span>
             <input
@@ -461,17 +451,6 @@ export function DeviceDetailPage() {
               <option value="connected">Conectado</option>
               <option value="disconnected">Desconectado</option>
             </select>
-
-            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Fecha</span>
-            <select
-              value={wifiDateFilter}
-              onChange={(event) => setWifiDateFilter(event.target.value as WifiDateFilter)}
-              className="rounded-full border border-[#223462] bg-[#111a35] px-3 py-1.5 text-[11px] text-[#dce6ff]"
-            >
-              <option value="today">Hoy</option>
-              <option value="selected">Fecha seleccionada</option>
-              <option value="all">Todo</option>
-            </select>
           </div>
         )}
       </section>
@@ -499,54 +478,27 @@ export function DeviceDetailPage() {
         </section>
       )}
 
-      {tab === 'activity' && !isLoading && (
-        <section className="rounded-2xl border border-[#1b2b56] bg-[linear-gradient(160deg,#0f1d43,#0b1329)] p-4 shadow-[0_12px_26px_rgba(0,0,0,0.32)]">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#8ea0cf]">CPU y RAM por hora (picos)</p>
-            <span className="font-mono text-[10px] text-[#7c90c1]">{resourceMetrics.length} muestras</span>
-          </div>
-
-          {resourceMetrics.length === 0 ? (
-            <div className="rounded-xl border border-[#20315a] bg-[#0a122a] px-4 py-6 text-center font-mono text-xs text-[#8fa0c9]">
-              Sin muestras de CPU/RAM para esta fecha.
-            </div>
-          ) : (
-            <>
-              <div className="flex h-32 items-end gap-1 overflow-hidden rounded-xl border border-[#20315a] bg-[#0a122a] p-2">
-                {resourceHourly.map((item) => (
-                  <div key={item.hour} className="flex min-w-[22px] flex-1 flex-col items-center justify-end gap-1">
-                    <div className="relative flex h-20 w-3 flex-col justify-end overflow-hidden rounded-full bg-[#1b2a4f]">
-                      <div className="w-full bg-[#00d9ff]" style={{ height: `${Math.min(100, Math.round(item.memory_peak))}%` }} />
-                      <div className="w-full bg-[#ff5f7a]" style={{ height: `${Math.min(100, Math.round(item.cpu_peak))}%` }} />
-                    </div>
-                    <span className="font-mono text-[9px] text-[#7c90c1]">{item.hour}</span>
-                  </div>
-                ))}
-              </div>
-
-              {resourcePeak && (
-                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
-                  <div className="rounded-xl border border-[#ff5f7a]/40 bg-[#ff5f7a]/10 px-3 py-2">
-                    <p className="font-mono text-[10px] text-[#ff8ea0]">CPU pico</p>
-                    <p className="mt-1 font-mono text-lg text-[#ffd8df]">{Math.round(resourcePeak.cpu_percent || 0)}%</p>
-                  </div>
-                  <div className="rounded-xl border border-[#00d9ff]/40 bg-[#00d9ff]/10 px-3 py-2">
-                    <p className="font-mono text-[10px] text-[#7deeff]">RAM pico</p>
-                    <p className="mt-1 font-mono text-lg text-[#d3f6ff]">{Math.round(resourcePeak.memory_percent || 0)}%</p>
-                  </div>
-                  <div className="rounded-xl border border-[#223462] bg-[#0a122a] px-3 py-2">
-                    <p className="font-mono text-[10px] text-[#8ea0cf]">Proceso dominante</p>
-                    <p className="mt-1 truncate font-mono text-[12px] text-[#dce6ff]" title={resourcePeak.top_process_name || 'N/A'}>
-                      {resourcePeak.top_process_name || 'N/A'}
-                    </p>
-                    <p className="mt-1 font-mono text-[10px] text-[#8ea0cf]">
-                      CPU {Math.round(resourcePeak.top_process_cpu_percent || 0)}% | RAM {Math.round(resourcePeak.top_process_memory_mb || 0)} MB
-                    </p>
-                  </div>
-                </div>
-              )}
-            </>
+      {tab === 'activity' && !isLoading && resourceMetrics.length > 0 && (
+        <section className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-[#1b2b56] bg-[#0b1329] px-4 py-2.5">
+          <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-[#5a6a90]">Recursos hoy</span>
+          <span className="flex items-center gap-1.5 rounded-full border border-[#ff5f7a]/30 bg-[#ff5f7a]/10 px-2.5 py-1">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#ff5f7a]" />
+            <span className="font-mono text-[11px] text-[#ffd8df]">CPU pico {Math.min(100, Math.round(resourcePeak?.cpu_percent || 0))}%</span>
+          </span>
+          <span className="flex items-center gap-1.5 rounded-full border border-[#00d9ff]/30 bg-[#00d9ff]/10 px-2.5 py-1">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#00d9ff]" />
+            <span className="font-mono text-[11px] text-[#d3f6ff]">RAM pico {Math.min(100, Math.round(resourcePeak?.memory_percent || 0))}%</span>
+          </span>
+          {resourcePeak?.top_process_name && (
+            <span className="flex items-center gap-1.5 rounded-full border border-[#223462] bg-[#0a122a] px-2.5 py-1">
+              <span className="font-mono text-[10px] text-[#5a6a90]">▸</span>
+              <span className="font-mono text-[11px] text-[#8ea0cf]">{resourcePeak.top_process_name}</span>
+              <span className="font-mono text-[10px] text-[#5a6a90]">
+                {formatTopProcessCpu(resourcePeak.top_process_cpu_percent)}% cpu · {formatTopProcessMemoryMb(resourcePeak.top_process_memory_mb)} MB
+              </span>
+            </span>
           )}
+          <span className="ml-auto font-mono text-[10px] text-[#3a4e78]">{resourceMetrics.length} muestras</span>
         </section>
       )}
 

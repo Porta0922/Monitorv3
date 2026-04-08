@@ -300,7 +300,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     
                     if changed {
                         // Window changed: send activity event for previous window
-                        let duration_seconds = (current.timestamp - *started_at).num_seconds().max(1);
+                        let duration_reference = last_heartbeat_sent.unwrap_or(*started_at);
+                        let duration_seconds = (current.timestamp - duration_reference).num_seconds().max(1);
                         let activity_payload = build_event_envelope(
                             "activity",
                             1,
@@ -327,7 +328,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             (now - last_heartbeat_sent.unwrap()).num_seconds() >= 30;
                         
                         if should_send_heartbeat {
-                            let duration_seconds = (now - *started_at).num_seconds().max(1);
+                            let duration_reference = last_heartbeat_sent.unwrap_or(*started_at);
+                            let duration_seconds = (now - duration_reference).num_seconds().max(1);
                             let activity_payload = build_event_envelope(
                                 "activity",
                                 1,
