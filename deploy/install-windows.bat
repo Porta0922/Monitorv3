@@ -18,6 +18,11 @@ set AGENT_VERSION=0.1.0
 set SERVICE_NAME=ActivityMonitor
 set AGENT_PATH=%~dp0\..\target\release\activity-monitor-agent.exe
 set NSSM_PATH=%~dp0\nssm.exe
+set NSSM_LOCAL_DIR=%PROGRAMDATA%\ActivityMonitor\bin
+set NSSM_LOCAL_PATH=%NSSM_LOCAL_DIR%\nssm.exe
+set NSSM_ZIP_URL=https://nssm.cc/download/nssm-2.24-101-g897c7ad.zip
+set NSSM_ZIP_PATH=%TEMP%\nssm.zip
+set NSSM_EXTRACT_DIR=%TEMP%\nssm-extract
 set CONFIG_DIR=%PROGRAMDATA%\ActivityMonitor
 set LOG_DIR=%PROGRAMDATA%\ActivityMonitor\logs
 set ENV_FILE=%CONFIG_DIR%\.env
@@ -26,6 +31,7 @@ set OSQUERY_MSI_URL=https://github.com/osquery/osquery/releases/download/%OSQUER
 set OSQUERY_MSI_PATH=%TEMP%\osquery-%OSQUERY_VERSION%.msi
 set AGENT_AUTH_TOKEN=dev-agent-token
 set AGENT_OFFLINE_CACHE_KEY=replace-with-32-byte-cache-key!!
+set AGENT_SERVER_URL=http://localhost:3000
 
 echo ========================================
 echo ActivityMonitor Enterprise v3 Installer
@@ -36,6 +42,11 @@ REM Ask for optional auth token (used by current agent)
 set /p INPUT_AUTH_TOKEN="Enter agent auth token (or press Enter for default dev-agent-token): "
 if not "!INPUT_AUTH_TOKEN!"=="" (
     set AGENT_AUTH_TOKEN=!INPUT_AUTH_TOKEN!
+)
+
+set /p INPUT_SERVER_URL="Enter server URL for remote osquery policy (or press Enter for default http://localhost:3000): "
+if not "!INPUT_SERVER_URL!"=="" (
+    set AGENT_SERVER_URL=!INPUT_SERVER_URL!
 )
 
 REM Create config directory
@@ -50,6 +61,7 @@ if not exist "%ENV_FILE%" (
         echo # ActivityMonitor Agent Configuration
         echo AGENT_AUTH_TOKEN=!AGENT_AUTH_TOKEN!
         echo AGENT_OFFLINE_CACHE_KEY=!AGENT_OFFLINE_CACHE_KEY!
+        echo AGENT_SERVER_URL=!AGENT_SERVER_URL!
     ) > "%ENV_FILE%"
     echo [+] Created configuration: %ENV_FILE%
 ) else (
@@ -102,14 +114,69 @@ if not exist "C:\Program Files\osquery\osqueryi.exe" (
     echo [+] osquery already installed
 )
 
-REM Download NSSM if not present
-if not exist "%NSSM_PATH%" (
-    echo [*] Downloading NSSM...
-    powershell -Command "(New-Object System.Net.WebClient).DownloadFile('https://nssm.cc/download/nssm-2.24-101-g897c7ad.zip', '%~dp0nssm.zip')"
-    powershell -Command "Expand-Archive '%~dp0nssm.zip' -DestinationPath '%~dp0'"
-    copy "%~dp0nssm-2.24-101-g897c7ad\win64\nssm.exe" "%NSSM_PATH%"
-    echo [+] NSSM installed
+REM Resolve/install NSSM (local file, PATH, Chocolatey, then direct download fallback)
+set NSSM_CMD=
+
+if exist "%NSSM_PATH%" set NSSM_CMD="%NSSM_PATH%"
+if "!NSSM_CMD!"=="" if exist "%NSSM_LOCAL_PATH%" set NSSM_CMD="%NSSM_LOCAL_PATH%"
+
+if "!NSSM_CMD!"=="" (
+    where nssm >nul 2>&1
+    if !errorLevel! equ 0 (
+        for /f "delims=" %%I in ('where nssm') do (
+            set NSSM_CMD="%%I"
+            goto :nssm_ready
+        )
+    )
 )
+
+if "!NSSM_CMD!"=="" (
+    where choco >nul 2>&1
+    if !errorLevel! equ 0 (
+        echo [*] Chocolatey detected. Installing NSSM from Chocolatey repository...
+        choco install nssm -y --no-progress
+        where nssm >nul 2>&1
+        if !errorLevel! equ 0 (
+            for /f "delims=" %%I in ('where nssm') do (
+                set NSSM_CMD="%%I"
+                goto :nssm_ready
+            )
+        )
+    ) else (
+        echo [!] Chocolatey not found. Skipping repository install for NSSM...
+    )
+)
+
+if "!NSSM_CMD!"=="" (
+    echo [*] Falling back to direct NSSM download...
+    if not exist "%NSSM_LOCAL_DIR%" mkdir "%NSSM_LOCAL_DIR%"
+    if exist "%NSSM_ZIP_PATH%" del /f /q "%NSSM_ZIP_PATH%" >nul 2>&1
+    if exist "%NSSM_EXTRACT_DIR%" rmdir /s /q "%NSSM_EXTRACT_DIR%" >nul 2>&1
+
+    powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -Uri '%NSSM_ZIP_URL%' -OutFile '%NSSM_ZIP_PATH%'"
+    if not exist "%NSSM_ZIP_PATH%" (
+        echo [-] Failed to download NSSM zip
+        pause
+        exit /b 1
+    )
+
+    powershell -NoProfile -Command "Expand-Archive '%NSSM_ZIP_PATH%' -DestinationPath '%NSSM_EXTRACT_DIR%' -Force"
+    if exist "%NSSM_EXTRACT_DIR%\nssm-2.24-101-g897c7ad\win64\nssm.exe" (
+        copy /y "%NSSM_EXTRACT_DIR%\nssm-2.24-101-g897c7ad\win64\nssm.exe" "%NSSM_LOCAL_PATH%" >nul
+    )
+
+    if exist "%NSSM_LOCAL_PATH%" (
+        set NSSM_CMD="%NSSM_LOCAL_PATH%"
+    )
+)
+
+:nssm_ready
+if "!NSSM_CMD!"=="" (
+    echo [-] Could not resolve or install NSSM automatically.
+    pause
+    exit /b 1
+)
+echo [+] NSSM ready: !NSSM_CMD!
 
 REM Stop and remove existing service
 echo [*] Checking for existing service...
@@ -118,22 +185,22 @@ if %errorLevel% equ 0 (
     echo [*] Stopping existing service...
     net stop %SERVICE_NAME% >nul 2>&1
     echo [*] Removing existing service...
-    %NSSM_PATH% remove %SERVICE_NAME% confirm
+    !NSSM_CMD! remove %SERVICE_NAME% confirm
 )
 
 REM Install new service
 echo [*] Installing service...
-%NSSM_PATH% install %SERVICE_NAME% "%AGENT_PATH%"
-%NSSM_PATH% set %SERVICE_NAME% AppDirectory "%CONFIG_DIR%"
-%NSSM_PATH% set %SERVICE_NAME% AppStdout "%LOG_DIR%\output.log"
-%NSSM_PATH% set %SERVICE_NAME% AppStderr "%LOG_DIR%\error.log"
-%NSSM_PATH% set %SERVICE_NAME% AppRotateFiles 1
-%NSSM_PATH% set %SERVICE_NAME% AppRotateOnline 1
-%NSSM_PATH% set %SERVICE_NAME% AppRotateSeconds 86400
-%NSSM_PATH% set %SERVICE_NAME% AppRotateBytes 10485760
+!NSSM_CMD! install %SERVICE_NAME% "%AGENT_PATH%"
+!NSSM_CMD! set %SERVICE_NAME% AppDirectory "%CONFIG_DIR%"
+!NSSM_CMD! set %SERVICE_NAME% AppStdout "%LOG_DIR%\output.log"
+!NSSM_CMD! set %SERVICE_NAME% AppStderr "%LOG_DIR%\error.log"
+!NSSM_CMD! set %SERVICE_NAME% AppRotateFiles 1
+!NSSM_CMD! set %SERVICE_NAME% AppRotateOnline 1
+!NSSM_CMD! set %SERVICE_NAME% AppRotateSeconds 86400
+!NSSM_CMD! set %SERVICE_NAME% AppRotateBytes 10485760
 
 REM Set environment variables for service
-%NSSM_PATH% set %SERVICE_NAME% AppEnvironmentExtra "AGENT_AUTH_TOKEN=!AGENT_AUTH_TOKEN!" "AGENT_OFFLINE_CACHE_KEY=!AGENT_OFFLINE_CACHE_KEY!"
+!NSSM_CMD! set %SERVICE_NAME% AppEnvironmentExtra "AGENT_AUTH_TOKEN=!AGENT_AUTH_TOKEN!" "AGENT_OFFLINE_CACHE_KEY=!AGENT_OFFLINE_CACHE_KEY!"
 
 REM Start service
 echo [*] Starting service...

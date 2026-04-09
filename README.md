@@ -196,6 +196,38 @@ Valores recomendados:
 - `30` = tick cada 30s, cada query ejecuta segun su intervalo
 - `60` = tick cada 60s (menos aggressive)
 
+### Control central desde servidor (recomendado para flotas)
+
+Ahora el agente puede tomar la política de osquery desde el servidor usando:
+
+```bash
+# En el agente
+set AGENT_SERVER_URL=http://TU-SERVIDOR:3000
+set AGENT_AUTH_TOKEN=dev-agent-token
+```
+
+Endpoint utilizado por el agente:
+- `GET /api/agent/osquery-policy?device_id=<uuid>`
+- Header: `x-agent-token: <AGENT_AUTH_TOKEN>`
+
+Variables de entorno del servidor para controlar la política global:
+
+```bash
+OSQUERY_POLICY_PROFILE=balanced
+OSQUERY_POLICY_TICK_SECONDS=60
+AGENT_AUTH_TOKEN=dev-agent-token
+```
+
+Perfiles soportados:
+- `off` -> desactiva osquery
+- `slow` -> tick default 90s
+- `balanced` -> tick default 60s
+- `aggressive` -> tick default 30s
+
+Notas de rendimiento:
+- El agente aplica limites de seguridad (`min 30s`, `max 900s`) para evitar sobrecarga accidental.
+- Si el servidor no responde, el agente vuelve automaticamente a `AGENT_OSQUERY_SCHEDULER_SECONDS` local.
+
 ### Detección de copia en USB (T1052.001)
 
 El agente monitorea continuamente drives USB removibles cada **45 segundos** y detecta:

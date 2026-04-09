@@ -5,7 +5,7 @@ use axum::{
     Json,
     extract::{Path, Query, State},
     middleware::Next,
-    http::{Method, header},
+    http::{Method, header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
@@ -95,6 +95,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
     let public_router = Router::new()
         .route("/health", get(health_check))
         .route("/readiness", get(readiness_check))
+        .route("/agent/osquery-policy", get(get_agent_osquery_policy))
         .route("/auth/register", post(register_user))
         .route("/auth/login", post(login_user))
         .route("/devices/register", post(register_device))
@@ -159,6 +160,69 @@ async fn readiness_check(
             "stale_threshold_seconds": state.config.stale_threshold_seconds
         }
     }))
+}
+
+#[derive(Debug, Deserialize)]
+struct AgentOsqueryPolicyQuery {
+    device_id: Option<String>,
+}
+
+async fn get_agent_osquery_policy(
+    Query(query): Query<AgentOsqueryPolicyQuery>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let expected_token = std::env::var("AGENT_AUTH_TOKEN").ok();
+    if let Some(expected) = expected_token {
+        let provided = headers
+            .get("x-agent-token")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("");
+
+        if provided != expected {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({
+                    "success": false,
+                    "error": "invalid agent token"
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    let profile = std::env::var("OSQUERY_POLICY_PROFILE")
+        .unwrap_or_else(|_| "balanced".to_string())
+        .to_lowercase();
+
+    let tick_seconds = std::env::var("OSQUERY_POLICY_TICK_SECONDS")
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .unwrap_or_else(|| match profile.as_str() {
+            "off" => 0,
+            "slow" => 90,
+            "aggressive" => 30,
+            _ => 60,
+        });
+
+    let enabled = tick_seconds > 0;
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "success": true,
+            "source": "server-policy",
+            "device_id": query.device_id,
+            "policy": {
+                "enabled": enabled,
+                "profile": profile,
+                "tick_seconds": tick_seconds,
+                "min_tick_seconds": 30,
+                "max_tick_seconds": 900,
+                "recommended_max_events_per_cycle": 25
+            }
+        })),
+    )
+        .into_response()
 }
 
 async fn register_user(
