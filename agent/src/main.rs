@@ -644,6 +644,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             for finding in findings {
+                let drive_letter = finding.drive_letter;
+                let file_name = finding.file_name;
+                let file_path = finding.file_path;
+                let size_bytes = finding.size_bytes;
+                let modified_utc = finding.modified_utc;
+                let fingerprint = finding.fingerprint;
+                let description = format!(
+                    "Copia a USB detectada: {} en {} ({} bytes)",
+                    file_name,
+                    drive_letter,
+                    size_bytes,
+                );
+
                 let security_payload = build_event_envelope(
                     "security",
                     1,
@@ -653,19 +666,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &auth_token_clone,
                     envelope_metadata_clone.as_ref(),
                     serde_json::json!({
+                        "alert_type": "USB_FILE_COPY_DETECTED",
+                        "description": description,
+                        "app_name": "usb_copy_monitor",
                         "query_name": "usb_file_copy_detected",
                         "query_pack": "usb_data_loss_prevention",
                         "mitre_technique": "T1052.001",
                         "severity": "HIGH",
                         "raw_data": {
                             "source": "usb_copy_monitor",
-                            "drive_letter": finding.drive_letter,
-                            "file_name": finding.file_name,
-                            "file_path": finding.file_path,
-                            "size_bytes": finding.size_bytes,
-                            "modified_utc": finding.modified_utc.to_rfc3339(),
+                            "drive_letter": drive_letter,
+                            "file_name": file_name,
+                            "file_path": file_path,
+                            "size_bytes": size_bytes,
+                            "modified_utc": modified_utc.to_rfc3339(),
                         },
-                        "event_fingerprint": finding.fingerprint,
+                        "event_fingerprint": fingerprint,
                     }),
                 );
 

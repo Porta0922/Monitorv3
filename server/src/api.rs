@@ -1230,7 +1230,7 @@ async fn get_history_hourly_programs(
                                         .get("seconds")
                                         .and_then(|value| value.as_i64())
                                         .unwrap_or(0)
-                                        >= 30
+                                        >= 1
                                 })
                                 .collect();
 
