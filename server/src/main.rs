@@ -86,6 +86,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         err_msg,
                         retry_delay_secs
                     );
+
+                    let details = format!("{}; retry_in_seconds={}", err_msg, retry_delay_secs);
+                    let _ = db_for_consumer
+                        .insert_audit_event(
+                            "server/rabbitmq-consumer",
+                            "rabbitmq.consumer.error",
+                            "rabbitmq",
+                            Some(details.as_str()),
+                        )
+                        .await;
+
                     tokio::time::sleep(tokio::time::Duration::from_secs(retry_delay_secs)).await;
                     retry_delay_secs = (retry_delay_secs * 2).min(60);
                 }

@@ -204,7 +204,7 @@ class ApiClient {
   }
 
   async resolveAlert(alertId: number): Promise<SecurityAlert> {
-    const response = await this.client.patch<SecurityAlert>(`/alerts/${alertId}`, {
+    const response = await this.client.patch<SecurityAlert>(`/alerts/${alertId}/resolve`, {
       resolved: true,
     });
     return response.data;

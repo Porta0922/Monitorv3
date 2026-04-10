@@ -1872,67 +1872,264 @@ async fn get_current_heatmap(
 // SECURITY ALERTS ENDPOINTS (NEW)
 // ============================================================================
 
+#[derive(Debug, Deserialize, Default)]
+struct SecurityAlertQuery {
+    severity: Option<String>,
+    resolved: Option<bool>,
+    limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ResolveAlertRequest {
+    resolution_notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TerminationAttemptPayload {
+    device_id: String,
+    method: Option<String>,
+    attempted_by: Option<String>,
+    blocked: Option<bool>,
+    auto_restarted: Option<bool>,
+    timestamp: Option<String>,
+}
+
 async fn list_security_alerts(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<SecurityAlertQuery>,
 ) -> impl IntoResponse {
-    // TODO: Query security_alerts table
-    // TODO: Apply filters (severity, alert_type, time range)
-    // TODO: Return latest alerts sorted by timestamp
-    
-    Json(json!({
-        "success": true,
-        "alerts": [],
-        "total": 0
-    }))
+    let limit = query.limit.unwrap_or(200).clamp(1, 1000);
+
+    match state
+        .db
+        .get_security_alerts(None, query.severity.as_deref(), query.resolved, limit)
+        .await
+    {
+        Ok(alerts) => Json(json!({
+            "success": true,
+            "alerts": alerts.iter().map(|a| json!({
+                "id": a.id,
+                "device_id": a.device_id,
+                "alert_type": a.alert_type,
+                "app_name": a.app_name,
+                "exe_hash": a.exe_hash,
+                "description": a.description,
+                "severity": a.severity,
+                "resolved": a.resolved,
+                "created_at": a.created_at.to_rfc3339(),
+            })).collect::<Vec<_>>(),
+            "total": alerts.len()
+        })),
+        Err(e) => {
+            tracing::error!("Failed to fetch security alerts: {}", e);
+            Json(json!({
+                "success": false,
+                "error": "Failed to fetch alerts",
+                "alerts": [],
+                "total": 0
+            }))
+        }
+    }
 }
 
 async fn list_device_alerts(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Path(device_id): Path<Uuid>,
+    Query(query): Query<SecurityAlertQuery>,
 ) -> impl IntoResponse {
-    // TODO: Query security_alerts for specific device
-    // TODO: Include both resolved and unresolved
-    // TODO: Highlight process termination attempts
-    
-    Json(json!({
-        "success": true,
-        "device_id": device_id.to_string(),
-        "alerts": [],
-        "unresolved_count": 0
-    }))
+    let limit = query.limit.unwrap_or(200).clamp(1, 1000);
+
+    match state
+        .db
+        .get_security_alerts(Some(device_id), query.severity.as_deref(), query.resolved, limit)
+        .await
+    {
+        Ok(alerts) => {
+            let unresolved_count = alerts.iter().filter(|a| !a.resolved).count();
+            Json(json!({
+                "success": true,
+                "device_id": device_id.to_string(),
+                "alerts": alerts.iter().map(|a| json!({
+                    "id": a.id,
+                    "device_id": a.device_id,
+                    "alert_type": a.alert_type,
+                    "app_name": a.app_name,
+                    "exe_hash": a.exe_hash,
+                    "description": a.description,
+                    "severity": a.severity,
+                    "resolved": a.resolved,
+                    "created_at": a.created_at.to_rfc3339(),
+                })).collect::<Vec<_>>(),
+                "unresolved_count": unresolved_count
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch device alerts for {}: {}", device_id, e);
+            Json(json!({
+                "success": false,
+                "device_id": device_id.to_string(),
+                "error": "Failed to fetch device alerts",
+                "alerts": [],
+                "unresolved_count": 0
+            }))
+        }
+    }
 }
 
 async fn resolve_alert(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Path(alert_id): Path<i64>,
-    Json(payload): Json<serde_json::Value>,
+    Json(payload): Json<ResolveAlertRequest>,
 ) -> impl IntoResponse {
-    // TODO: Update security_alerts SET resolved=true
-    // TODO: Store resolution_notes from payload
-    // TODO: Update updated_at timestamp
-    
-    Json(json!({
-        "success": true,
-        "alert_id": alert_id,
-        "message": "Alert resolved successfully"
-    }))
+    match state
+        .db
+        .resolve_security_alert(alert_id, payload.resolution_notes.as_deref())
+        .await
+    {
+        Ok(Some(alert)) => Json(json!({
+            "success": true,
+            "alert": {
+                "id": alert.id,
+                "device_id": alert.device_id,
+                "alert_type": alert.alert_type,
+                "app_name": alert.app_name,
+                "exe_hash": alert.exe_hash,
+                "description": alert.description,
+                "severity": alert.severity,
+                "resolved": alert.resolved,
+                "created_at": alert.created_at.to_rfc3339(),
+            }
+        }))
+        .into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "success": false,
+                "error": "alert not found"
+            })),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::error!("Failed to resolve alert {}: {}", alert_id, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "success": false,
+                    "error": "failed to resolve alert"
+                })),
+            )
+                .into_response()
+        }
+    }
 }
 
 async fn record_termination_attempt(
-    State(_state): State<Arc<AppState>>,
-    Json(payload): Json<serde_json::Value>,
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<TerminationAttemptPayload>,
 ) -> impl IntoResponse {
-    // TODO: Extract termination attempt details
-    // TODO: Insert into process_termination_attempts table
-    // TODO: Create CRITICAL security alert
-    // TODO: Broadcast alert via WebSocket to dashboard
-    
-    Json(json!({
-        "success": true,
-        "message": "Termination attempt recorded and alerted",
-        "alert_type": "PROCESS_TERMINATION_ATTEMPTED",
-        "severity": "CRITICAL"
-    }))
+    let device_id = match Uuid::parse_str(payload.device_id.trim()) {
+        Ok(id) => id,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "success": false,
+                    "error": "invalid device_id"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let method = payload.method.unwrap_or_else(|| "unknown".to_string());
+    let blocked = payload.blocked.unwrap_or(true);
+    let auto_restarted = payload.auto_restarted.unwrap_or(true);
+    let timestamp = payload
+        .timestamp
+        .as_deref()
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.with_timezone(&Utc));
+
+    if let Err(e) = state
+        .db
+        .insert_process_termination_attempt(
+            device_id,
+            method.as_str(),
+            payload.attempted_by.as_deref(),
+            blocked,
+            auto_restarted,
+            timestamp,
+        )
+        .await
+    {
+        tracing::error!("Failed to persist process termination attempt: {}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "success": false,
+                "error": "failed to persist process termination attempt"
+            })),
+        )
+            .into_response();
+    }
+
+    let description = format!(
+        "Intento de cierre del agent detectado (metodo: {}, bloqueado: {}, auto_reinicio: {})",
+        method, blocked, auto_restarted
+    );
+
+    match state
+        .db
+        .insert_security_alert(
+            device_id,
+            "PROCESS_TERMINATION_ATTEMPTED",
+            Some("activity-monitor-agent"),
+            None,
+            description.as_str(),
+            "CRITICAL",
+        )
+        .await
+    {
+        Ok(alert) => {
+            let _ = state
+                .db
+                .insert_audit_event(
+                    "agent/process-protection",
+                    "security.process_termination_attempt",
+                    &device_id.to_string(),
+                    Some(description.as_str()),
+                )
+                .await;
+
+            Json(json!({
+                "success": true,
+                "message": "Termination attempt recorded and alerted",
+                "alert": {
+                    "id": alert.id,
+                    "device_id": alert.device_id,
+                    "alert_type": alert.alert_type,
+                    "app_name": alert.app_name,
+                    "exe_hash": alert.exe_hash,
+                    "description": alert.description,
+                    "severity": alert.severity,
+                    "resolved": alert.resolved,
+                    "created_at": alert.created_at.to_rfc3339(),
+                }
+            }))
+            .into_response()
+        }
+        Err(e) => {
+            tracing::error!("Failed to create security alert for termination attempt: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "success": false,
+                    "error": "failed to create security alert"
+                })),
+            )
+                .into_response()
+        }
+    }
 }
 
 // JWT Verification Middleware

@@ -687,8 +687,55 @@ impl RabbitMQConsumer {
         let device_id = event["device_id"].as_str().unwrap_or("unknown").to_string();
         let hostname   = event["hostname"].as_str().unwrap_or(&device_id).to_string();
         let mac_address = event["mac_address"].as_str().map(str::to_string);
+        let timestamp = event
+            .get("timestamp")
+            .and_then(|v| v.as_str())
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+            .unwrap_or_else(chrono::Utc::now);
 
         let _ = db.register_device(hostname, device_id.clone(), mac_address, None).await;
+
+        if let Some(alert_type) = payload["alert_type"].as_str() {
+            let severity = payload["severity"].as_str().unwrap_or("CRITICAL").to_uppercase();
+            let description = payload["description"]
+                .as_str()
+                .or_else(|| payload["message"].as_str())
+                .unwrap_or("Security alert received from agent")
+                .to_string();
+
+            if let Ok(device_uuid) = uuid::Uuid::parse_str(&device_id) {
+                let _ = db
+                    .insert_security_alert(
+                        device_uuid,
+                        alert_type,
+                        payload["app_name"].as_str(),
+                        payload["exe_hash"].as_str(),
+                        description.as_str(),
+                        severity.as_str(),
+                    )
+                    .await;
+
+                if alert_type == "PROCESS_TERMINATION_ATTEMPTED" {
+                    let blocked = payload["blocked"].as_bool().unwrap_or(true);
+                    let auto_restarted = payload["auto_restarted"].as_bool().unwrap_or(true);
+                    let _ = db
+                        .insert_process_termination_attempt(
+                            device_uuid,
+                            payload["method"].as_str().unwrap_or("unknown"),
+                            payload["attempted_by"].as_str(),
+                            blocked,
+                            auto_restarted,
+                            Some(timestamp),
+                        )
+                        .await;
+                }
+            }
+
+            if payload["query_name"].as_str().is_none() {
+                return Ok(());
+            }
+        }
 
         let query_name = payload["query_name"].as_str().unwrap_or("unknown_query").to_string();
         let query_pack = payload["query_pack"].as_str().map(str::to_string);
@@ -696,13 +743,6 @@ impl RabbitMQConsumer {
         let severity = payload["severity"].as_str().unwrap_or("LOW").to_uppercase();
         let raw_data = payload["raw_data"].clone();
         let event_fingerprint = payload["event_fingerprint"].as_str().map(str::to_string);
-
-        let timestamp = event
-            .get("timestamp")
-            .and_then(|v| v.as_str())
-            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| dt.with_timezone(&chrono::Utc))
-            .unwrap_or_else(chrono::Utc::now);
 
         match db.insert_security_event(
             device_id.clone(),

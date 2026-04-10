@@ -180,6 +180,19 @@ pub struct SecurityEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityAlert {
+    pub id: i64,
+    pub device_id: Uuid,
+    pub alert_type: String,
+    pub app_name: String,
+    pub exe_hash: String,
+    pub description: String,
+    pub severity: String,
+    pub resolved: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecuritySummaryRow {
     pub severity: String,
     pub mitre_technique: String,
@@ -449,6 +462,68 @@ impl Database {
 
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_audit_events_created_at ON audit_events(created_at DESC)"
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS security_alerts (
+                id BIGSERIAL PRIMARY KEY,
+                device_id UUID NOT NULL REFERENCES devices(device_id),
+                alert_type VARCHAR(64) NOT NULL,
+                app_name VARCHAR(255) NOT NULL DEFAULT '',
+                exe_hash VARCHAR(255) NOT NULL DEFAULT '',
+                description TEXT NOT NULL,
+                severity VARCHAR(16) NOT NULL,
+                resolved BOOLEAN NOT NULL DEFAULT FALSE,
+                resolution_notes TEXT,
+                timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_security_alerts_device_created ON security_alerts(device_id, created_at DESC)"
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_security_alerts_resolved ON security_alerts(resolved, created_at DESC)"
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_security_alerts_severity ON security_alerts(severity, created_at DESC)"
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS process_termination_attempts (
+                id BIGSERIAL PRIMARY KEY,
+                device_id UUID NOT NULL REFERENCES devices(device_id),
+                method VARCHAR(128) NOT NULL,
+                attempted_by VARCHAR(255),
+                blocked BOOLEAN NOT NULL DEFAULT TRUE,
+                auto_restarted BOOLEAN NOT NULL DEFAULT TRUE,
+                timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_process_termination_attempts_device_ts ON process_termination_attempts(device_id, timestamp DESC)"
         )
         .execute(pool)
         .await?;
@@ -879,6 +954,171 @@ impl Database {
                 created_at,
             })
             .collect())
+    }
+
+    pub async fn insert_security_alert(
+        &self,
+        device_id: Uuid,
+        alert_type: &str,
+        app_name: Option<&str>,
+        exe_hash: Option<&str>,
+        description: &str,
+        severity: &str,
+    ) -> Result<SecurityAlert, sqlx::Error> {
+        let row = sqlx::query_as::<_, (i64, Uuid, String, String, String, String, String, bool, DateTime<Utc>)>(
+            r#"
+            INSERT INTO security_alerts (device_id, alert_type, app_name, exe_hash, description, severity, resolved)
+            VALUES ($1, $2, $3, $4, $5, $6, FALSE)
+            RETURNING id, device_id, alert_type, app_name, exe_hash, description, severity, resolved, created_at
+            "#,
+        )
+        .bind(device_id)
+        .bind(alert_type)
+        .bind(app_name.unwrap_or(""))
+        .bind(exe_hash.unwrap_or(""))
+        .bind(description)
+        .bind(severity)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(SecurityAlert {
+            id: row.0,
+            device_id: row.1,
+            alert_type: row.2,
+            app_name: row.3,
+            exe_hash: row.4,
+            description: row.5,
+            severity: row.6,
+            resolved: row.7,
+            created_at: row.8,
+        })
+    }
+
+    pub async fn get_security_alerts(
+        &self,
+        device_id: Option<Uuid>,
+        severity: Option<&str>,
+        resolved: Option<bool>,
+        limit: i64,
+    ) -> Result<Vec<SecurityAlert>, sqlx::Error> {
+        let mut query_builder = QueryBuilder::<Postgres>::new(
+            "SELECT id, device_id, alert_type, app_name, exe_hash, description, severity, resolved, created_at FROM security_alerts"
+        );
+
+        let mut has_where = false;
+
+        if let Some(device_uuid) = device_id {
+            query_builder.push(" WHERE device_id = ").push_bind(device_uuid);
+            has_where = true;
+        }
+
+        if let Some(severity_value) = severity {
+            if has_where {
+                query_builder.push(" AND severity = ");
+            } else {
+                query_builder.push(" WHERE severity = ");
+                has_where = true;
+            }
+            query_builder.push_bind(severity_value);
+        }
+
+        if let Some(resolved_value) = resolved {
+            if has_where {
+                query_builder.push(" AND resolved = ");
+            } else {
+                query_builder.push(" WHERE resolved = ");
+            }
+            query_builder.push_bind(resolved_value);
+        }
+
+        query_builder.push(" ORDER BY created_at DESC LIMIT ").push_bind(limit.max(1));
+
+        let rows = query_builder
+            .build_query_as::<(i64, Uuid, String, String, String, String, String, bool, DateTime<Utc>)>()
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(id, device_id, alert_type, app_name, exe_hash, description, severity, resolved, created_at)| SecurityAlert {
+                id,
+                device_id,
+                alert_type,
+                app_name,
+                exe_hash,
+                description,
+                severity,
+                resolved,
+                created_at,
+            })
+            .collect())
+    }
+
+    pub async fn resolve_security_alert(
+        &self,
+        alert_id: i64,
+        resolution_notes: Option<&str>,
+    ) -> Result<Option<SecurityAlert>, sqlx::Error> {
+        let row = sqlx::query_as::<_, (i64, Uuid, String, String, String, String, String, bool, DateTime<Utc>)>(
+            r#"
+            UPDATE security_alerts
+            SET resolved = TRUE,
+                resolution_notes = COALESCE($2, resolution_notes),
+                updated_at = NOW()
+            WHERE id = $1
+            RETURNING id, device_id, alert_type, app_name, exe_hash, description, severity, resolved, created_at
+            "#,
+        )
+        .bind(alert_id)
+        .bind(resolution_notes)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|(id, device_id, alert_type, app_name, exe_hash, description, severity, resolved, created_at)| SecurityAlert {
+            id,
+            device_id,
+            alert_type,
+            app_name,
+            exe_hash,
+            description,
+            severity,
+            resolved,
+            created_at,
+        }))
+    }
+
+    pub async fn insert_process_termination_attempt(
+        &self,
+        device_id: Uuid,
+        method: &str,
+        attempted_by: Option<&str>,
+        blocked: bool,
+        auto_restarted: bool,
+        timestamp: Option<DateTime<Utc>>,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO process_termination_attempts (
+                device_id,
+                method,
+                attempted_by,
+                blocked,
+                auto_restarted,
+                timestamp
+            )
+            VALUES ($1, $2, $3, $4, $5, COALESCE($6, NOW()))
+            "#,
+        )
+        .bind(device_id)
+        .bind(method)
+        .bind(attempted_by)
+        .bind(blocked)
+        .bind(auto_restarted)
+        .bind(timestamp)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 
     pub async fn get_operational_metrics(

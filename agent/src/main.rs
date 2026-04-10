@@ -369,6 +369,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mac_address = device_identity.mac_address.clone();
     let envelope_metadata = Arc::new(EventMetadata::new());
 
+    // Best-effort anti-shutdown signal alert for visibility in dashboard alerts.
+    let publisher_shutdown = publisher.clone();
+    let cache_shutdown = cache.clone();
+    let auth_token_shutdown = auth_token.clone();
+    let device_id_shutdown = device_id_str.clone();
+    let hostname_shutdown = hostname.clone();
+    let mac_shutdown = mac_address.clone();
+    let envelope_metadata_shutdown = envelope_metadata.clone();
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            let now = Utc::now();
+            let alert_payload = build_event_envelope(
+                "security",
+                1,
+                &device_id_shutdown,
+                &hostname_shutdown,
+                &mac_shutdown,
+                &auth_token_shutdown,
+                envelope_metadata_shutdown.as_ref(),
+                serde_json::json!({
+                    "alert_type": "PROCESS_TERMINATION_ATTEMPTED",
+                    "severity": "CRITICAL",
+                    "description": "Signal de terminacion recibida por el agent",
+                    "method": "signal.ctrl_c",
+                    "attempted_by": serde_json::Value::Null,
+                    "blocked": false,
+                    "auto_restarted": false,
+                    "timestamp": now.to_rfc3339(),
+                }),
+            );
+
+            publish_or_cache(&publisher_shutdown, &cache_shutdown, "security", alert_payload).await;
+            tracing::warn!("Termination signal detected. Security alert emitted.");
+        }
+    });
+
     // Spawn monitoring task
     let monitoring = MonitoringLoop::new();
     let publisher_clone = publisher.clone();
