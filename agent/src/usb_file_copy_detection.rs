@@ -83,25 +83,52 @@ impl UsbFileCopyMonitor {
         let max_files = max_files_per_drive.clamp(5, 100);
 
         let script = format!(
-            "$cutoff=(Get-Date).ToUniversalTime().AddSeconds(-{lookback}); \
+                        "$cutoffUtc=(Get-Date).ToUniversalTime().AddSeconds(-{lookback}); \
              $max={max_files}; \
-             $drives=Get-CimInstance Win32_LogicalDisk | Where-Object {{ $_.DriveType -eq 2 -and $_.DeviceID }}; \
+                         $usbDrives=@(); \
+                         try {{ \
+                             $usbDisks=Get-CimInstance Win32_DiskDrive | Where-Object {{ $_.PNPDeviceID -match '^USBSTOR\\\\' -or $_.InterfaceType -eq 'USB' }}; \
+                             foreach($disk in $usbDisks){{ \
+                                 $parts=Get-CimAssociatedInstance -InputObject $disk -Association Win32_DiskDriveToDiskPartition -ErrorAction SilentlyContinue; \
+                                 foreach($part in $parts){{ \
+                                     $letters=Get-CimAssociatedInstance -InputObject $part -Association Win32_LogicalDiskToPartition -ErrorAction SilentlyContinue; \
+                                     foreach($letter in $letters){{ \
+                                         if($letter.DeviceID){{ $usbDrives += $letter.DeviceID }} \
+                                     }} \
+                                 }} \
+                             }} \
+                         }} catch {{}}; \
+                         $removableDrives=Get-CimInstance Win32_LogicalDisk | Where-Object {{ $_.DriveType -eq 2 -and $_.DeviceID }} | Select-Object -ExpandProperty DeviceID; \
+                         $drives=@($usbDrives + $removableDrives | Sort-Object -Unique); \
              $results=@(); \
-             foreach($d in $drives){{ \
-               $root=\"$($d.DeviceID)\\\"; \
+                         foreach($driveId in $drives){{ \
+                             $root=\"$driveId\\\"; \
                if(Test-Path -LiteralPath $root){{ \
                  try {{ \
-                   $items=Get-ChildItem -LiteralPath $root -File -Recurse -Force -ErrorAction SilentlyContinue | \
-                     Where-Object {{ $_.LastWriteTimeUtc -ge $cutoff }} | \
-                     Sort-Object LastWriteTimeUtc -Descending | \
-                     Select-Object -First $max; \
+                                     $items=Get-ChildItem -LiteralPath $root -File -Recurse -Force -ErrorAction SilentlyContinue | \
+                                         ForEach-Object {{ \
+                                             $writeUtc=$_.LastWriteTime.ToUniversalTime(); \
+                                             $createUtc=$_.CreationTime.ToUniversalTime(); \
+                                             $eventUtc=if($createUtc -gt $writeUtc){{ $createUtc }} else {{ $writeUtc }}; \
+                                             if($eventUtc -ge $cutoffUtc){{ \
+                                                 [pscustomobject]@{{ \
+                                                     Drive=$driveId; \
+                                                     FullName=$_.FullName; \
+                                                     Name=$_.Name; \
+                                                     Length=[int64]$_.Length; \
+                                                     EventUtc=$eventUtc; \
+                                                 }} \
+                                             }} \
+                                         }} | \
+                                         Sort-Object EventUtc -Descending | \
+                                         Select-Object -First $max; \
                    foreach($f in $items){{ \
                      $results += [pscustomobject]@{{ \
-                       drive=$d.DeviceID; \
-                       path=$f.FullName; \
-                       name=$f.Name; \
-                       size=[int64]$f.Length; \
-                       modified_utc=$f.LastWriteTimeUtc.ToString('o') \
+                                             drive=$f.Drive; \
+                                             path=$f.FullName; \
+                                             name=$f.Name; \
+                                             size=[int64]$f.Length; \
+                                             modified_utc=$f.EventUtc.ToString('o') \
                      }}; \
                    }} \
                  }} catch {{}} \
@@ -110,14 +137,19 @@ impl UsbFileCopyMonitor {
              $results | ConvertTo-Json -Compress"
         );
 
-        let output = tokio::process::Command::new("powershell")
+                let output = tokio::process::Command::new("powershell.exe")
             .args(["-NoProfile", "-Command", &script])
             .output()
             .await
             .map_err(|e| e.to_string())?;
 
         if !output.status.success() {
-            return Ok(Vec::new());
+                        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                        return Err(if stderr.is_empty() {
+                                "powershell usb copy scan failed".to_string()
+                        } else {
+                                format!("powershell usb copy scan failed: {}", stderr)
+                        });
         }
 
         let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();

@@ -630,12 +630,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let envelope_metadata_clone = envelope_metadata.clone();
     tokio::spawn(async move {
         let mut detector = usb_file_copy_detection::UsbFileCopyMonitor::new(900);
-        let mut interval = interval(Duration::from_secs(45));
+        let mut interval = interval(Duration::from_secs(20));
 
         loop {
             interval.tick().await;
 
-            let findings = match detector.scan_recent_writes(180, 20).await {
+            let findings = match detector.scan_recent_writes(300, 40).await {
                 Ok(items) => items,
                 Err(e) => {
                     tracing::debug!("USB copy detector scan failed: {}", e);

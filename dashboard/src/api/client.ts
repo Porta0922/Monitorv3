@@ -204,10 +204,16 @@ class ApiClient {
   }
 
   async resolveAlert(alertId: number): Promise<SecurityAlert> {
-    const response = await this.client.patch<SecurityAlert>(`/alerts/${alertId}/resolve`, {
-      resolved: true,
-    });
-    return response.data;
+    const response = await this.client.patch<{ success?: boolean; alert?: SecurityAlert; error?: string }>(
+      `/alerts/${alertId}/resolve`,
+      {}
+    );
+
+    if (response.data?.success && response.data.alert) {
+      return response.data.alert;
+    }
+
+    throw new Error(response.data?.error || 'No fue posible resolver la alerta');
   }
 
   // Security Events (osquery + MITRE ATT&CK)

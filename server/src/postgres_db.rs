@@ -505,6 +505,17 @@ impl Database {
         .execute(pool)
         .await?;
 
+        // Backward compatibility for older security_alerts schemas.
+        sqlx::query("ALTER TABLE security_alerts ADD COLUMN IF NOT EXISTS resolution_notes TEXT")
+            .execute(pool)
+            .await?;
+        sqlx::query("ALTER TABLE security_alerts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            .execute(pool)
+            .await?;
+        sqlx::query("ALTER TABLE security_alerts ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ")
+            .execute(pool)
+            .await?;
+
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS process_termination_attempts (
@@ -969,7 +980,7 @@ impl Database {
             r#"
             INSERT INTO security_alerts (device_id, alert_type, app_name, exe_hash, description, severity, resolved)
             VALUES ($1, $2, $3, $4, $5, $6, FALSE)
-            RETURNING id, device_id, alert_type, app_name, exe_hash, description, severity, resolved, created_at
+            RETURNING id::BIGINT, device_id, alert_type, app_name, exe_hash, description, severity, resolved, created_at
             "#,
         )
         .bind(device_id)
@@ -1002,7 +1013,7 @@ impl Database {
         limit: i64,
     ) -> Result<Vec<SecurityAlert>, sqlx::Error> {
         let mut query_builder = QueryBuilder::<Postgres>::new(
-            "SELECT id, device_id, alert_type, app_name, exe_hash, description, severity, resolved, created_at FROM security_alerts"
+            "SELECT id::BIGINT, device_id, alert_type, app_name, exe_hash, description, severity, resolved, created_at FROM security_alerts"
         );
 
         let mut has_where = false;
@@ -1064,9 +1075,10 @@ impl Database {
             UPDATE security_alerts
             SET resolved = TRUE,
                 resolution_notes = COALESCE($2, resolution_notes),
+                resolved_at = NOW(),
                 updated_at = NOW()
             WHERE id = $1
-            RETURNING id, device_id, alert_type, app_name, exe_hash, description, severity, resolved, created_at
+            RETURNING id::BIGINT, device_id, alert_type, app_name, exe_hash, description, severity, resolved, created_at
             "#,
         )
         .bind(alert_id)

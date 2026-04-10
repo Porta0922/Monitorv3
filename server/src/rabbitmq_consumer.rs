@@ -696,25 +696,60 @@ impl RabbitMQConsumer {
 
         let _ = db.register_device(hostname, device_id.clone(), mac_address, None).await;
 
-        if let Some(alert_type) = payload["alert_type"].as_str() {
+        let query_name = payload["query_name"].as_str();
+        let inferred_alert_type = match query_name {
+            Some("usb_file_copy_detected") => Some("USB_FILE_COPY_DETECTED"),
+            _ => None,
+        };
+
+        if let Some(alert_type) = payload["alert_type"].as_str().or(inferred_alert_type) {
             let severity = payload["severity"].as_str().unwrap_or("CRITICAL").to_uppercase();
+            let usb_raw = payload.get("raw_data").unwrap_or(payload);
+            let usb_file = usb_raw["file_name"].as_str().unwrap_or("archivo");
+            let usb_drive = usb_raw["drive_letter"].as_str().unwrap_or("USB");
+            let usb_size = usb_raw["size_bytes"].as_i64().unwrap_or(0);
+            let default_usb_description = format!(
+                "Copia a USB detectada: {} en {} ({} bytes)",
+                usb_file,
+                usb_drive,
+                usb_size
+            );
             let description = payload["description"]
                 .as_str()
                 .or_else(|| payload["message"].as_str())
-                .unwrap_or("Security alert received from agent")
+                .unwrap_or_else(|| {
+                    if alert_type == "USB_FILE_COPY_DETECTED" {
+                        default_usb_description.as_str()
+                    } else {
+                        "Security alert received from agent"
+                    }
+                })
                 .to_string();
 
             if let Ok(device_uuid) = uuid::Uuid::parse_str(&device_id) {
-                let _ = db
+                match db
                     .insert_security_alert(
                         device_uuid,
                         alert_type,
-                        payload["app_name"].as_str(),
+                        payload["app_name"].as_str().or_else(|| usb_raw["source"].as_str()),
                         payload["exe_hash"].as_str(),
                         description.as_str(),
                         severity.as_str(),
                     )
-                    .await;
+                    .await {
+                        Ok(alert) => info!(
+                            "✅ Security alert stored: id={} type={} severity={}",
+                            alert.id,
+                            alert.alert_type,
+                            alert.severity
+                        ),
+                        Err(e) => warn!(
+                            "Failed to store security alert for {} type {}: {}",
+                            device_id,
+                            alert_type,
+                            e
+                        ),
+                    }
 
                 if alert_type == "PROCESS_TERMINATION_ATTEMPTED" {
                     let blocked = payload["blocked"].as_bool().unwrap_or(true);
@@ -730,14 +765,19 @@ impl RabbitMQConsumer {
                         )
                         .await;
                 }
+            } else {
+                warn!(
+                    "Skipping security alert persistence due to invalid device_id: {}",
+                    device_id
+                );
             }
 
-            if payload["query_name"].as_str().is_none() {
+            if query_name.is_none() {
                 return Ok(());
             }
         }
 
-        let query_name = payload["query_name"].as_str().unwrap_or("unknown_query").to_string();
+        let query_name = query_name.unwrap_or("unknown_query").to_string();
         let query_pack = payload["query_pack"].as_str().map(str::to_string);
         let mitre_technique = payload["mitre_technique"].as_str().map(str::to_string);
         let severity = payload["severity"].as_str().unwrap_or("LOW").to_uppercase();

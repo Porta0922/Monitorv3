@@ -4,11 +4,18 @@ import { AppShell } from '../components/AppShell';
 import type { SecurityAlert, DeviceResourcePeak } from '../types';
 import { useNavigate } from 'react-router-dom';
 
+interface DeviceMeta {
+  nodeName: string;
+  macAddress: string;
+}
+
 export function AlertsPage() {
   const navigate = useNavigate();
   const [alerts, setAlerts] = useState<SecurityAlert[]>([]);
   const [resourcePeaks, setResourcePeaks] = useState<DeviceResourcePeak[]>([]);
   const [deviceNames, setDeviceNames] = useState<Map<string, string>>(new Map());
+  const [deviceMeta, setDeviceMeta] = useState<Map<string, DeviceMeta>>(new Map());
+  const [resolvingIds, setResolvingIds] = useState<Set<number>>(new Set());
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -26,6 +33,17 @@ export function AlertsPage() {
       setAlerts(alertsData);
       setResourcePeaks(peaksData as DeviceResourcePeak[]);
       setDeviceNames(new Map(devicesData.map((d) => [d.device_id, d.nickname || d.hostname])));
+      setDeviceMeta(
+        new Map(
+          devicesData.map((d) => [
+            d.device_id,
+            {
+              nodeName: d.nickname || d.hostname || d.device_id.slice(0, 8),
+              macAddress: d.mac_address || 'N/A',
+            },
+          ])
+        )
+      );
     } catch (err) {
       console.error('Error loading alerts:', err);
     } finally {
@@ -34,11 +52,20 @@ export function AlertsPage() {
   };
 
   const handleResolveAlert = async (alertId: number) => {
+    if (resolvingIds.has(alertId)) return;
+
     try {
+      setResolvingIds((prev) => new Set(prev).add(alertId));
       await apiClient.resolveAlert(alertId);
-      load();
+      setAlerts((prev) => prev.filter((alert) => alert.id !== alertId));
     } catch (err) {
       console.error('Error resolving alert:', err);
+    } finally {
+      setResolvingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(alertId);
+        return next;
+      });
     }
   };
 
@@ -134,6 +161,8 @@ export function AlertsPage() {
                   <tr className="sticky top-0 z-10 border-b border-[#20315a] bg-[#0a122a]">
                     <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Severidad</th>
                     <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Tipo</th>
+                    <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Nodo</th>
+                    <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">MAC</th>
                     <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Descripcion</th>
                     <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">App</th>
                     <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Fecha</th>
@@ -147,6 +176,12 @@ export function AlertsPage() {
                         <span className={severityBadge(alert.severity)}>{alert.severity}</span>
                       </td>
                       <td className="px-5 py-2.5 font-mono text-[10px] text-[#8ea0cf]">{alert.alert_type}</td>
+                      <td className="px-5 py-2.5 font-mono text-[11px] text-[#dce6ff]">
+                        {deviceMeta.get(alert.device_id)?.nodeName || deviceNames.get(alert.device_id) || alert.device_id.slice(0, 8)}
+                      </td>
+                      <td className="px-5 py-2.5 font-mono text-[10px] text-[#8ea0cf]">
+                        {deviceMeta.get(alert.device_id)?.macAddress || 'N/A'}
+                      </td>
                       <td className="max-w-[320px] truncate px-5 py-2.5 font-mono text-[11px] text-[#dce6ff]">{alert.description}</td>
                       <td className="px-5 py-2.5 font-mono text-[10px] text-[#8ea0cf]">{alert.app_name || '—'}</td>
                       <td className="px-5 py-2.5 font-mono text-[10px] text-[#7c90c1]">
@@ -155,9 +190,10 @@ export function AlertsPage() {
                       <td className="px-5 py-2.5">
                         <button
                           onClick={() => handleResolveAlert(alert.id)}
-                          className="rounded-full border border-[#00ff88]/40 bg-[#00ff88]/10 px-3 py-1 font-mono text-[10px] text-[#00ff88] hover:border-[#00ff88]"
+                          disabled={resolvingIds.has(alert.id)}
+                          className="rounded-full border border-[#00ff88]/40 bg-[#00ff88]/10 px-3 py-1 font-mono text-[10px] text-[#00ff88] hover:border-[#00ff88] disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          Resolver
+                          {resolvingIds.has(alert.id) ? 'Resolviendo...' : 'Resolver'}
                         </button>
                       </td>
                     </tr>
