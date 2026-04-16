@@ -2,7 +2,7 @@
 
 -- 1. Input Activity Heatmaps Table (Mouse/Keyboard activity by coordinate)
 CREATE TABLE IF NOT EXISTS input_activity_heatmaps (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL NOT NULL,
     timestamp TIMESTAMPTZ NOT NULL,
     device_id UUID NOT NULL,
     
@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS input_activity_heatmaps (
     
     -- Tracking
     created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (timestamp, id),
     FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
 );
 
@@ -42,7 +43,7 @@ CREATE INDEX idx_heatmaps_timestamp ON input_activity_heatmaps(timestamp DESC);
 
 -- 2. Enhanced Security Alerts Table
 CREATE TABLE IF NOT EXISTS security_alerts (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGSERIAL NOT NULL,
     timestamp TIMESTAMPTZ NOT NULL,
     device_id UUID NOT NULL,
     
@@ -62,6 +63,7 @@ CREATE TABLE IF NOT EXISTS security_alerts (
     -- Tracking
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (timestamp, id),
     FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
 );
 
@@ -88,7 +90,7 @@ CREATE INDEX idx_alerts_resolved ON security_alerts(resolved);
 
 -- 3. Process Protection Event Logs
 CREATE TABLE IF NOT EXISTS process_termination_attempts (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGSERIAL NOT NULL,
     timestamp TIMESTAMPTZ NOT NULL,
     device_id UUID NOT NULL,
     
@@ -104,6 +106,7 @@ CREATE TABLE IF NOT EXISTS process_termination_attempts (
     
     -- Tracking
     created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (timestamp, id),
     FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
 );
 

@@ -195,7 +195,41 @@ docker compose logs -f rabbitmq
 
 ---
 
-## 10) Hardening minimo recomendado
+## 10) Error TimescaleDB al iniciar migraciones
+
+### Error
+
+cannot create a unique index without the column "timestamp" (used in partitioning)
+
+### Causa
+
+Una tabla que se convierte en hypertable tenia PRIMARY KEY solo en id.
+En TimescaleDB, toda clave unica/primaria debe incluir la columna de particion (timestamp).
+
+### Estado en este repo
+
+La migracion [migrations/002_input_heatmaps_and_alerts.sql](migrations/002_input_heatmaps_and_alerts.sql) ya fue corregida para usar PK compuesta (timestamp, id) en:
+- input_activity_heatmaps
+- security_alerts
+- process_termination_attempts
+
+### Que hacer en un despliegue fallido
+
+Si el error ocurre durante initdb, la BD queda parcialmente inicializada.
+La forma mas limpia es recrear volumen de Postgres y relanzar:
+
+```powershell
+docker compose down
+docker volume ls | findstr postgres_data
+# reemplaza <NOMBRE_VOLUMEN> con el que te aparezca en el comando anterior
+docker volume rm <NOMBRE_VOLUMEN>
+docker compose up -d postgres rabbitmq
+docker compose logs -f postgres
+```
+
+---
+
+## 11) Hardening minimo recomendado
 
 Antes de pasar a productivo real:
 - Cambiar JWT_SECRET por uno fuerte
@@ -207,7 +241,7 @@ Antes de pasar a productivo real:
 
 ---
 
-## 11) Procedimiento de handoff
+## 12) Procedimiento de handoff
 
 Para entregar a otro responsable:
 
@@ -221,7 +255,7 @@ Para entregar a otro responsable:
 
 ---
 
-## 12) Comandos resumen (copiar y ejecutar)
+## 13) Comandos resumen (copiar y ejecutar)
 
 ```powershell
 # 1) Infra
