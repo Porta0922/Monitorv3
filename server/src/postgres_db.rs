@@ -277,7 +277,7 @@ impl Database {
             r#"
             CREATE TABLE IF NOT EXISTS activity_logs (
                 id UUID PRIMARY KEY,
-                device_id VARCHAR(255) NOT NULL REFERENCES devices(device_id),
+                device_id UUID NOT NULL REFERENCES devices(device_id),
                 app_name VARCHAR(255) NOT NULL,
                 window_title TEXT,
                 duration_seconds BIGINT NOT NULL,
@@ -294,7 +294,7 @@ impl Database {
             r#"
             CREATE TABLE IF NOT EXISTS inventory (
                 id UUID PRIMARY KEY,
-                device_id VARCHAR(255) NOT NULL REFERENCES devices(device_id),
+                device_id UUID NOT NULL REFERENCES devices(device_id),
                 app_name VARCHAR(255) NOT NULL,
                 version VARCHAR(255),
                 exe_hash VARCHAR(255),
@@ -305,6 +305,27 @@ impl Database {
         )
         .execute(pool)
         .await?;
+
+        // Reconcile older installs where device_id was VARCHAR in activity_logs/inventory.
+        sqlx::query("ALTER TABLE activity_logs DROP CONSTRAINT IF EXISTS activity_logs_device_id_fkey")
+            .execute(pool)
+            .await?;
+        sqlx::query("ALTER TABLE activity_logs ALTER COLUMN device_id TYPE UUID USING device_id::uuid")
+            .execute(pool)
+            .await?;
+        sqlx::query("ALTER TABLE activity_logs ADD CONSTRAINT activity_logs_device_id_fkey FOREIGN KEY (device_id) REFERENCES devices(device_id)")
+            .execute(pool)
+            .await?;
+
+        sqlx::query("ALTER TABLE inventory DROP CONSTRAINT IF EXISTS inventory_device_id_fkey")
+            .execute(pool)
+            .await?;
+        sqlx::query("ALTER TABLE inventory ALTER COLUMN device_id TYPE UUID USING device_id::uuid")
+            .execute(pool)
+            .await?;
+        sqlx::query("ALTER TABLE inventory ADD CONSTRAINT inventory_device_id_fkey FOREIGN KEY (device_id) REFERENCES devices(device_id)")
+            .execute(pool)
+            .await?;
 
         // Create USB events table
         sqlx::query(
@@ -1425,6 +1446,8 @@ impl Database {
         exe_hash: String,
     ) -> Result<InventoryItem, sqlx::Error> {
         let timestamp = Utc::now();
+        let device_uuid = Uuid::parse_str(&device_id)
+            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
 
         let insert_result = sqlx::query(
             r#"
@@ -1441,7 +1464,7 @@ impl Database {
             "#,
         )
         .bind(Uuid::new_v4())
-        .bind(&device_id)
+        .bind(device_uuid)
         .bind(&app_name)
         .bind(&version)
         .bind(&exe_hash)
@@ -1451,7 +1474,7 @@ impl Database {
 
         let row = sqlx::query_as::<_, (String, String, String, String, String, DateTime<Utc>)>(
             r#"
-            SELECT id::text, device_id, app_name, COALESCE(version, ''), COALESCE(exe_hash, ''), timestamp
+            SELECT id::text, device_id::text, app_name, COALESCE(version, ''), COALESCE(exe_hash, ''), timestamp
             FROM inventory
             WHERE device_id = $1
               AND app_name = $2
@@ -1461,7 +1484,7 @@ impl Database {
             LIMIT 1
             "#,
         )
-        .bind(&device_id)
+        .bind(device_uuid)
         .bind(&app_name)
         .bind(&version)
         .bind(&exe_hash)
@@ -1488,20 +1511,23 @@ impl Database {
 
     pub async fn get_inventory(&self, device_id: Option<&str>) -> Result<Vec<InventoryItem>, sqlx::Error> {
         let items = if let Some(did) = device_id {
+            let did_uuid = Uuid::parse_str(did)
+                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+
             sqlx::query_as::<_, (String, String, String, String, String, DateTime<Utc>)>(
                 "SELECT DISTINCT ON (app_name, COALESCE(version, ''), COALESCE(exe_hash, ''))
-                        id::text, device_id, app_name, COALESCE(version, ''), COALESCE(exe_hash, ''), timestamp
+                        id::text, device_id::text, app_name, COALESCE(version, ''), COALESCE(exe_hash, ''), timestamp
                  FROM inventory
                  WHERE device_id = $1
                  ORDER BY app_name, COALESCE(version, ''), COALESCE(exe_hash, ''), timestamp DESC"
             )
-            .bind(did)
+            .bind(did_uuid)
             .fetch_all(&self.pool)
             .await?
         } else {
             sqlx::query_as::<_, (String, String, String, String, String, DateTime<Utc>)>(
                 "SELECT DISTINCT ON (device_id, app_name, COALESCE(version, ''), COALESCE(exe_hash, ''))
-                        id::text, device_id, app_name, COALESCE(version, ''), COALESCE(exe_hash, ''), timestamp
+                        id::text, device_id::text, app_name, COALESCE(version, ''), COALESCE(exe_hash, ''), timestamp
                  FROM inventory
                  ORDER BY device_id, app_name, COALESCE(version, ''), COALESCE(exe_hash, ''), timestamp DESC"
             )
