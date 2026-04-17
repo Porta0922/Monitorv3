@@ -1,7 +1,6 @@
 services:
   postgres:
     image: timescale/timescaledb:latest-pg15
-    container_name: activity-monitor-postgres
     environment:
       - POSTGRES_DB=activity_monitor
       - POSTGRES_USER=monitor_user
@@ -21,7 +20,6 @@ services:
 
   rabbitmq:
     image: rabbitmq:3.12-management-alpine
-    container_name: activity-monitor-rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
@@ -40,7 +38,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: activity-monitor-redis
     volumes:
       - redis_data:/data
     ports:
@@ -57,7 +54,6 @@ services:
     build:
       context: ..
       dockerfile: DockerServer/Dockerfile
-    container_name: activity-monitor-server
     environment:
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: 3000
