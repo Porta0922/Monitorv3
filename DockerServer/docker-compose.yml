@@ -60,7 +60,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       AGENT_AUTH_TOKEN: ${AGENT_AUTH_TOKEN:-change-me-in-production}
       DATABASE_URL: postgresql://monitor_user:monitor_password@postgres:5432/activity_monitor
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2f
     ports:
       - "3000:3000"
     depends_on:

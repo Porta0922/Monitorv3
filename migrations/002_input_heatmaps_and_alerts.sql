@@ -43,50 +43,28 @@ CREATE INDEX idx_heatmaps_timestamp ON input_activity_heatmaps(timestamp DESC);
 
 -- 2. Enhanced Security Alerts Table
 CREATE TABLE IF NOT EXISTS security_alerts (
-    id BIGSERIAL NOT NULL,
-    timestamp TIMESTAMPTZ NOT NULL,
+    id BIGSERIAL PRIMARY KEY,
     device_id UUID NOT NULL,
-    
-    -- Alert classification
-    alert_type VARCHAR(50) NOT NULL,  -- e.g., PROCESS_TERMINATION_ATTEMPTED, HASH_MISMATCH, UNAUTHORIZED_ACCESS
-    severity VARCHAR(20) NOT NULL,    -- CRITICAL, HIGH, MEDIUM, LOW
-    
-    -- Alert details
-    message TEXT NOT NULL,
-    details JSONB,                     -- Additional context (method, user, timestamp_attempted, etc)
-    
-    -- Resolution tracking
+    alert_type VARCHAR(50),
+    app_name VARCHAR(255),
+    exe_hash VARCHAR(64),
+    description TEXT,
+    severity VARCHAR(20),
     resolved BOOLEAN DEFAULT FALSE,
-    resolved_at TIMESTAMPTZ,
-    resolution_notes TEXT,
-    
-    -- Tracking
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    PRIMARY KEY (timestamp, id),
+    resolved_at TIMESTAMPTZ,
     FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
 );
 
--- Create hypertable for alerts (1-day chunks for immediate access)
-SELECT create_hypertable(
-    'security_alerts',
-    'timestamp',
-    if_not_exists => TRUE,
-    chunk_time_interval => INTERVAL '1 day'
-);
+ALTER TABLE security_alerts ADD COLUMN IF NOT EXISTS resolution_notes TEXT;
+ALTER TABLE security_alerts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE security_alerts ADD COLUMN IF NOT EXISTS timestamp TIMESTAMPTZ DEFAULT NOW();
 
--- Compress alerts older than 14 days
-ALTER TABLE security_alerts SET (timescaledb.compress, timescaledb.compress_segmentby = 'device_id');
-SELECT add_compression_policy('security_alerts', INTERVAL '14 days', if_not_exists => true);
-
--- Retention: Keep 365 days of security alerts (compliance)
-SELECT add_retention_policy('security_alerts', INTERVAL '365 days', if_not_exists => true);
-
--- Indices for alert queries
-CREATE INDEX idx_alerts_device_timestamp ON security_alerts(device_id, timestamp DESC);
-CREATE INDEX idx_alerts_type ON security_alerts(alert_type);
-CREATE INDEX idx_alerts_severity ON security_alerts(severity);
-CREATE INDEX idx_alerts_resolved ON security_alerts(resolved);
+-- Keep security_alerts as a regular table for compatibility with the base schema.
+CREATE INDEX IF NOT EXISTS idx_alerts_device_timestamp ON security_alerts(device_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_alerts_type ON security_alerts(alert_type);
+CREATE INDEX IF NOT EXISTS idx_alerts_severity ON security_alerts(severity);
+CREATE INDEX IF NOT EXISTS idx_alerts_resolved ON security_alerts(resolved);
 
 -- 3. Process Protection Event Logs
 CREATE TABLE IF NOT EXISTS process_termination_attempts (
