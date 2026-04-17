@@ -289,6 +289,18 @@ impl Database {
         .execute(pool)
         .await?;
 
+        // Backward compatibility: legacy schemas created by SQL migrations may not have id/created_at.
+        // Keep this reconciliation idempotent so existing installs are fixed on startup.
+        sqlx::query("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+            .execute(pool)
+            .await?;
+        sqlx::query("ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS id UUID")
+            .execute(pool)
+            .await?;
+        sqlx::query("UPDATE activity_logs SET id = gen_random_uuid() WHERE id IS NULL")
+            .execute(pool)
+            .await?;
+
         // Create inventory table
         sqlx::query(
             r#"
@@ -1213,10 +1225,21 @@ impl Database {
 
     pub async fn get_live_devices_activity(&self) -> Result<Vec<LiveDeviceActivity>, sqlx::Error> {
         let rows = sqlx::query_as::<_, (Uuid, String, String, i64, DateTime<Utc>)>(
-            "SELECT DISTINCT ON (device_id)
-                    device_id, app_name, window_title, duration_seconds, timestamp
-             FROM activity_logs
-             ORDER BY device_id, timestamp DESC"
+            "SELECT
+                    d.device_id,
+                    COALESCE(a.app_name, 'Sin actividad') AS app_name,
+                    COALESCE(a.window_title, 'Heartbeat activo') AS window_title,
+                    COALESCE(a.duration_seconds, 0) AS duration_seconds,
+                    COALESCE(a.timestamp, d.last_seen) AS timestamp
+             FROM devices d
+             LEFT JOIN LATERAL (
+                 SELECT app_name, window_title, duration_seconds, timestamp
+                 FROM activity_logs
+                 WHERE device_id = d.device_id
+                 ORDER BY timestamp DESC
+                 LIMIT 1
+             ) a ON TRUE
+             ORDER BY d.last_seen DESC"
         )
         .fetch_all(&self.pool)
         .await?;
