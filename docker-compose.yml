@@ -11,7 +11,7 @@ services:
       - POSTGRES_PASSWORD=monitor_password
       # ELIMINAMOS POSTGRES_INITDB_ARGS porque causa el error -c
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data_v2:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d
     ports:
       - "5432:5432"
@@ -60,7 +60,7 @@ services:
       - activity-monitor
 
 volumes:
-  postgres_data:
+  postgres_data_v2:
   rabbitmq_data:
   redis_data:
 
