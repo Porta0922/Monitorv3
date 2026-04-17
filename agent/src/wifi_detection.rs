@@ -12,6 +12,11 @@ pub struct WifiSnapshot {
 pub struct WifiMonitor {
     last_key: Option<String>,
     last_signal: Option<i32>,
+    /// Counts scans since last broadcast; forces a re-send every N scans even
+    /// without a state change so a freshly-started server always learns the
+    /// current WiFi state within a bounded interval.
+    scans_since_broadcast: u32,
+    periodic_broadcast_interval: u32,
 }
 
 impl WifiMonitor {
@@ -19,7 +24,17 @@ impl WifiMonitor {
         Self {
             last_key: None,
             last_signal: None,
+            scans_since_broadcast: 0,
+            // 10 scans × 60 s/scan = 10 minutes max before a periodic re-send.
+            periodic_broadcast_interval: 10,
         }
+    }
+
+    /// Force the next call to `scan_and_detect_change` to report the current
+    /// WiFi state regardless of whether it changed.  Call this after a
+    /// RabbitMQ reconnect so the new server receives the current state quickly.
+    pub fn force_resend(&mut self) {
+        self.scans_since_broadcast = self.periodic_broadcast_interval;
     }
 
     pub async fn scan_and_detect_change(
@@ -45,9 +60,13 @@ impl WifiMonitor {
             _ => false,
         };
 
-        if state_changed || signal_dropped {
+        self.scans_since_broadcast += 1;
+        let periodic_due = self.scans_since_broadcast >= self.periodic_broadcast_interval;
+
+        if state_changed || signal_dropped || periodic_due {
             self.last_key = Some(current_key);
             self.last_signal = snapshot.signal_percent;
+            self.scans_since_broadcast = 0;
             return Ok(Some(snapshot));
         }
 

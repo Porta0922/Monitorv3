@@ -12,7 +12,7 @@ mod process_protection;
 mod osquery_runner;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::collections::HashSet;
 use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration, interval};
@@ -326,9 +326,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let publisher: SharedPublisher = Arc::new(RwLock::new(initial_publisher));
 
+    // Shared flag: set to true when RabbitMQ (re)connects so stateful monitors
+    // like WifiMonitor can force-resend their current state to the new server.
+    let wifi_resend_flag = Arc::new(AtomicBool::new(false));
+
     // Keep trying to establish publisher if startup happened while RabbitMQ was unavailable.
     let publisher_reconnect = publisher.clone();
     let rabbitmq_url_reconnect = rabbitmq_url.clone();
+    let wifi_resend_flag_reconnect = wifi_resend_flag.clone();
     tokio::spawn(async move {
         let mut reconnect_interval = interval(Duration::from_secs(10));
         loop {
@@ -354,6 +359,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if state.is_none() {
                         *state = Some(conn);
                         tracing::info!("✅ RabbitMQ reconnected after offline startup");
+                        // Signal stateful monitors to re-broadcast current state.
+                        wifi_resend_flag_reconnect.store(true, Ordering::Relaxed);
                     }
                 }
                 Err(e) => {
@@ -692,6 +699,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn WiFi history task
     let mut wifi_monitor = WifiMonitor::new();
+    // Force an immediate state broadcast so any server that just started
+    // learns the current WiFi state within the first scan.
+    wifi_monitor.force_resend();
     let publisher_clone = publisher.clone();
     let cache_clone = cache.clone();
     let auth_token_clone = auth_token.clone();
@@ -699,11 +709,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mac_clone = mac_address.clone();
     let device_id_clone_for_wifi = device_identity.device_id.to_string();
     let envelope_metadata_clone = envelope_metadata.clone();
+    let wifi_resend_flag_wifi = wifi_resend_flag.clone();
 
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(60)); // Check every 60 seconds
         loop {
             interval.tick().await;
+
+            // If RabbitMQ reconnected since last scan, force a state re-broadcast.
+            if wifi_resend_flag_wifi.swap(false, Ordering::Relaxed) {
+                wifi_monitor.force_resend();
+            }
 
             match wifi_monitor.scan_and_detect_change().await {
                 Ok(Some(snapshot)) => {
