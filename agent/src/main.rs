@@ -642,13 +642,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             interval.tick().await;
 
-            let findings = match detector.scan_recent_writes(300, 40).await {
+            // Wider lookback/cap helps on larger USB volumes where recursive scans
+            // can be slower and recent writes might otherwise fall out of the window.
+            let findings = match detector.scan_recent_writes(1800, 200).await {
                 Ok(items) => items,
                 Err(e) => {
-                    tracing::debug!("USB copy detector scan failed: {}", e);
+                    tracing::warn!("USB copy detector scan failed: {}", e);
                     continue;
                 }
             };
+
+            if !findings.is_empty() {
+                tracing::info!(
+                    "USB copy detector found {} candidate file write(s)",
+                    findings.len()
+                );
+            }
 
             for finding in findings {
                 let drive_letter = finding.drive_letter;
