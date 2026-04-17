@@ -198,9 +198,19 @@ echo [*] Installing service...
 !NSSM_CMD! set %SERVICE_NAME% AppRotateOnline 1
 !NSSM_CMD! set %SERVICE_NAME% AppRotateSeconds 86400
 !NSSM_CMD! set %SERVICE_NAME% AppRotateBytes 10485760
+!NSSM_CMD! set %SERVICE_NAME% Start SERVICE_AUTO_START
+
+REM Harden restart behavior: always restart agent if process exits unexpectedly.
+!NSSM_CMD! set %SERVICE_NAME% AppExit Default Restart
+!NSSM_CMD! set %SERVICE_NAME% AppRestartDelay 5000
+!NSSM_CMD! set %SERVICE_NAME% AppThrottle 1500
 
 REM Set environment variables for service
 !NSSM_CMD! set %SERVICE_NAME% AppEnvironmentExtra "AGENT_AUTH_TOKEN=!AGENT_AUTH_TOKEN!" "AGENT_OFFLINE_CACHE_KEY=!AGENT_OFFLINE_CACHE_KEY!"
+
+REM Configure Service Control Manager recovery actions as an additional safety net.
+sc failure %SERVICE_NAME% reset= 0 actions= restart/5000/restart/5000/restart/5000 >nul 2>&1
+sc failureflag %SERVICE_NAME% 1 >nul 2>&1
 
 REM Start service
 echo [*] Starting service...
@@ -211,6 +221,15 @@ if %errorLevel% equ 0 (
     echo [-] Failed to start service. Check logs at %LOG_DIR%
     pause
     exit /b 1
+)
+
+REM Guardian watchdog: if someone stops the service, start it again automatically.
+echo [*] Installing guardian watchdog task...
+schtasks /Create /TN "ActivityMonitorGuardian" /SC MINUTE /MO 1 /RU SYSTEM /RL HIGHEST /F /TR "powershell -NoProfile -WindowStyle Hidden -Command \"try { $s = Get-Service -Name 'ActivityMonitor' -ErrorAction Stop; if ($s.Status -ne 'Running') { Start-Service -Name 'ActivityMonitor' -ErrorAction Stop } } catch {}\"" >nul 2>&1
+if %errorLevel% equ 0 (
+    echo [+] Guardian watchdog task configured (ActivityMonitorGuardian)
+) else (
+    echo [!] Warning: Could not configure watchdog task. Service recovery is still enabled.
 )
 
 echo.
@@ -228,5 +247,6 @@ echo   Start:   net start ActivityMonitor
 echo   Stop:    net stop ActivityMonitor
 echo   Update token/key: Edit %ENV_FILE% and reinstall service
 echo   Uninstall: nssm remove ActivityMonitor confirm
+echo   Remove watchdog: schtasks /Delete /TN ActivityMonitorGuardian /F
 echo.
 pause
