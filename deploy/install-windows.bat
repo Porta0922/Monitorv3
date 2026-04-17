@@ -3,13 +3,14 @@ REM ActivityMonitor Enterprise v3 - Windows Installer
 REM Registers agent as Windows Service using NSSM (Non-Sucking Service Manager)
 
 SETLOCAL ENABLEDELAYEDEXPANSION
+set SERVICE_NAME=ActivityMonitor
 
 REM Check for admin privileges
 net session >nul 2>&1
 if %errorLevel% neq 0 (
-    echo This script requires Administrator privileges.
-    pause
-    exit /b 1
+    echo [*] Requesting Administrator privileges...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+    exit /b 0
 )
 
 REM Configuration
@@ -68,14 +69,38 @@ if not exist "%ENV_FILE%" (
     echo [!] Configuration file already exists
 )
 
-REM Check if agent binary exists
-if not exist "%AGENT_PATH%" (
-    echo [-] Agent binary not found at %AGENT_PATH%
-    echo [!] Please build the agent first: cargo build --release
+REM Stop existing service early so the release binary is not locked during build.
+sc query %SERVICE_NAME% >nul 2>&1
+if %errorLevel% equ 0 (
+    echo [*] Stopping existing service before build...
+    net stop %SERVICE_NAME% >nul 2>&1
+)
+
+REM Build latest release binary automatically.
+where cargo >nul 2>&1
+if %errorLevel% neq 0 (
+    echo [-] cargo was not found in PATH. Install Rust toolchain first.
     pause
     exit /b 1
 )
-echo [+] Found agent binary: %AGENT_PATH%
+
+echo [*] Building latest agent release...
+pushd "%~dp0\.."
+cargo build --release -p activity-monitor-agent
+if %errorLevel% neq 0 (
+    popd
+    echo [-] Failed to build release agent binary.
+    pause
+    exit /b 1
+)
+popd
+
+if not exist "%AGENT_PATH%" (
+    echo [-] Agent binary not found at %AGENT_PATH% after build.
+    pause
+    exit /b 1
+)
+echo [+] Release agent ready: %AGENT_PATH%
 
 REM Install osquery if not present
 if not exist "C:\Program Files\osquery\osqueryi.exe" (
