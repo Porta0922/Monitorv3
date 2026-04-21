@@ -26,7 +26,7 @@ export function useActivityStream() {
 
     const connect = () => {
       try {
-        eventSource = new EventSource('http://localhost:3000/api/stream');
+        eventSource = new EventSource(`http://${window.location.hostname}:3000/api/stream`);
 
         eventSource.onopen = () => {
           setIsConnected(true);

@@ -15,7 +15,7 @@ import type {
   DeviceResourcePeak,
 } from '../types';
 
-const BASE_URL = 'http://localhost:3000/api';
+const BASE_URL = `http://${window.location.hostname}:3000/api`;
 
 function getClientUtcOffsetMinutes(): number {
   return -new Date().getTimezoneOffset();
