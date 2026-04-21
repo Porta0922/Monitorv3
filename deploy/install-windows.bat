@@ -8,8 +8,8 @@ set SERVICE_NAME=ActivityMonitor
 REM Check for admin privileges
 net session >nul 2>&1
 if %errorLevel% neq 0 (
-    echo [*] Requesting Administrator privileges...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+    echo [*] Solicitando permisos de Administrador...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd -ArgumentList '/k \"%~f0\"' -Verb RunAs"
     exit /b 0
 )
 
@@ -35,10 +35,102 @@ set AGENT_OFFLINE_CACHE_KEY=replace-with-32-byte-cache-key!!
 set AGENT_SERVER_URL=http://10.30.0.123:3000
 set RABBITMQ_URL=amqp://eclub:eCLUB123@10.30.0.123:5672/
 
+:MAIN_MENU
+cls
 echo ========================================
 echo ActivityMonitor Enterprise v3 Installer
 echo ========================================
+echo Rutas de instalacion:
+echo - Ejecutable: %AGENT_PATH%
+echo - Configuracion: %CONFIG_DIR%
+echo - Logs: %LOG_DIR%
+echo ========================================
 echo.
+echo Seleccione una opcion:
+echo 1. Instalar (o actualizar) el agente
+echo 2. Modificar credenciales (.env) y reiniciar
+echo 3. Desinstalar
+echo 4. Salir
+echo.
+set /p MENU_OPTION="Opcion: "
+
+if "%MENU_OPTION%"=="1" goto INSTALL_AGENT
+if "%MENU_OPTION%"=="2" goto MODIFY_CREDS
+if "%MENU_OPTION%"=="3" goto UNINSTALL_AGENT
+if "%MENU_OPTION%"=="4" goto END_SCRIPT
+goto MAIN_MENU
+
+:MODIFY_CREDS
+echo.
+echo === Modificar Credenciales ===
+set /p INPUT_AUTH_TOKEN="Enter agent auth token (or press Enter for default dev-agent-token): "
+if not "!INPUT_AUTH_TOKEN!"=="" set AGENT_AUTH_TOKEN=!INPUT_AUTH_TOKEN!
+
+set /p INPUT_SERVER_URL="Enter server URL for remote osquery policy (or press Enter for default http://10.30.0.123:3000): "
+if not "!INPUT_SERVER_URL!"=="" set AGENT_SERVER_URL=!INPUT_SERVER_URL!
+
+set /p INPUT_RABBITMQ_URL="Enter RabbitMQ URL (or press Enter for default amqp://eclub:eCLUB123@10.30.0.123:5672/): "
+if not "!INPUT_RABBITMQ_URL!"=="" set RABBITMQ_URL=!INPUT_RABBITMQ_URL!
+
+if not exist "%CONFIG_DIR%" mkdir "%CONFIG_DIR%"
+echo Creating configuration file...
+(
+    echo # ActivityMonitor Agent Configuration
+    echo AGENT_AUTH_TOKEN=!AGENT_AUTH_TOKEN!
+    echo AGENT_OFFLINE_CACHE_KEY=!AGENT_OFFLINE_CACHE_KEY!
+    echo AGENT_SERVER_URL=!AGENT_SERVER_URL!
+    echo RABBITMQ_URL=!RABBITMQ_URL!
+) > "%ENV_FILE%"
+echo [+] Credenciales actualizadas en: %ENV_FILE%
+
+sc query %SERVICE_NAME% >nul 2>&1
+if !errorLevel! equ 0 (
+    echo [*] Reiniciando servicio para aplicar cambios...
+    net stop %SERVICE_NAME% >nul 2>&1
+    
+    set NSSM_CMD=
+    if exist "%NSSM_PATH%" set NSSM_CMD="%NSSM_PATH%"
+    if "!NSSM_CMD!"=="" if exist "%NSSM_LOCAL_PATH%" set NSSM_CMD="%NSSM_LOCAL_PATH%"
+    if not "!NSSM_CMD!"=="" (
+        !NSSM_CMD! set %SERVICE_NAME% AppEnvironmentExtra "AGENT_AUTH_TOKEN=!AGENT_AUTH_TOKEN!" "AGENT_OFFLINE_CACHE_KEY=!AGENT_OFFLINE_CACHE_KEY!" "AGENT_SERVER_URL=!AGENT_SERVER_URL!" "RABBITMQ_URL=!RABBITMQ_URL!"
+    )
+    
+    net start %SERVICE_NAME%
+    echo [+] Servicio reiniciado.
+) else (
+    echo [!] El servicio no esta instalado. Instale primero para reiniciar.
+)
+pause
+goto MAIN_MENU
+
+:UNINSTALL_AGENT
+echo.
+echo === Desinstalando ===
+sc query %SERVICE_NAME% >nul 2>&1
+if !errorLevel! equ 0 (
+    echo [*] Deteniendo servicio...
+    net stop %SERVICE_NAME% >nul 2>&1
+    
+    set NSSM_CMD=
+    if exist "%NSSM_PATH%" set NSSM_CMD="%NSSM_PATH%"
+    if "!NSSM_CMD!"=="" if exist "%NSSM_LOCAL_PATH%" set NSSM_CMD="%NSSM_LOCAL_PATH%"
+    if not "!NSSM_CMD!"=="" (
+        echo [*] Removiendo servicio con NSSM...
+        !NSSM_CMD! remove %SERVICE_NAME% confirm
+    ) else (
+        echo [*] Removiendo servicio con sc...
+        sc delete %SERVICE_NAME%
+    )
+) else (
+    echo [!] El servicio no esta instalado.
+)
+echo [*] Removiendo tarea programada (watchdog)...
+schtasks /Delete /TN ActivityMonitorGuardian /F >nul 2>&1
+echo [+] Desinstalacion completada.
+pause
+goto MAIN_MENU
+
+:INSTALL_AGENT
 
 REM Ask for optional auth token (used by current agent)
 set /p INPUT_AUTH_TOKEN="Enter agent auth token (or press Enter for default dev-agent-token): "
@@ -57,6 +149,8 @@ if not "!INPUT_RABBITMQ_URL!"=="" (
 )
 
 REM Create config directory
+echo.
+echo [Paso 1/5] Preparando directorios y configuracion...
 if not exist "%CONFIG_DIR%" mkdir "%CONFIG_DIR%"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 echo [+] Created config directory: %CONFIG_DIR%
@@ -91,7 +185,8 @@ if %errorLevel% neq 0 (
     exit /b 1
 )
 
-echo [*] Building latest agent release...
+echo.
+echo [Paso 2/5] Compilando la ultima version del agente...
 pushd "%~dp0\.."
 cargo build --release -p activity-monitor-agent
 if %errorLevel% neq 0 (
@@ -110,6 +205,8 @@ if not exist "%AGENT_PATH%" (
 echo [+] Release agent ready: %AGENT_PATH%
 
 REM Install osquery if not present
+echo.
+echo [Paso 3/5] Verificando dependencias (OSQuery)...
 if not exist "C:\Program Files\osquery\osqueryi.exe" (
     echo [*] osquery not found. Installing...
 
@@ -147,6 +244,8 @@ if not exist "C:\Program Files\osquery\osqueryi.exe" (
 )
 
 REM Resolve/install NSSM (local file, PATH, Chocolatey, then direct download fallback)
+echo.
+echo [Paso 4/5] Instalando gestor de servicios (NSSM)...
 set NSSM_CMD=
 
 if exist "%NSSM_PATH%" set NSSM_CMD="%NSSM_PATH%"
@@ -211,6 +310,8 @@ if "!NSSM_CMD!"=="" (
 echo [+] NSSM ready: !NSSM_CMD!
 
 REM Stop and remove existing service
+echo.
+echo [Paso 5/5] Registrando e iniciando servicio de Windows...
 echo [*] Checking for existing service...
 sc query %SERVICE_NAME% >nul 2>&1
 if %errorLevel% equ 0 (
@@ -282,3 +383,6 @@ echo   Uninstall: nssm remove ActivityMonitor confirm
 echo   Remove watchdog: schtasks /Delete /TN ActivityMonitorGuardian /F
 echo.
 pause
+goto MAIN_MENU
+
+:END_SCRIPT
