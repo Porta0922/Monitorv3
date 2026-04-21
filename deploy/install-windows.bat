@@ -33,6 +33,7 @@ set OSQUERY_MSI_PATH=%TEMP%\osquery-%OSQUERY_VERSION%.msi
 set AGENT_AUTH_TOKEN=dev-agent-token
 set AGENT_OFFLINE_CACHE_KEY=replace-with-32-byte-cache-key!!
 set AGENT_SERVER_URL=http://localhost:3000
+set RABBITMQ_URL=amqp://guest:guest@127.0.0.1:5672/
 
 echo ========================================
 echo ActivityMonitor Enterprise v3 Installer
@@ -50,6 +51,11 @@ if not "!INPUT_SERVER_URL!"=="" (
     set AGENT_SERVER_URL=!INPUT_SERVER_URL!
 )
 
+set /p INPUT_RABBITMQ_URL="Enter RabbitMQ URL (or press Enter for default amqp://guest:guest@127.0.0.1:5672/): "
+if not "!INPUT_RABBITMQ_URL!"=="" (
+    set RABBITMQ_URL=!INPUT_RABBITMQ_URL!
+)
+
 REM Create config directory
 if not exist "%CONFIG_DIR%" mkdir "%CONFIG_DIR%"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
@@ -63,6 +69,7 @@ if not exist "%ENV_FILE%" (
         echo AGENT_AUTH_TOKEN=!AGENT_AUTH_TOKEN!
         echo AGENT_OFFLINE_CACHE_KEY=!AGENT_OFFLINE_CACHE_KEY!
         echo AGENT_SERVER_URL=!AGENT_SERVER_URL!
+        echo RABBITMQ_URL=!RABBITMQ_URL!
     ) > "%ENV_FILE%"
     echo [+] Created configuration: %ENV_FILE%
 ) else (
@@ -231,7 +238,7 @@ REM Harden restart behavior: always restart agent if process exits unexpectedly.
 !NSSM_CMD! set %SERVICE_NAME% AppThrottle 1500
 
 REM Set environment variables for service
-!NSSM_CMD! set %SERVICE_NAME% AppEnvironmentExtra "AGENT_AUTH_TOKEN=!AGENT_AUTH_TOKEN!" "AGENT_OFFLINE_CACHE_KEY=!AGENT_OFFLINE_CACHE_KEY!"
+!NSSM_CMD! set %SERVICE_NAME% AppEnvironmentExtra "AGENT_AUTH_TOKEN=!AGENT_AUTH_TOKEN!" "AGENT_OFFLINE_CACHE_KEY=!AGENT_OFFLINE_CACHE_KEY!" "AGENT_SERVER_URL=!AGENT_SERVER_URL!" "RABBITMQ_URL=!RABBITMQ_URL!"
 
 REM Configure Service Control Manager recovery actions as an additional safety net.
 sc failure %SERVICE_NAME% reset= 0 actions= restart/5000/restart/5000/restart/5000 >nul 2>&1

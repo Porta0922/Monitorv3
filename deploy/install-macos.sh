@@ -36,6 +36,16 @@ if [ -z "$AGENT_AUTH_TOKEN" ]; then
     AGENT_AUTH_TOKEN="dev-agent-token"
 fi
 
+read -p "Enter server URL for remote osquery policy (or press Enter for default http://localhost:3000): " AGENT_SERVER_URL
+if [ -z "$AGENT_SERVER_URL" ]; then
+    AGENT_SERVER_URL="http://localhost:3000"
+fi
+
+read -p "Enter RabbitMQ URL (or press Enter for default amqp://guest:guest@127.0.0.1:5672/): " RABBITMQ_URL
+if [ -z "$RABBITMQ_URL" ]; then
+    RABBITMQ_URL="amqp://guest:guest@127.0.0.1:5672/"
+fi
+
 AGENT_OFFLINE_CACHE_KEY="replace-with-32-byte-cache-key!!"
 
 # Create directories
@@ -49,6 +59,8 @@ if [ ! -f "$ENV_FILE" ]; then
 # ActivityMonitor Agent Configuration
 AGENT_AUTH_TOKEN=$AGENT_AUTH_TOKEN
 AGENT_OFFLINE_CACHE_KEY=$AGENT_OFFLINE_CACHE_KEY
+AGENT_SERVER_URL=$AGENT_SERVER_URL
+RABBITMQ_URL=$RABBITMQ_URL
 ENVEOF
     chmod 600 "$ENV_FILE"
     echo "[+] Created configuration: $ENV_FILE"
@@ -119,6 +131,10 @@ cat > "$PLIST_PATH" << EOF
         <string>$AGENT_AUTH_TOKEN</string>
         <key>AGENT_OFFLINE_CACHE_KEY</key>
         <string>$AGENT_OFFLINE_CACHE_KEY</string>
+        <key>AGENT_SERVER_URL</key>
+        <string>$AGENT_SERVER_URL</string>
+        <key>RABBITMQ_URL</key>
+        <string>$RABBITMQ_URL</string>
     </dict>
 </dict>
 </plist>
