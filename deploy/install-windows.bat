@@ -32,8 +32,8 @@ set OSQUERY_MSI_URL=https://github.com/osquery/osquery/releases/download/%OSQUER
 set OSQUERY_MSI_PATH=%TEMP%\osquery-%OSQUERY_VERSION%.msi
 set AGENT_AUTH_TOKEN=dev-agent-token
 set AGENT_OFFLINE_CACHE_KEY=replace-with-32-byte-cache-key!!
-set AGENT_SERVER_URL=http://localhost:3000
-set RABBITMQ_URL=amqp://guest:guest@127.0.0.1:5672/
+set AGENT_SERVER_URL=http://10.30.0.123:3000
+set RABBITMQ_URL=amqp://eclub:eCLUB123@10.30.0.123:5672/
 
 echo ========================================
 echo ActivityMonitor Enterprise v3 Installer
