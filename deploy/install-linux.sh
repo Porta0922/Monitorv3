@@ -42,9 +42,9 @@ if [ -z "$AGENT_SERVER_URL" ]; then
     AGENT_SERVER_URL="http://localhost:3000"
 fi
 
-read -p "Enter RabbitMQ URL (or press Enter for default amqp://guest:guest@127.0.0.1:5672/): " RABBITMQ_URL
+read -p "Enter RabbitMQ URL (or press Enter for default amqp://guest:guest@127.0.0.1:5672/%2f): " RABBITMQ_URL
 if [ -z "$RABBITMQ_URL" ]; then
-    RABBITMQ_URL="amqp://guest:guest@127.0.0.1:5672/"
+    RABBITMQ_URL="amqp://guest:guest@127.0.0.1:5672/%2f"
 fi
 
 # Create directories
