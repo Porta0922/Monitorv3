@@ -239,13 +239,18 @@ async fn login_user(
         .and_then(|u| u.as_str())
         .map(|s| s.to_string())
         .unwrap_or_else(|| "unknown".to_string());
-    let has_password = _payload
+    let password = _payload
         .get("password")
         .and_then(|p| p.as_str())
-        .is_some();
+        .unwrap_or("");
 
-    if has_password {
-        // TODO: Fetch user from database and verify password hash
+    let default_admin_user = std::env::var("ADMIN_USERNAME").unwrap_or_else(|_| "admin".to_string());
+    let default_admin_pass = std::env::var("ADMIN_PASSWORD").unwrap_or_else(|_| "admin123".to_string());
+
+    let is_valid = username == default_admin_user && password == default_admin_pass;
+
+    if is_valid {
+        // TODO: Fetch user from database and verify password hash (Using hardcoded default for now)
         let token_result = state.auth.issue_token(&username, 24);
         if let Ok(token) = token_result {
             if state.config.audit_log_enabled {
