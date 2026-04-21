@@ -49,7 +49,7 @@ export function useActivityStream() {
           retryAttempt += 1;
           setError(`Connection lost. Reconnecting in ${Math.round(nextDelay / 1000)} seconds...`);
           eventSource?.close();
-          
+
           // Exponential backoff reconnect to reduce pressure when backend is unavailable
           reconnectTimeout = setTimeout(() => {
             connect();

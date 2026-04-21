@@ -228,13 +228,13 @@ class ApiClient {
   } = {}): Promise<SecurityEvent[]> {
     const response = await this.client.get<{ events: SecurityEvent[] }>('/security', {
       params: {
-        ...(params.deviceId       ? { device_id:        params.deviceId }       : {}),
-        ...(params.from           ? { from:             params.from }           : {}),
-        ...(params.to             ? { to:               params.to }             : {}),
-        ...(params.hours          ? { hours:            params.hours }          : {}),
-        ...(params.severity       ? { severity:         params.severity }       : {}),
-        ...(params.mitreFilter    ? { mitre_technique:  params.mitreFilter }    : {}),
-        ...(params.limit          ? { limit:            params.limit }          : {}),
+        ...(params.deviceId ? { device_id: params.deviceId } : {}),
+        ...(params.from ? { from: params.from } : {}),
+        ...(params.to ? { to: params.to } : {}),
+        ...(params.hours ? { hours: params.hours } : {}),
+        ...(params.severity ? { severity: params.severity } : {}),
+        ...(params.mitreFilter ? { mitre_technique: params.mitreFilter } : {}),
+        ...(params.limit ? { limit: params.limit } : {}),
       },
     });
     return response.data.events || [];
@@ -249,11 +249,11 @@ class ApiClient {
   } = {}): Promise<SecurityEvent[]> {
     const response = await this.client.get<{ events: SecurityEvent[] }>(`/security/${deviceId}`, {
       params: {
-        ...(params.from        ? { from:            params.from }        : {}),
-        ...(params.to          ? { to:              params.to }          : {}),
-        ...(params.severity    ? { severity:        params.severity }    : {}),
+        ...(params.from ? { from: params.from } : {}),
+        ...(params.to ? { to: params.to } : {}),
+        ...(params.severity ? { severity: params.severity } : {}),
         ...(params.mitreFilter ? { mitre_technique: params.mitreFilter } : {}),
-        ...(params.limit       ? { limit:           params.limit }       : {}),
+        ...(params.limit ? { limit: params.limit } : {}),
       },
     });
     return response.data.events || [];
@@ -272,8 +272,8 @@ class ApiClient {
     const response = await this.client.get('/security/summary', {
       params: {
         ...(params.deviceId ? { device_id: params.deviceId } : {}),
-        ...(params.from     ? { from:      params.from }     : {}),
-        ...(params.to       ? { to:        params.to }       : {}),
+        ...(params.from ? { from: params.from } : {}),
+        ...(params.to ? { to: params.to } : {}),
       },
     });
     return response.data;

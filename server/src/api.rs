@@ -33,16 +33,7 @@ pub struct AppState {
 
 pub fn create_router(state: Arc<AppState>) -> Router {
     // Configure CORS layer
-    let cors = CorsLayer::permissive()
-        .allow_origin(AllowOrigin::predicate(|origin, _| {
-            origin
-                .as_bytes()
-                .eq(b"http://localhost:5173")
-                || origin.as_bytes().eq(b"http://localhost:3000")
-                || origin.as_bytes().eq(b"http://127.0.0.1:5173")
-        }))
-        .allow_methods([Method::GET, Method::POST, Method::OPTIONS, Method::PATCH])
-        .allow_headers(AllowHeaders::any());
+    let cors = CorsLayer::permissive();
 
     // Create the main router with protected endpoints
     let protected_router = Router::new()
