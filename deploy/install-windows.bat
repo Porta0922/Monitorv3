@@ -215,7 +215,7 @@ if not exist "C:\Program Files\osquery\osqueryi.exe" (
         echo [*] Chocolatey detected. Installing osquery from Chocolatey repository...
         choco install osquery -y --no-progress
     ) else (
-        echo [!] Chocolatey not found. Falling back to direct MSI download (%OSQUERY_VERSION%)...
+        echo [!] Chocolatey not found. Falling back to direct MSI download [%OSQUERY_VERSION%]...
         powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -Uri '%OSQUERY_MSI_URL%' -OutFile '%OSQUERY_MSI_PATH%'"
         if not exist "%OSQUERY_MSI_PATH%" (
             echo [-] Failed to download osquery MSI
@@ -367,13 +367,18 @@ if %errorLevel% equ 0 (
 
 echo.
 echo ========================================
-echo Installation Complete
+echo Instalacion Completada
 echo ========================================
-echo Agent auth token configured
-echo Service Name: %SERVICE_NAME%
-echo Binary Path: %AGENT_PATH%
-echo Config Dir: %CONFIG_DIR%
-echo Log Dir: %LOG_DIR%
+echo Resumen de configuracion:
+echo - API Remota: %AGENT_SERVER_URL%
+echo - RabbitMQ:   %RABBITMQ_URL%
+echo - Token:      %AGENT_AUTH_TOKEN%
+echo.
+echo Rutas:
+echo - Servicio:   %SERVICE_NAME%
+echo - Ejecutable: %AGENT_PATH%
+echo - Config:     %CONFIG_DIR%
+echo - Logs:       %LOG_DIR%
 echo.
 echo To manage the service:
 echo   Start:   net start ActivityMonitor
