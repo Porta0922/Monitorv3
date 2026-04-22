@@ -31,7 +31,8 @@ winapi = { version = "0.3", features = ["winnt", "jobapi", "jobapi2", "processth
 windows = { version = "0.48", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Memory"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# Linux-specific deps as needed
+libc = "0.2"
+signal-hook = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # macOS-specific deps as needed

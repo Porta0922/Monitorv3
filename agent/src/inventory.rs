@@ -194,7 +194,7 @@ impl InventoryScanner {
                 let path = entry.path();
                 
                 if path.is_file() && is_executable(&path) {
-                    if let Ok(hash) = super::super::monitoring::calculate_file_hash(&path.to_string_lossy()) {
+                    if let Ok(hash) = crate::monitoring::calculate_file_hash(&path.to_string_lossy()) {
                         let app = InstalledApp {
                             app_name: path.file_name()
                                 .and_then(|n| n.to_str())
