@@ -103,14 +103,20 @@ impl UsbMonitor {
         let mut devices = Vec::new();
 
         // Capture only physical USB storage devices (exclude internal NVMe/SATA).
-        let output = Command::new("powershell")
-            .args(&[
-                "-NoProfile",
-                "-Command",
-                "Get-CimInstance Win32_DiskDrive | Where-Object { $_.PNPDeviceID -match '^USBSTOR\\\\' -or $_.InterfaceType -eq 'USB' } | Select-Object Model,PNPDeviceID,SerialNumber,DeviceID | ConvertTo-Json -Compress",
-            ])
-            .output()
-            .map_err(|e| e.to_string())?;
+        let mut cmd = Command::new("powershell");
+        cmd.args(&[
+            "-NoProfile",
+            "-Command",
+            "Get-CimInstance Win32_DiskDrive | Where-Object { $_.PNPDeviceID -match '^USBSTOR\\\\' -or $_.InterfaceType -eq 'USB' } | Select-Object Model,PNPDeviceID,SerialNumber,DeviceID | ConvertTo-Json -Compress",
+        ]);
+        
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
+        
+        let output = cmd.output().map_err(|e| e.to_string())?;
 
         if !output.status.success() {
             return Ok(devices);

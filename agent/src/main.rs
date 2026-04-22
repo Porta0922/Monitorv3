@@ -1,3 +1,4 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod monitoring;
 mod offline_cache;
 mod inventory;
@@ -228,6 +229,9 @@ async fn publish_or_cache(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Attempt to load .env from global config path if it exists
+    dotenvy::from_path(r"C:\ProgramData\ActivityMonitor\.env").ok();
+
     // Initialize logging
     tracing_subscriber::fmt::init();
     

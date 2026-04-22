@@ -84,9 +84,16 @@ impl Default for WifiMonitor {
 
 #[cfg(target_os = "windows")]
 fn current_wifi_snapshot() -> Result<Option<WifiSnapshot>, Box<dyn std::error::Error + Send + Sync>> {
-    let output = Command::new("netsh")
-        .args(["wlan", "show", "interfaces"])
-        .output()?;
+    let mut cmd = Command::new("netsh");
+    cmd.args(["wlan", "show", "interfaces"]);
+    
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    
+    let output = cmd.output()?;
 
     if !output.status.success() {
         return Ok(None);

@@ -161,11 +161,13 @@ pub fn get_device_nickname() -> Option<String> {
 #[cfg(target_os = "windows")]
 fn get_mac_windows() -> Option<String> {
     use std::process::Command;
+    use std::os::windows::process::CommandExt;
     
-    let output = Command::new("ipconfig")
-        .arg("/all")
-        .output()
-        .ok()?;
+    let mut cmd = Command::new("ipconfig");
+    cmd.arg("/all");
+    cmd.creation_flags(0x08000000);
+    
+    let output = cmd.output().ok()?;
     
     let output_str = String::from_utf8_lossy(&output.stdout).to_string();
     

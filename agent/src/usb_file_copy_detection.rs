@@ -137,11 +137,15 @@ impl UsbFileCopyMonitor {
              $results | ConvertTo-Json -Compress"
         );
 
-                let output = tokio::process::Command::new("powershell.exe")
-            .args(["-NoProfile", "-Command", &script])
-            .output()
-            .await
-            .map_err(|e| e.to_string())?;
+        let mut cmd = tokio::process::Command::new("powershell.exe");
+        cmd.args(["-NoProfile", "-Command", &script]);
+        
+        #[cfg(target_os = "windows")]
+        {
+            cmd.creation_flags(0x08000000);
+        }
+        
+        let output = cmd.output().await.map_err(|e| e.to_string())?;
 
         if !output.status.success() {
                         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();

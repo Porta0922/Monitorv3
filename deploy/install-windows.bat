@@ -16,15 +16,10 @@ if %errorLevel% neq 0 (
 REM Configuration
 set AGENT_NAME=ActivityMonitorAgent
 set AGENT_VERSION=0.1.0
-set SERVICE_NAME=ActivityMonitor
 set AGENT_PATH=%~dp0\..\target\release\activity-monitor-agent.exe
-set NSSM_PATH=%~dp0\nssm.exe
-set NSSM_LOCAL_DIR=%PROGRAMDATA%\ActivityMonitor\bin
-set NSSM_LOCAL_PATH=%NSSM_LOCAL_DIR%\nssm.exe
-set NSSM_ZIP_URL=https://nssm.cc/download/nssm-2.24-101-g897c7ad.zip
-set NSSM_ZIP_PATH=%TEMP%\nssm.zip
-set NSSM_EXTRACT_DIR=%TEMP%\nssm-extract
 set CONFIG_DIR=%PROGRAMDATA%\ActivityMonitor
+set LOG_DIR=%PROGRAMDATA%\ActivityMonitor\logs
+set ENV_FILE=%CONFIG_DIR%\.env
 set LOG_DIR=%PROGRAMDATA%\ActivityMonitor\logs
 set ENV_FILE=%CONFIG_DIR%\.env
 set OSQUERY_VERSION=5.22.1
@@ -83,47 +78,29 @@ echo Creating configuration file...
 ) > "%ENV_FILE%"
 echo [+] Credenciales actualizadas en: %ENV_FILE%
 
-sc query %SERVICE_NAME% >nul 2>&1
-if !errorLevel! equ 0 (
-    echo [*] Reiniciando servicio para aplicar cambios...
-    net stop %SERVICE_NAME% >nul 2>&1
+taskkill /F /IM activity-monitor-agent.exe >nul 2>&1
     
-    set NSSM_CMD=
-    if exist "%NSSM_PATH%" set NSSM_CMD="%NSSM_PATH%"
-    if "!NSSM_CMD!"=="" if exist "%NSSM_LOCAL_PATH%" set NSSM_CMD="%NSSM_LOCAL_PATH%"
-    if not "!NSSM_CMD!"=="" (
-        !NSSM_CMD! set %SERVICE_NAME% AppEnvironmentExtra "AGENT_AUTH_TOKEN=!AGENT_AUTH_TOKEN!" "AGENT_OFFLINE_CACHE_KEY=!AGENT_OFFLINE_CACHE_KEY!" "AGENT_SERVER_URL=!AGENT_SERVER_URL!" "RABBITMQ_URL=!RABBITMQ_URL!"
-    )
-    
-    net start %SERVICE_NAME%
-    echo [+] Servicio reiniciado.
-) else (
-    echo [!] El servicio no esta instalado. Instale primero para reiniciar.
-)
+    echo [*] Iniciando agente...
+    start "" "%AGENT_PATH%"
+    echo [+] Credenciales actualizadas y agente reiniciado.
 pause
 goto MAIN_MENU
 
 :UNINSTALL_AGENT
 echo.
-echo === Desinstalando ===
-sc query %SERVICE_NAME% >nul 2>&1
+echo [*] Limpiando servicio NSSM antiguo si existe...
+sc query ActivityMonitor >nul 2>&1
 if !errorLevel! equ 0 (
-    echo [*] Deteniendo servicio...
-    net stop %SERVICE_NAME% >nul 2>&1
-    
-    set NSSM_CMD=
-    if exist "%NSSM_PATH%" set NSSM_CMD="%NSSM_PATH%"
-    if "!NSSM_CMD!"=="" if exist "%NSSM_LOCAL_PATH%" set NSSM_CMD="%NSSM_LOCAL_PATH%"
-    if not "!NSSM_CMD!"=="" (
-        echo [*] Removiendo servicio con NSSM...
-        !NSSM_CMD! remove %SERVICE_NAME% confirm
-    ) else (
-        echo [*] Removiendo servicio con sc...
-        sc delete %SERVICE_NAME%
-    )
-) else (
-    echo [!] El servicio no esta instalado.
+    net stop ActivityMonitor >nul 2>&1
+    sc delete ActivityMonitor >nul 2>&1
 )
+
+echo [*] Deteniendo agente en ejecucion...
+taskkill /F /IM activity-monitor-agent.exe >nul 2>&1
+
+echo [*] Removiendo de inicio automatico (Registro Run)...
+REG DELETE "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v ActivityMonitorAgent /f >nul 2>&1
+
 echo [*] Removiendo tarea programada (watchdog)...
 schtasks /Delete /TN ActivityMonitorGuardian /F >nul 2>&1
 echo [+] Desinstalacion completada.
@@ -170,12 +147,16 @@ if not exist "%ENV_FILE%" (
     echo [!] Configuration file already exists
 )
 
-REM Stop existing service early so the release binary is not locked during build.
-sc query %SERVICE_NAME% >nul 2>&1
+REM Cleanup old service if it exists
+sc query ActivityMonitor >nul 2>&1
 if %errorLevel% equ 0 (
-    echo [*] Stopping existing service before build...
-    net stop %SERVICE_NAME% >nul 2>&1
+    echo [*] Stopping old service before build...
+    net stop ActivityMonitor >nul 2>&1
+    sc delete ActivityMonitor >nul 2>&1
 )
+
+echo [*] Deteniendo agente existente si esta en ejecucion...
+taskkill /F /IM activity-monitor-agent.exe >nul 2>&1
 
 REM Build latest release binary automatically.
 where cargo >nul 2>&1
@@ -243,127 +224,27 @@ if not exist "C:\Program Files\osquery\osqueryi.exe" (
     echo [+] osquery already installed
 )
 
-REM Resolve/install NSSM (local file, PATH, Chocolatey, then direct download fallback)
 echo.
-echo [Paso 4/5] Instalando gestor de servicios (NSSM)...
-set NSSM_CMD=
+echo [Paso 4/5] Registrando inicio automatico (Registro de Windows)...
 
-if exist "%NSSM_PATH%" set NSSM_CMD="%NSSM_PATH%"
-if "!NSSM_CMD!"=="" if exist "%NSSM_LOCAL_PATH%" set NSSM_CMD="%NSSM_LOCAL_PATH%"
-
-if "!NSSM_CMD!"=="" (
-    where nssm >nul 2>&1
-    if !errorLevel! equ 0 (
-        for /f "delims=" %%I in ('where nssm') do (
-            set NSSM_CMD="%%I"
-            goto :nssm_ready
-        )
-    )
-)
-
-if "!NSSM_CMD!"=="" (
-    where choco >nul 2>&1
-    if !errorLevel! equ 0 (
-        echo [*] Chocolatey detected. Installing NSSM from Chocolatey repository...
-        choco install nssm -y --no-progress
-        where nssm >nul 2>&1
-        if !errorLevel! equ 0 (
-            for /f "delims=" %%I in ('where nssm') do (
-                set NSSM_CMD="%%I"
-                goto :nssm_ready
-            )
-        )
-    ) else (
-        echo [!] Chocolatey not found. Skipping repository install for NSSM...
-    )
-)
-
-if "!NSSM_CMD!"=="" (
-    echo [*] Falling back to direct NSSM download...
-    if not exist "%NSSM_LOCAL_DIR%" mkdir "%NSSM_LOCAL_DIR%"
-    if exist "%NSSM_ZIP_PATH%" del /f /q "%NSSM_ZIP_PATH%" >nul 2>&1
-    if exist "%NSSM_EXTRACT_DIR%" rmdir /s /q "%NSSM_EXTRACT_DIR%" >nul 2>&1
-
-    powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -Uri '%NSSM_ZIP_URL%' -OutFile '%NSSM_ZIP_PATH%'"
-    if not exist "%NSSM_ZIP_PATH%" (
-        echo [-] Failed to download NSSM zip
-        pause
-        exit /b 1
-    )
-
-    powershell -NoProfile -Command "Expand-Archive '%NSSM_ZIP_PATH%' -DestinationPath '%NSSM_EXTRACT_DIR%' -Force"
-    if exist "%NSSM_EXTRACT_DIR%\nssm-2.24-101-g897c7ad\win64\nssm.exe" (
-        copy /y "%NSSM_EXTRACT_DIR%\nssm-2.24-101-g897c7ad\win64\nssm.exe" "%NSSM_LOCAL_PATH%" >nul
-    )
-
-    if exist "%NSSM_LOCAL_PATH%" (
-        set NSSM_CMD="%NSSM_LOCAL_PATH%"
-    )
-)
-
-:nssm_ready
-if "!NSSM_CMD!"=="" (
-    echo [-] Could not resolve or install NSSM automatically.
-    pause
-    exit /b 1
-)
-echo [+] NSSM ready: !NSSM_CMD!
-
-REM Stop and remove existing service
-echo.
-echo [Paso 5/5] Registrando e iniciando servicio de Windows...
-echo [*] Checking for existing service...
-sc query %SERVICE_NAME% >nul 2>&1
+REM Add to HKLM Run registry key for automatic startup on login
+REG ADD "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v ActivityMonitorAgent /t REG_SZ /d "\"%AGENT_PATH%\"" /f
 if %errorLevel% equ 0 (
-    echo [*] Stopping existing service...
-    net stop %SERVICE_NAME% >nul 2>&1
-    echo [*] Removing existing service...
-    !NSSM_CMD! remove %SERVICE_NAME% confirm
-)
-
-REM Install new service
-echo [*] Installing service...
-!NSSM_CMD! install %SERVICE_NAME% "%AGENT_PATH%"
-!NSSM_CMD! set %SERVICE_NAME% AppDirectory "%CONFIG_DIR%"
-!NSSM_CMD! set %SERVICE_NAME% AppStdout "%LOG_DIR%\output.log"
-!NSSM_CMD! set %SERVICE_NAME% AppStderr "%LOG_DIR%\error.log"
-!NSSM_CMD! set %SERVICE_NAME% AppRotateFiles 1
-!NSSM_CMD! set %SERVICE_NAME% AppRotateOnline 1
-!NSSM_CMD! set %SERVICE_NAME% AppRotateSeconds 86400
-!NSSM_CMD! set %SERVICE_NAME% AppRotateBytes 10485760
-!NSSM_CMD! set %SERVICE_NAME% Start SERVICE_AUTO_START
-
-REM Harden restart behavior: always restart agent if process exits unexpectedly.
-!NSSM_CMD! set %SERVICE_NAME% AppExit Default Restart
-!NSSM_CMD! set %SERVICE_NAME% AppRestartDelay 5000
-!NSSM_CMD! set %SERVICE_NAME% AppThrottle 1500
-
-REM Set environment variables for service
-!NSSM_CMD! set %SERVICE_NAME% AppEnvironmentExtra "AGENT_AUTH_TOKEN=!AGENT_AUTH_TOKEN!" "AGENT_OFFLINE_CACHE_KEY=!AGENT_OFFLINE_CACHE_KEY!" "AGENT_SERVER_URL=!AGENT_SERVER_URL!" "RABBITMQ_URL=!RABBITMQ_URL!"
-
-REM Configure Service Control Manager recovery actions as an additional safety net.
-sc failure %SERVICE_NAME% reset= 0 actions= restart/5000/restart/5000/restart/5000 >nul 2>&1
-sc failureflag %SERVICE_NAME% 1 >nul 2>&1
-
-REM Start service
-echo [*] Starting service...
-net start %SERVICE_NAME%
-if %errorLevel% equ 0 (
-    echo [+] Service installed and started successfully!
+    echo [+] Agente registrado en el inicio de Windows
 ) else (
-    echo [-] Failed to start service. Check logs at %LOG_DIR%
+    echo [-] Error al registrar en el inicio
     pause
     exit /b 1
 )
 
-REM Guardian watchdog: if someone stops the service, start it again automatically.
-echo [*] Installing guardian watchdog task...
-schtasks /Create /TN "ActivityMonitorGuardian" /SC MINUTE /MO 1 /RU SYSTEM /RL HIGHEST /F /TR "powershell -NoProfile -WindowStyle Hidden -Command \"try { $s = Get-Service -Name 'ActivityMonitor' -ErrorAction Stop; if ($s.Status -ne 'Running') { Start-Service -Name 'ActivityMonitor' -ErrorAction Stop } } catch {}\"" >nul 2>&1
-if %errorLevel% equ 0 (
-    echo [+] Guardian watchdog task configured (ActivityMonitorGuardian)
-) else (
-    echo [!] Warning: Could not configure watchdog task. Service recovery is still enabled.
-)
+REM Start agent now
+echo.
+echo [Paso 5/5] Iniciando agente...
+start "" "%AGENT_PATH%"
+echo [+] Agente iniciado silenciosamente en segundo plano.
+
+REM Remove old guardian watchdog if exists
+schtasks /Delete /TN ActivityMonitorGuardian /F >nul 2>&1
 
 echo.
 echo ========================================
@@ -375,17 +256,16 @@ echo - RabbitMQ:   %RABBITMQ_URL%
 echo - Token:      %AGENT_AUTH_TOKEN%
 echo.
 echo Rutas:
-echo - Servicio:   %SERVICE_NAME%
+echo - Agente auto-inicio: Activado (Registry Run)
+echo.
+echo Rutas:
 echo - Ejecutable: %AGENT_PATH%
 echo - Config:     %CONFIG_DIR%
 echo - Logs:       %LOG_DIR%
 echo.
-echo To manage the service:
-echo   Start:   net start ActivityMonitor
-echo   Stop:    net stop ActivityMonitor
-echo   Update token/key: Edit %ENV_FILE% and reinstall service
-echo   Uninstall: nssm remove ActivityMonitor confirm
-echo   Remove watchdog: schtasks /Delete /TN ActivityMonitorGuardian /F
+echo To manage the agent:
+echo   Update token/key: Option 2 in this installer
+echo   Uninstall:        Option 3 in this installer
 echo.
 pause
 goto MAIN_MENU
