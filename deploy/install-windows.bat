@@ -158,16 +158,12 @@ if %errorLevel% equ 0 (
 echo [*] Deteniendo agente existente si esta en ejecucion...
 taskkill /F /IM activity-monitor-agent.exe >nul 2>&1
 
-REM Build latest release binary automatically.
+REM Build latest release binary automatically if cargo is available.
 where cargo >nul 2>&1
-if %errorLevel% neq 0 (
-    echo [-] cargo was not found in PATH. Install Rust toolchain first.
-    pause
-    exit /b 1
-)
+if %errorLevel% neq 0 goto CHECK_PREBUILT
 
 echo.
-echo [Paso 2/5] Compilando la ultima version del agente...
+echo [Paso 2/5] Compilando la ultima version del agente con cargo...
 pushd "%~dp0\.."
 cargo build --release -p activity-monitor-agent
 if %errorLevel% neq 0 (
@@ -177,9 +173,22 @@ if %errorLevel% neq 0 (
     exit /b 1
 )
 popd
+goto VERIFY_BINARY
 
+:CHECK_PREBUILT
+echo.
+echo [Paso 2/5] cargo no encontrado. Verificando binario pre-compilado...
 if not exist "%AGENT_PATH%" (
-    echo [-] Agent binary not found at %AGENT_PATH% after build.
+    echo [-] cargo no esta en PATH y no se encontro binario en %AGENT_PATH%.
+    echo [-] Por favor compile el agente en otra maquina o instale Rust.
+    pause
+    exit /b 1
+)
+echo [+] Usando binario pre-compilado en target\release\.
+
+:VERIFY_BINARY
+if not exist "%AGENT_PATH%" (
+    echo [-] Agent binary not found at %AGENT_PATH%.
     pause
     exit /b 1
 )

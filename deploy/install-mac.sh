@@ -165,32 +165,35 @@ ENVEOF
         echo "$DEVICE_NICKNAME" > "$NICKNAME_FILE"
     fi
 
-    echo "[Paso 2/4] Compilando la ultima version del agente..."
-    if ! command -v cargo &> /dev/null; then
-        echo "[-] cargo no encontrado en PATH. Intentando cargar entorno..."
-        if [ -f "$HOME/.cargo/env" ]; then
-            source "$HOME/.cargo/env"
-        fi
-        
-        if ! command -v cargo &> /dev/null; then
-            echo "[-] Error: cargo (Rust) no esta instalado. Instale Rust toolchain primero usando rustup."
+    echo "[Paso 2/4] Verificando/Compilando el agente..."
+    CARGO_FOUND=0
+    if command -v cargo &> /dev/null; then
+        CARGO_FOUND=1
+    elif [ -f "$HOME/.cargo/env" ]; then
+        source "$HOME/.cargo/env"
+        command -v cargo &> /dev/null && CARGO_FOUND=1
+    fi
+
+    if [ $CARGO_FOUND -eq 1 ]; then
+        echo "[*] cargo encontrado. Compilando la ultima version del agente..."
+        pushd "$SCRIPT_DIR/.." > /dev/null
+        cargo build --release -p activity-monitor-agent
+        if [ $? -ne 0 ]; then
+            echo "[-] Fallo en la compilacion del agente."
+            popd > /dev/null
             exit 1
         fi
-    fi
-
-    pushd "$SCRIPT_DIR/.." > /dev/null
-    echo "[*] Ejecutando cargo build --release..."
-    cargo build --release -p activity-monitor-agent
-    if [ $? -ne 0 ]; then
-        echo "[-] Fallo en la compilacion del agente."
         popd > /dev/null
-        exit 1
+    else
+        echo "[*] cargo no encontrado. Verificando binario pre-compilado..."
     fi
-    popd > /dev/null
 
     if [ ! -f "$TARGET_BIN" ]; then
-        echo "[-] Binario compilado no encontrado en $TARGET_BIN"
+        echo "[-] Error: cargo (Rust) no esta instalado y no se encontro binario en $TARGET_BIN"
+        echo "[-] Instale Rust toolchain primero usando rustup o copie un ejecutable pre-compilado."
         exit 1
+    else
+        echo "[+] Usando binario en $TARGET_BIN"
     fi
 
     echo "[*] Deteniendo servicio si esta en ejecucion..."
