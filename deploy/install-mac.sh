@@ -1,20 +1,24 @@
 #!/bin/bash
-# ActivityMonitor Enterprise v3 - Linux Installer
-# Creates systemd service unit for agent
+# ActivityMonitor Enterprise v3 - macOS Installer
+# Creates a LaunchAgent for the current user
 
 set -e
 
 # Configuration
 AGENT_NAME="activity-monitor-agent"
-SERVICE_NAME="activity-monitor-agent"
+SERVICE_NAME="com.activitymonitor.agent"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_BIN="$SCRIPT_DIR/../target/release/$AGENT_NAME"
-AGENT_PATH="/opt/activity-monitor/bin/$AGENT_NAME"
-CONFIG_DIR="/etc/activity-monitor"
-LOG_DIR="/var/log/activity-monitor"
-DATA_DIR="/var/lib/activity-monitor"
+
+# macOS User-level directories (required for UI/Accessibility capture)
+BASE_DIR="$HOME/.activitymonitor"
+AGENT_PATH="$BASE_DIR/bin/$AGENT_NAME"
+CONFIG_DIR="$BASE_DIR/config"
+LOG_DIR="$BASE_DIR/logs"
+DATA_DIR="$BASE_DIR/data"
 ENV_FILE="$CONFIG_DIR/.env"
 NICKNAME_FILE="$DATA_DIR/device_nickname.txt"
+PLIST_PATH="$HOME/Library/LaunchAgents/$SERVICE_NAME.plist"
 
 # Default Variables
 AGENT_AUTH_TOKEN="dev-agent-token"
@@ -22,9 +26,9 @@ AGENT_SERVER_URL="http://localhost:3000"
 RABBITMQ_URL="amqp://guest:guest@127.0.0.1:5672/%2f"
 AGENT_OFFLINE_CACHE_KEY="replace-with-32-byte-cache-key!!"
 
-# Check for root privileges
-if [[ $EUID -ne 0 ]]; then
-   echo "[-] This script must be run as root. (Use: sudo ./install-linux.sh)"
+# Check that script is NOT run as root (we want to install as user for UI session)
+if [[ $EUID -eq 0 ]]; then
+   echo "[-] Este script NO debe ejecutarse con sudo. Ejecutalo como tu usuario normal para poder monitorear la sesion grafica."
    exit 1
 fi
 
@@ -36,7 +40,7 @@ fi
 show_menu() {
     clear
     echo "========================================"
-    echo "ActivityMonitor Enterprise v3 Installer (Linux)"
+    echo "ActivityMonitor Enterprise v3 Installer (macOS)"
     echo "========================================"
     echo "Rutas de instalacion:"
     echo "- Ejecutable: $AGENT_PATH"
@@ -85,9 +89,10 @@ ENVEOF
     chmod 600 "$ENV_FILE"
     echo "[+] Credenciales actualizadas en: $ENV_FILE"
 
-    if systemctl is-active --quiet $SERVICE_NAME.service; then
-        echo "[*] Reiniciando servicio para aplicar cambios..."
-        systemctl restart $SERVICE_NAME.service
+    if launchctl list | grep -q "$SERVICE_NAME"; then
+        echo "[*] Reiniciando LaunchAgent para aplicar cambios..."
+        launchctl unload -w "$PLIST_PATH" 2>/dev/null || true
+        launchctl load -w "$PLIST_PATH"
         echo "[+] Servicio reiniciado."
     else
         echo "[!] El servicio no esta en ejecucion. Instale primero."
@@ -101,17 +106,13 @@ ENVEOF
 uninstall_agent() {
     echo ""
     echo "=== Desinstalando ==="
-    if systemctl is-active --quiet $SERVICE_NAME.service || systemctl is-failed --quiet $SERVICE_NAME.service; then
-        echo "[*] Deteniendo servicio..."
-        systemctl stop $SERVICE_NAME.service || true
-        echo "[*] Deshabilitando servicio..."
-        systemctl disable $SERVICE_NAME.service || true
-        
-        echo "[*] Removiendo unidad de systemd..."
-        rm -f /etc/systemd/system/$SERVICE_NAME.service
-        systemctl daemon-reload
+    if launchctl list | grep -q "$SERVICE_NAME"; then
+        echo "[*] Deteniendo LaunchAgent..."
+        launchctl unload -w "$PLIST_PATH" 2>/dev/null || true
+        echo "[*] Removiendo archivo plist..."
+        rm -f "$PLIST_PATH"
     else
-        echo "[!] El servicio no esta instalado o registrado en systemd."
+        echo "[!] El servicio no esta instalado o registrado en launchd."
     fi
 
     echo "[*] Deteniendo agente en ejecucion (si existe)..."
@@ -148,7 +149,8 @@ install_agent() {
     echo ""
     echo "[Paso 1/4] Preparando directorios y configuracion..."
     mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR"
-    mkdir -p /opt/activity-monitor/bin
+    mkdir -p "$BASE_DIR/bin"
+    mkdir -p "$HOME/Library/LaunchAgents"
 
     cat > "$ENV_FILE" << ENVEOF
 # ActivityMonitor Agent Configuration
@@ -165,15 +167,13 @@ ENVEOF
 
     echo "[Paso 2/4] Compilando la ultima version del agente..."
     if ! command -v cargo &> /dev/null; then
-        echo "[-] cargo no encontrado en PATH. Intentando cargar entorno de root o usuario..."
+        echo "[-] cargo no encontrado en PATH. Intentando cargar entorno..."
         if [ -f "$HOME/.cargo/env" ]; then
             source "$HOME/.cargo/env"
-        elif [ -f "/root/.cargo/env" ]; then
-            source "/root/.cargo/env"
         fi
         
         if ! command -v cargo &> /dev/null; then
-            echo "[-] Error: cargo (Rust) no esta instalado. Instale Rust toolchain primero."
+            echo "[-] Error: cargo (Rust) no esta instalado. Instale Rust toolchain primero usando rustup."
             exit 1
         fi
     fi
@@ -194,64 +194,66 @@ ENVEOF
     fi
 
     echo "[*] Deteniendo servicio si esta en ejecucion..."
-    systemctl stop $SERVICE_NAME.service 2>/dev/null || true
+    launchctl unload -w "$PLIST_PATH" 2>/dev/null || true
+    pkill -f "$AGENT_NAME" || true
 
     echo "[*] Copiando binario a $AGENT_PATH..."
     cp -f "$TARGET_BIN" "$AGENT_PATH"
     chmod 755 "$AGENT_PATH"
 
     echo ""
-    echo "[Paso 3/4] Creando usuario y permisos..."
-    if ! id -u activity-monitor &>/dev/null; then
-        useradd --system --home $DATA_DIR --shell /usr/sbin/nologin activity-monitor
-    fi
-
-    chown -R root:root "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR"
-    chmod 750 "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR"
-    chmod 640 "$NICKNAME_FILE" 2>/dev/null || true
-
-    echo ""
-    echo "[Paso 4/4] Configurando e iniciando servicio (systemd)..."
-    cat > /etc/systemd/system/$SERVICE_NAME.service << EOF
-[Unit]
-Description=ActivityMonitor Enterprise Agent
-Documentation=https://github.com/yourrepo/ActivityMonitor-Enterprise-v3
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=root
-# We must run as root to access /dev/input for keystroke capture natively.
-WorkingDirectory=$DATA_DIR
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=$SERVICE_NAME
-
-# Restart policy
-Restart=on-failure
-RestartSec=10s
-
-# Resource limits
-MemoryLimit=256M
-CPUQuota=50%
-
-# Start command
-EnvironmentFile=-$ENV_FILE
-ExecStart=$AGENT_PATH
-
-[Install]
-WantedBy=multi-user.target
+    echo "[Paso 3/4] Generando plist LaunchAgent..."
+    cat > "$PLIST_PATH" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$SERVICE_NAME</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$AGENT_PATH</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>AGENT_AUTH_TOKEN</key>
+        <string>$AGENT_AUTH_TOKEN</string>
+        <key>AGENT_OFFLINE_CACHE_KEY</key>
+        <string>$AGENT_OFFLINE_CACHE_KEY</string>
+        <key>AGENT_SERVER_URL</key>
+        <string>$AGENT_SERVER_URL</string>
+        <key>RABBITMQ_URL</key>
+        <string>$RABBITMQ_URL</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>$LOG_DIR/output.log</string>
+    <key>StandardErrorPath</key>
+    <string>$LOG_DIR/error.log</string>
+    <key>WorkingDirectory</key>
+    <string>$DATA_DIR</string>
+</dict>
+</plist>
 EOF
 
-    systemctl daemon-reload
-    systemctl enable $SERVICE_NAME.service
-    systemctl start $SERVICE_NAME.service
+    echo ""
+    echo "[Paso 4/4] Configurando e iniciando LaunchAgent..."
+    launchctl load -w "$PLIST_PATH"
 
-    if systemctl is-active --quiet $SERVICE_NAME.service; then
+    if launchctl list | grep -q "$SERVICE_NAME"; then
         echo "[+] Servicio instalado y en ejecucion correctamente!"
+        echo "=========================================================="
+        echo " NOTA IMPORTANTE PARA macOS:                             "
+        echo " Debes otorgar permisos de 'Accesibilidad' al agente.     "
+        echo " Ve a Preferencias del Sistema > Seguridad y Privacidad   "
+        echo " > Privacidad > Accesibilidad, y añade el archivo:        "
+        echo " $AGENT_PATH "
+        echo "=========================================================="
     else
-        echo "[-] Error al iniciar el servicio. Revisa los logs con: journalctl -u $SERVICE_NAME.service -n 20"
+        echo "[-] Error al iniciar el servicio con launchd."
         exit 1
     fi
 
@@ -268,12 +270,8 @@ EOF
     echo "- Servicio:   $SERVICE_NAME"
     echo "- Ejecutable: $AGENT_PATH"
     echo "- Config:     $CONFIG_DIR"
-    echo "- Logs:       $LOG_DIR (via journalctl)"
+    echo "- Logs:       $LOG_DIR"
     echo ""
-    echo "Para gestionar el servicio:"
-    echo "  Start:   systemctl start $SERVICE_NAME"
-    echo "  Stop:    systemctl stop $SERVICE_NAME"
-    echo "  Logs:    journalctl -u $SERVICE_NAME -f"
     echo "========================================"
     
     echo ""
