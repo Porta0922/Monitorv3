@@ -158,6 +158,15 @@ if %errorLevel% equ 0 (
 echo [*] Deteniendo agente existente si esta en ejecucion...
 taskkill /F /IM activity-monitor-agent.exe >nul 2>&1
 
+REM Check if a pre-built binary already exists
+if exist "%AGENT_PATH%" (
+    echo.
+    echo [+] Se detecto un binario pre-compilado en: %AGENT_PATH%
+    set /p USE_EXISTING="¿Desea usar este binario en lugar de compilar uno nuevo? (S/N) [S]: "
+    if "!USE_EXISTING!"=="" set USE_EXISTING=S
+    if /i "!USE_EXISTING!"=="S" goto VERIFY_BINARY
+)
+
 REM Build latest release binary automatically if cargo is available.
 where cargo >nul 2>&1
 if %errorLevel% equ 0 goto CARGO_BUILD
