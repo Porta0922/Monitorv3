@@ -18,8 +18,8 @@ set AGENT_NAME=ActivityMonitorAgent
 set AGENT_VERSION=0.1.0
 set AGENT_PATH=%~dp0\..\target\release\activity-monitor-agent.exe
 set CONFIG_DIR=%PROGRAMDATA%\ActivityMonitor
-set LOG_DIR=%PROGRAMDATA%\ActivityMonitor\logs
-set ENV_FILE=%CONFIG_DIR%\.env
+set BIN_DIR=%PROGRAMDATA%\ActivityMonitor\Bin
+set AGENT_BIN=%BIN_DIR%\activity-monitor-agent.exe
 set LOG_DIR=%PROGRAMDATA%\ActivityMonitor\logs
 set ENV_FILE=%CONFIG_DIR%\.env
 set OSQUERY_VERSION=5.22.1
@@ -160,8 +160,35 @@ taskkill /F /IM activity-monitor-agent.exe >nul 2>&1
 
 REM Build latest release binary automatically if cargo is available.
 where cargo >nul 2>&1
-if %errorLevel% neq 0 goto CHECK_PREBUILT
+if %errorLevel% equ 0 goto CARGO_BUILD
 
+echo.
+echo [*] cargo no encontrado. Intentando instalar Rust...
+echo [*] Descargando rustup-init.exe...
+powershell -NoProfile -Command "Invoke-WebRequest -Uri https://win.rustup.rs/x86_64 -OutFile %TEMP%\rustup-init.exe"
+if not exist "%TEMP%\rustup-init.exe" (
+    echo [-] No se pudo descargar el instalador de Rust.
+    goto CHECK_PREBUILT
+)
+
+echo [*] Ejecutando instalador de Rust (esto puede tardar unos minutos)...
+echo [*] Se usara la instalacion por defecto (-y).
+"%TEMP%\rustup-init.exe" -y --default-toolchain stable
+if %errorLevel% neq 0 (
+    echo [-] Error al instalar Rust.
+    goto CHECK_PREBUILT
+)
+
+REM Add cargo to current session PATH
+set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
+where cargo >nul 2>&1
+if %errorLevel% neq 0 (
+    echo [-] Rust se instalo pero cargo no esta en el PATH de esta sesion.
+    goto CHECK_PREBUILT
+)
+echo [+] Rust instalado y configurado correctamente.
+
+:CARGO_BUILD
 echo.
 echo [Paso 2/5] Compilando la ultima version del agente con cargo...
 pushd "%~dp0\.."
@@ -186,13 +213,19 @@ if not exist "%AGENT_PATH%" (
 )
 echo [+] Usando binario pre-compilado en target\release\.
 
-:VERIFY_BINARY
-if not exist "%AGENT_PATH%" (
-    echo [-] Agent binary not found at %AGENT_PATH%.
+)
+echo [+] Release agent ready: %AGENT_PATH%
+
+echo.
+echo [Paso 2.5/5] Copiando binario a ruta local...
+if not exist "%BIN_DIR%" mkdir "%BIN_DIR%"
+copy /Y "%AGENT_PATH%" "%AGENT_BIN%" >nul
+if %errorLevel% neq 0 (
+    echo [-] Error al copiar el binario a %AGENT_BIN%
     pause
     exit /b 1
 )
-echo [+] Release agent ready: %AGENT_PATH%
+echo [+] Binario copiado a: %AGENT_BIN%
 
 REM Install osquery if not present
 echo.
@@ -234,23 +267,38 @@ if not exist "C:\Program Files\osquery\osqueryi.exe" (
 )
 
 echo.
-echo [Paso 4/5] Registrando inicio automatico (Registro de Windows)...
+echo [Paso 4/5] Registrando como Servicio de Windows...
 
-REM Add to HKLM Run registry key for automatic startup on login
-REG ADD "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v ActivityMonitorAgent /t REG_SZ /d "\"%AGENT_PATH%\"" /f
+REM Remove registry run key if it exists (legacy)
+REG DELETE "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v ActivityMonitorAgent /f >nul 2>&1
+
+REM Create Windows Service
+sc create ActivityMonitor binPath= "\"%AGENT_BIN%\"" start= delayed-auto displayName= "ActivityMonitor Enterprise Agent" >nul
 if %errorLevel% equ 0 (
-    echo [+] Agente registrado en el inicio de Windows
+    echo [+] Servicio registrado correctamente (Inicio: Automático Diferido)
 ) else (
-    echo [-] Error al registrar en el inicio
-    pause
-    exit /b 1
+    REM Check if it already exists, maybe sc create failed because it exists
+    sc query ActivityMonitor >nul 2>&1
+    if !errorLevel! equ 0 (
+        echo [+] El servicio ya esta registrado.
+        sc config ActivityMonitor binPath= "\"%AGENT_BIN%\"" start= delayed-auto >nul
+    ) else (
+        echo [-] Error al registrar el servicio (Error: %errorLevel%)
+        pause
+        exit /b 1
+    )
 )
 
 REM Start agent now
 echo.
-echo [Paso 5/5] Iniciando agente...
-start "" "%AGENT_PATH%"
-echo [+] Agente iniciado silenciosamente en segundo plano.
+echo [Paso 5/5] Iniciando servicio...
+sc start ActivityMonitor >nul 2>&1
+if %errorLevel% equ 0 (
+    echo [+] Servicio iniciado correctamente.
+) else (
+    REM Maybe it's already running
+    echo [*] El servicio ya esta en ejecucion o tardara un momento en iniciar.
+)
 
 REM Remove old guardian watchdog if exists
 schtasks /Delete /TN ActivityMonitorGuardian /F >nul 2>&1
@@ -265,10 +313,8 @@ echo - RabbitMQ:   %RABBITMQ_URL%
 echo - Token:      %AGENT_AUTH_TOKEN%
 echo.
 echo Rutas:
-echo - Agente auto-inicio: Activado (Registry Run)
-echo.
-echo Rutas:
-echo - Ejecutable: %AGENT_PATH%
+echo - Servicio:   Activado (ActivityMonitor)
+echo - Ejecutable: %AGENT_BIN%
 echo - Config:     %CONFIG_DIR%
 echo - Logs:       %LOG_DIR%
 echo.

@@ -15,10 +15,87 @@ mod osquery_runner;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::collections::HashSet;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, mpsc};
 use tokio::time::{sleep, Duration, interval};
 use device_id::{load_or_create_device_identity, get_device_nickname};
 use monitoring::{MonitoringLoop, ResourceMonitor};
+
+#[cfg(windows)]
+use windows_service::{
+    define_windows_service,
+    service::{
+        ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
+        ServiceType,
+    },
+    service_control_handler::{self, ServiceControlHandlerResult},
+    service_dispatcher,
+};
+
+#[cfg(windows)]
+const SERVICE_NAME: &str = "ActivityMonitor";
+
+#[cfg(windows)]
+define_windows_service!(ffi_service_main, my_service_main);
+
+#[cfg(windows)]
+fn my_service_main(arguments: Vec<std::ffi::OsString>) {
+    if let Err(e) = run_service() {
+        tracing::error!("Service failed: {:?}", e);
+    }
+}
+
+#[cfg(windows)]
+fn run_service() -> Result<(), windows_service::Error> {
+    let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
+
+    let event_handler = move |control_event| -> ServiceControlHandlerResult {
+        match control_event {
+            ServiceControl::Stop => {
+                let _ = shutdown_tx.blocking_send(());
+                ServiceControlHandlerResult::NoError
+            }
+            ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
+            _ => ServiceControlHandlerResult::NotImplemented,
+        }
+    };
+
+    let status_handle = service_control_handler::register(SERVICE_NAME, event_handler)?;
+
+    status_handle.set_service_status(ServiceStatus {
+        service_type: ServiceType::OWN_PROCESS,
+        current_state: ServiceState::Running,
+        controls_accepted: ServiceControlAccept::STOP,
+        exit_code: ServiceExitCode::Win32(0),
+        checkpoint: 0,
+        wait_hint: std::time::Duration::default(),
+        process_id: None,
+    })?;
+
+    tracing::info!("Service running, starting async agent...");
+    
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    rt.block_on(async {
+        if let Err(e) = run_agent(shutdown_rx).await {
+            tracing::error!("Agent error: {}", e);
+        }
+    });
+
+    status_handle.set_service_status(ServiceStatus {
+        service_type: ServiceType::OWN_PROCESS,
+        current_state: ServiceState::Stopped,
+        controls_accepted: ServiceControlAccept::empty(),
+        exit_code: ServiceExitCode::Win32(0),
+        checkpoint: 0,
+        wait_hint: std::time::Duration::default(),
+        process_id: None,
+    })?;
+
+    Ok(())
+}
 use usb_detection::UsbMonitor;
 use wifi_detection::WifiMonitor;
 use input_tracking::InputTracker;
@@ -227,14 +304,55 @@ async fn publish_or_cache(
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Attempt to load .env from global config path if it exists
     dotenvy::from_path(r"C:\ProgramData\ActivityMonitor\.env").ok();
 
     // Initialize logging
     tracing_subscriber::fmt::init();
-    
+
+    #[cfg(windows)]
+    {
+        if service_dispatcher::start(SERVICE_NAME, ffi_service_main).is_err() {
+            tracing::info!("Running in console mode...");
+            let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+            let (tx, rx) = mpsc::channel(1);
+            
+            let tx_clone = tx.clone();
+            rt.spawn(async move {
+                if tokio::signal::ctrl_c().await.is_ok() {
+                    let _ = tx_clone.send(()).await;
+                }
+            });
+
+            rt.block_on(async {
+                run_agent(rx).await
+            })?;
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        tracing::info!("Running in console mode...");
+        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let (tx, rx) = mpsc::channel(1);
+        
+        let tx_clone = tx.clone();
+        rt.spawn(async move {
+            if tokio::signal::ctrl_c().await.is_ok() {
+                let _ = tx_clone.send(()).await;
+            }
+        });
+
+        rt.block_on(async {
+            run_agent(rx).await
+        })?;
+    }
+
+    Ok(())
+}
+
+async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("🚀 ActivityMonitor Agent v0.1.0 starting...");
     
     // Load device identity (or create if new)
@@ -1106,9 +1224,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("✅ Agent started successfully");
     tracing::info!("📊 Monitoring: focus-activity (2s) | heartbeat (15s) | open apps (20s) | USB (30s) | USB-copy-detect (45s) | WiFi (60s) | inventory (12h) | input summary (60s) | osquery (configurable)");
     
-    // Keep agent running
-    loop {
-        sleep(Duration::from_secs(60)).await;
-    }
+    // Keep agent running until shutdown signal is received
+    shutdown_rx.recv().await;
+    tracing::info!("🛑 Shutdown signal received. Stopping agent...");
+
+    Ok(())
 }
 

@@ -29,6 +29,7 @@ dotenvy = "0.15"
 winreg = "0.50"
 winapi = { version = "0.3", features = ["winnt", "jobapi", "jobapi2", "processthreadsapi", "winuser", "handleapi", "winbase"] }
 windows = { version = "0.48", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Memory"] }
+windows-service = "0.6"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

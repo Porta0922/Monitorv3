@@ -175,6 +175,19 @@ ENVEOF
         command -v cargo &> /dev/null && CARGO_FOUND=1
     fi
 
+    if [ $CARGO_FOUND -eq 0 ]; then
+        echo "[*] cargo no encontrado. Intentando instalar Rust..."
+        if command -v curl &> /dev/null; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+            if [ -f "$HOME/.cargo/env" ]; then
+                source "$HOME/.cargo/env"
+                CARGO_FOUND=1
+            fi
+        else
+            echo "[-] curl no esta instalado. No se puede instalar Rust automaticamente."
+        fi
+    fi
+
     if [ $CARGO_FOUND -eq 1 ]; then
         echo "[*] cargo encontrado. Compilando la ultima version del agente..."
         pushd "$SCRIPT_DIR/.." > /dev/null
@@ -186,7 +199,7 @@ ENVEOF
         fi
         popd > /dev/null
     else
-        echo "[*] cargo no encontrado. Verificando binario pre-compilado..."
+        echo "[*] No se pudo instalar cargo. Verificando binario pre-compilado..."
     fi
 
     if [ ! -f "$TARGET_BIN" ]; then
