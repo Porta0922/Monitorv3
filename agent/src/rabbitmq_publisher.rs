@@ -44,12 +44,23 @@ impl RabbitMQPublisher {
     ) -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("🔌 Agent connecting to RabbitMQ at: {}", rabbitmq_url);
 
-        let connection = Connection::connect(rabbitmq_url, ConnectionProperties::default())
-            .await
-            .map_err(|e| {
+        let connection_result = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            Connection::connect(rabbitmq_url, ConnectionProperties::default())
+        ).await;
+
+        let connection = match connection_result {
+            Ok(Ok(conn)) => conn,
+            Ok(Err(e)) => {
                 tracing::error!("❌ Agent failed to connect to RabbitMQ: {}", e);
-                Box::new(e) as Box<dyn std::error::Error>
-            })?;
+                return Err(Box::new(e) as Box<dyn std::error::Error>);
+            }
+            Err(_) => {
+                let err_msg = "RabbitMQ connection timed out after 10s";
+                tracing::error!("❌ {}", err_msg);
+                return Err(Self::boxed_error(err_msg.to_string()));
+            }
+        };
 
         let channel = connection.create_channel().await.map_err(|e| {
             tracing::error!("❌ Agent failed to create channel: {}", e);
@@ -192,35 +203,50 @@ impl RabbitMQPublisher {
                 })?
             };
 
-            let publish_result = async {
-                channel
-                    .basic_publish(
-                        "monitoring",
-                        &routing_key,
-                        BasicPublishOptions::default(),
-                        &body,
-                        BasicProperties::default()
-                            .with_content_type("application/json".into())
-                            .with_delivery_mode(2u8),
-                    )
-                    .await?
-                    .await?;
-                Ok::<(), lapin::Error>(())
-            }
-            .await;
+            let publish_result = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                async {
+                    channel
+                        .basic_publish(
+                            "monitoring",
+                            &routing_key,
+                            BasicPublishOptions::default(),
+                            &body,
+                            BasicProperties::default()
+                                .with_content_type("application/json".into())
+                                .with_delivery_mode(2u8),
+                        )
+                        .await?
+                        .await?;
+                    Ok::<(), lapin::Error>(())
+                }
+            ).await;
 
             match publish_result {
-                Ok(_) => {
+                Ok(Ok(_)) => {
                     tracing::info!("✅ Event published successfully: {} ({} bytes)", routing_key, body.len());
                     return Ok(());
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     let err_msg = e.to_string();
                     tracing::warn!(
                         "Publish attempt {} failed for {}: {}",
                         attempt,
                         routing_key,
                         err_msg
+                    );
+                    last_error = Some(err_msg);
+
+                    let mut state = self.state.lock().await;
+                    state.channel = None;
+                    state.connection = None;
+                }
+                Err(_) => {
+                    let err_msg = "Publish operation timed out after 5 seconds".to_string();
+                    tracing::warn!(
+                        "Publish attempt {} timed out for {}",
+                        attempt,
+                        routing_key
                     );
                     last_error = Some(err_msg);
 
@@ -251,8 +277,9 @@ impl RabbitMQPublisher {
             return Ok(false);
         };
 
-        match channel
-            .exchange_declare(
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            channel.exchange_declare(
                 "monitoring",
                 lapin::ExchangeKind::Topic,
                 lapin::options::ExchangeDeclareOptions {
@@ -262,10 +289,9 @@ impl RabbitMQPublisher {
                 },
                 Default::default(),
             )
-            .await
-        {
-            Ok(_) => Ok(true),
-            Err(_) => {
+        ).await {
+            Ok(Ok(_)) => Ok(true),
+            _ => {
                 state.channel = None;
                 state.connection = None;
                 Ok(false)
