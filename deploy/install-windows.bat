@@ -222,6 +222,11 @@ if not exist "%AGENT_PATH%" (
 )
 echo [+] Usando binario pre-compilado en target\release\.
 
+:VERIFY_BINARY
+if not exist "%AGENT_PATH%" (
+    echo [-] No se pudo encontrar el binario del agente en %AGENT_PATH%.
+    pause
+    exit /b 1
 )
 echo [+] Release agent ready: %AGENT_PATH%
 
@@ -284,7 +289,7 @@ REG DELETE "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v ActivityMonit
 REM Create Windows Service
 sc create ActivityMonitor binPath= "\"%AGENT_BIN%\"" start= delayed-auto displayName= "ActivityMonitor Enterprise Agent" >nul
 if %errorLevel% equ 0 (
-    echo [+] Servicio registrado correctamente (Inicio: Automático Diferido)
+    echo [+] Servicio registrado correctamente ^(Inicio: Automático Diferido^)
 ) else (
     REM Check if it already exists, maybe sc create failed because it exists
     sc query ActivityMonitor >nul 2>&1
@@ -292,7 +297,7 @@ if %errorLevel% equ 0 (
         echo [+] El servicio ya esta registrado.
         sc config ActivityMonitor binPath= "\"%AGENT_BIN%\"" start= delayed-auto >nul
     ) else (
-        echo [-] Error al registrar el servicio (Error: %errorLevel%)
+        echo [-] Error al registrar el servicio ^(Error: %errorLevel%^)
         pause
         exit /b 1
     )
