@@ -36,7 +36,8 @@ libc = "0.2"
 signal-hook = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# macOS-specific deps as needed
+libc = "0.2"
+signal-hook = "0.3"
 
 [[bin]]
 name = "activity-monitor-agent"

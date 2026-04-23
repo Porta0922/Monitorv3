@@ -17,9 +17,9 @@ ENV_FILE="$CONFIG_DIR/.env"
 NICKNAME_FILE="$DATA_DIR/device_nickname.txt"
 
 # Default Variables
-AGENT_AUTH_TOKEN="dev-agent-token"
-AGENT_SERVER_URL="http://localhost:3000"
-RABBITMQ_URL="amqp://guest:guest@127.0.0.1:5672/%2f"
+AGENT_AUTH_TOKEN="change-me-in-production"
+AGENT_SERVER_URL="http://10.30.0.123:3000"
+RABBITMQ_URL="amqp://eclub:eCLUB123@10.30.0.123:5672/%2f"
 AGENT_OFFLINE_CACHE_KEY="replace-with-32-byte-cache-key!!"
 
 # Check for root privileges
