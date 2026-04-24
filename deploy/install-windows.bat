@@ -4,6 +4,7 @@ REM Registers agent as Windows Service using NSSM (Non-Sucking Service Manager)
 
 SETLOCAL ENABLEDELAYEDEXPANSION
 set SERVICE_NAME=ActivityMonitor
+set TASK_NAME=ActivityMonitorAgentTask
 
 REM Check for admin privileges
 net session >nul 2>&1
@@ -281,38 +282,36 @@ if not exist "C:\Program Files\osquery\osqueryi.exe" (
 )
 
 echo.
-echo [Paso 4/5] Registrando como Servicio de Windows...
+echo [Paso 4/5] Configurando Modo Hibrido (Servicio + Tarea Programada)...
 
-REM Remove registry run key if it exists (legacy)
-REG DELETE "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v ActivityMonitorAgent /f >nul 2>&1
+REM 1. Register the System Service (for Persistence & Resources)
+sc stop %SERVICE_NAME% >nul 2>&1
+sc delete %SERVICE_NAME% >nul 2>&1
 
-REM Create Windows Service
-sc create ActivityMonitor binPath= "\"%AGENT_BIN%\"" start= delayed-auto displayName= "ActivityMonitor Enterprise Agent" >nul
+sc create %SERVICE_NAME% binPath= "\"%AGENT_BIN%\"" start= delayed-auto displayName= "ActivityMonitor Enterprise Agent" >nul
 if %errorLevel% equ 0 (
-    echo [+] Servicio registrado correctamente ^(Inicio: Automático Diferido^)
+    echo [+] Servicio de Sistema registrado correctamente.
 ) else (
-    REM Check if it already exists, maybe sc create failed because it exists
-    sc query ActivityMonitor >nul 2>&1
-    if !errorLevel! equ 0 (
-        echo [+] El servicio ya esta registrado.
-        sc config ActivityMonitor binPath= "\"%AGENT_BIN%\"" start= delayed-auto >nul
-    ) else (
-        echo [-] Error al registrar el servicio ^(Error: %errorLevel%^)
-        pause
-        exit /b 1
-    )
+    echo [-] Error al registrar el servicio.
 )
 
-REM Start agent now
+REM 2. Register the User Task (for Input & Activity)
+set TASK_NAME=ActivityMonitorUserTask
+schtasks /Delete /TN "%TASK_NAME%" /F >nul 2>&1
+schtasks /Create /F /TN "%TASK_NAME%" /TR "\"%AGENT_BIN%\" --user-mode" /SC ONLOGON /RL HIGHEST /IT
+if %errorLevel% equ 0 (
+    echo [+] Tarea de Actividad de Usuario configurada correctamente.
+) else (
+    echo [-] Error al configurar la tarea de usuario.
+)
+
+REM Start both now
 echo.
-echo [Paso 5/5] Iniciando servicio...
-sc start ActivityMonitor >nul 2>&1
-if %errorLevel% equ 0 (
-    echo [+] Servicio iniciado correctamente.
-) else (
-    REM Maybe it's already running
-    echo [*] El servicio ya esta en ejecucion o tardara un momento en iniciar.
-)
+echo [Paso 5/5] Iniciando componentes...
+sc start %SERVICE_NAME% >nul 2>&1
+schtasks /Run /TN "%TASK_NAME%" >nul 2>&1
+
+echo [+] Agente Hibrido en ejecucion.
 
 REM Remove old guardian watchdog if exists
 schtasks /Delete /TN ActivityMonitorGuardian /F >nul 2>&1

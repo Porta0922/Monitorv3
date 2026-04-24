@@ -38,7 +38,7 @@ const SERVICE_NAME: &str = "ActivityMonitor";
 define_windows_service!(ffi_service_main, my_service_main);
 
 #[cfg(windows)]
-fn my_service_main(arguments: Vec<std::ffi::OsString>) {
+fn my_service_main(_arguments: Vec<std::ffi::OsString>) {
     if let Err(e) = run_service() {
         tracing::error!("Service failed: {:?}", e);
     }
@@ -79,7 +79,7 @@ fn run_service() -> Result<(), windows_service::Error> {
         .unwrap();
 
     rt.block_on(async {
-        if let Err(e) = run_agent(shutdown_rx).await {
+        if let Err(e) = run_agent(shutdown_rx, false).await {
             tracing::error!("Agent error: {}", e);
         }
     });
@@ -305,16 +305,37 @@ async fn publish_or_cache(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().collect();
+    let is_user_mode = args.iter().any(|arg| arg == "--user-mode");
+
     // Attempt to load .env from global config path if it exists
     dotenvy::from_path(r"C:\ProgramData\ActivityMonitor\.env").ok();
 
     // Initialize logging
     tracing_subscriber::fmt::init();
 
+    if is_user_mode {
+        tracing::info!("Running in User Activity Mode (--user-mode)...");
+        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let (tx, rx) = mpsc::channel(1);
+        
+        let tx_clone = tx.clone();
+        rt.spawn(async move {
+            if tokio::signal::ctrl_c().await.is_ok() {
+                let _ = tx_clone.send(()).await;
+            }
+        });
+
+        rt.block_on(async {
+            run_agent(rx, true).await
+        })?;
+        return Ok(());
+    }
+
     #[cfg(windows)]
     {
         if service_dispatcher::start(SERVICE_NAME, ffi_service_main).is_err() {
-            tracing::info!("Running in console mode...");
+            tracing::info!("Running in console mode (System Service emulation)...");
             let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
             let (tx, rx) = mpsc::channel(1);
             
@@ -326,7 +347,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
 
             rt.block_on(async {
-                run_agent(rx).await
+                run_agent(rx, false).await
             })?;
         }
     }
@@ -345,15 +366,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
 
         rt.block_on(async {
-            run_agent(rx).await
+            run_agent(rx, false).await
         })?;
     }
 
     Ok(())
 }
 
-async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn std::error::Error>> {
-    tracing::info!("🚀 ActivityMonitor Agent v0.1.0 starting...");
+async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>, is_user_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
+    tracing::info!("🚀 ActivityMonitor Agent v0.1.0 starting (User Mode: {})", is_user_mode);
     
     // Load device identity (or create if new)
     let device_identity = load_or_create_device_identity()?;
@@ -383,12 +404,14 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     
     tracing::info!("✅ Offline cache initialized");
     
-    // Initialize Process Protection (Anti-Kill)
-    let protection = ProcessProtection::new(device_identity.device_id.to_string(), true);
-    if let Err(e) = protection.init() {
-        tracing::warn!("⚠️  Process protection initialization warning: {}", e);
-    } else {
-        tracing::info!("✅ Process protection enabled");
+    // Initialize Process Protection (Anti-Kill) - Only in Service Mode
+    if !is_user_mode {
+        let protection = ProcessProtection::new(device_identity.device_id.to_string(), true);
+        if let Err(e) = protection.init() {
+            tracing::warn!("⚠️  Process protection initialization warning: {}", e);
+        } else {
+            tracing::info!("✅ Process protection enabled");
+        }
     }
     
     // Initialize Input Tracking (Keyboard/Mouse Heatmaps)
@@ -396,37 +419,39 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     input_tracker.set_screen_resolution(1920, 1080).await;
     tracing::info!("✅ Input activity tracking enabled");
 
-    // Initialize Keystroke Tracking (Idle detection + keystroke counting)
+    // Initialize Keystroke Tracking (Idle detection + keystroke counting) - Only in User Mode
     let keystroke_tracker = Arc::new(KeystrokeTracker::new());
     
-    // Initialize platform-specific input listener
-    #[cfg(target_os = "windows")]
-    {
-        use keystroke_tracker::windows_input_listener;
-        if let Err(e) = windows_input_listener::init_input_listener(keystroke_tracker.clone()).await {
-            tracing::warn!("⚠️  Failed to initialize keystroke tracking: {}", e);
-        } else {
-            tracing::info!("✅ Keystroke tracking enabled");
+    if is_user_mode {
+        // Initialize platform-specific input listener
+        #[cfg(target_os = "windows")]
+        {
+            use keystroke_tracker::windows_input_listener;
+            if let Err(e) = windows_input_listener::init_input_listener(keystroke_tracker.clone()).await {
+                tracing::warn!("⚠️  Failed to initialize keystroke tracking: {}", e);
+            } else {
+                tracing::info!("✅ Keystroke tracking enabled");
+            }
         }
-    }
-    
-    #[cfg(target_os = "linux")]
-    {
-        use keystroke_tracker::linux_input_listener;
-        if let Err(e) = linux_input_listener::init_input_listener(keystroke_tracker.clone()).await {
-            tracing::warn!("⚠️  Failed to initialize keystroke tracking: {}", e);
-        } else {
-            tracing::info!("✅ Keystroke tracking enabled");
+        
+        #[cfg(target_os = "linux")]
+        {
+            use keystroke_tracker::linux_input_listener;
+            if let Err(e) = linux_input_listener::init_input_listener(keystroke_tracker.clone()).await {
+                tracing::warn!("⚠️  Failed to initialize keystroke tracking: {}", e);
+            } else {
+                tracing::info!("✅ Keystroke tracking enabled");
+            }
         }
-    }
-    
-    #[cfg(target_os = "macos")]
-    {
-        use keystroke_tracker::macos_input_listener;
-        if let Err(e) = macos_input_listener::init_input_listener(keystroke_tracker.clone()).await {
-            tracing::warn!("⚠️  Failed to initialize keystroke tracking: {}", e);
-        } else {
-            tracing::info!("✅ Keystroke tracking enabled");
+        
+        #[cfg(target_os = "macos")]
+        {
+            use keystroke_tracker::macos_input_listener;
+            if let Err(e) = macos_input_listener::init_input_listener(keystroke_tracker.clone()).await {
+                tracing::warn!("⚠️  Failed to initialize keystroke tracking: {}", e);
+            } else {
+                tracing::info!("✅ Keystroke tracking enabled");
+            }
         }
     }
     
@@ -534,66 +559,39 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         }
     });
 
-    // Spawn monitoring task
-    let monitoring = MonitoringLoop::new();
-    let publisher_clone = publisher.clone();
-    let keystroke_tracker_clone = keystroke_tracker.clone();
-    let cache_clone = cache.clone();
-    let auth_token_clone = auth_token.clone();
-    let device_id_clone_for_activity = device_id_str.clone();
-    let hostname_clone_for_activity = hostname.clone();
-    let mac_clone_for_activity = mac_address.clone();
-    let envelope_metadata_clone = envelope_metadata.clone();
-    
-    tokio::spawn(async move {
-        let mut interval = interval(Duration::from_secs(2));
-        let mut last_window: Option<(String, String, DateTime<Utc>)> = None;
-        let mut last_heartbeat_sent: Option<DateTime<Utc>> = None;
+    // Spawn activity monitoring task - Only in User Mode
+    if is_user_mode {
+        let monitoring = MonitoringLoop::new();
+        let publisher_clone = publisher.clone();
+        let keystroke_tracker_clone = keystroke_tracker.clone();
+        let cache_clone = cache.clone();
+        let auth_token_clone = auth_token.clone();
+        let device_id_clone_for_activity = device_id_str.clone();
+        let hostname_clone_for_activity = hostname.clone();
+        let mac_clone_for_activity = mac_address.clone();
+        let envelope_metadata_clone = envelope_metadata.clone();
+        
+        tokio::spawn(async move {
+            let mut interval = interval(Duration::from_secs(2));
+            let mut last_window: Option<(String, String, DateTime<Utc>)> = None;
+            let mut last_heartbeat_sent: Option<DateTime<Utc>> = None;
 
-        loop {
-            interval.tick().await;
-            
-            // Update idle status based on recent activity
-            keystroke_tracker_clone.update_idle_status().await;
-            
-            if let Some(current) = monitoring.capture_active_window() {
-                let (current_app, current_title) = sanitize_activity_fields(&current.app_name, &current.window_title);
+            loop {
+                interval.tick().await;
+                
+                // Update idle status based on recent activity
+                keystroke_tracker_clone.update_idle_status().await;
+                
+                if let Some(current) = monitoring.capture_active_window() {
+                    let (current_app, current_title) = sanitize_activity_fields(&current.app_name, &current.window_title);
 
-                if let Some((last_app, last_title, started_at)) = &last_window {
-                    let changed = *last_app != current_app || *last_title != current_title;
-                    
-                    if changed {
-                        // Window changed: send activity event for previous window
-                        let duration_reference = last_heartbeat_sent.unwrap_or(*started_at);
-                        let duration_seconds = (current.timestamp - duration_reference).num_seconds().max(1);
-                        let activity_payload = build_event_envelope(
-                            "activity",
-                            1,
-                            &device_id_clone_for_activity,
-                            &hostname_clone_for_activity,
-                            &mac_clone_for_activity,
-                            &auth_token_clone,
-                            envelope_metadata_clone.as_ref(),
-                            serde_json::json!({
-                                "app_name": last_app,
-                                "window_title": last_title,
-                                "duration_seconds": duration_seconds,
-                                "timestamp": current.timestamp.to_rfc3339(),
-                            }),
-                        );
-
-                        publish_or_cache(&publisher_clone, &cache_clone, "activity", activity_payload).await;
-                        last_window = Some((current_app.clone(), current_title.clone(), current.timestamp));
-                        last_heartbeat_sent = Some(current.timestamp);
-                    } else {
-                        // Window unchanged: send activity heartbeat every 30 seconds to show continuation
-                        let now = current.timestamp;
-                        let should_send_heartbeat = last_heartbeat_sent.is_none() || 
-                            (now - last_heartbeat_sent.unwrap()).num_seconds() >= 30;
+                    if let Some((last_app, last_title, started_at)) = &last_window {
+                        let changed = *last_app != current_app || *last_title != current_title;
                         
-                        if should_send_heartbeat {
+                        if changed {
+                            // Window changed: send activity event for previous window
                             let duration_reference = last_heartbeat_sent.unwrap_or(*started_at);
-                            let duration_seconds = (now - duration_reference).num_seconds().max(1);
+                            let duration_seconds = (current.timestamp - duration_reference).num_seconds().max(1);
                             let activity_payload = build_event_envelope(
                                 "activity",
                                 1,
@@ -606,41 +604,51 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                                     "app_name": last_app,
                                     "window_title": last_title,
                                     "duration_seconds": duration_seconds,
-                                    "timestamp": now.to_rfc3339(),
+                                    "timestamp": current.timestamp.to_rfc3339(),
                                 }),
                             );
 
                             publish_or_cache(&publisher_clone, &cache_clone, "activity", activity_payload).await;
-                            last_heartbeat_sent = Some(now);
-                        }
-                    }
-                } else {
-                    // Initial window capture on startup
-                    last_window = Some((current_app, current_title, current.timestamp));
-                    last_heartbeat_sent = Some(current.timestamp);
-                    
-                    // Send initial activity event
-                    let activity_payload = build_event_envelope(
-                        "activity",
-                        1,
-                        &device_id_clone_for_activity,
-                        &hostname_clone_for_activity,
-                        &mac_clone_for_activity,
-                        &auth_token_clone,
-                        envelope_metadata_clone.as_ref(),
-                        serde_json::json!({
-                            "app_name": current.app_name,
-                            "window_title": current.window_title,
-                            "duration_seconds": 0,
-                            "timestamp": current.timestamp.to_rfc3339(),
-                        }),
-                    );
+                            last_window = Some((current_app.clone(), current_title.clone(), current.timestamp));
+                            last_heartbeat_sent = Some(current.timestamp);
+                        } else {
+                            // Window unchanged: send activity heartbeat every 30 seconds to show continuation
+                            let now = current.timestamp;
+                            let should_send_heartbeat = last_heartbeat_sent.is_none() || 
+                                (now - last_heartbeat_sent.unwrap()).num_seconds() >= 30;
+                            
+                            if should_send_heartbeat {
+                                let duration_reference = last_heartbeat_sent.unwrap_or(*started_at);
+                                let duration_seconds = (now - duration_reference).num_seconds().max(1);
+                                let activity_payload = build_event_envelope(
+                                    "activity",
+                                    1,
+                                    &device_id_clone_for_activity,
+                                    &hostname_clone_for_activity,
+                                    &mac_clone_for_activity,
+                                    &auth_token_clone,
+                                    envelope_metadata_clone.as_ref(),
+                                    serde_json::json!({
+                                        "app_name": last_app,
+                                        "window_title": last_title,
+                                        "duration_seconds": duration_seconds,
+                                        "timestamp": now.to_rfc3339(),
+                                    }),
+                                );
 
-                    publish_or_cache(&publisher_clone, &cache_clone, "activity", activity_payload).await;
+                                publish_or_cache(&publisher_clone, &cache_clone, "activity", activity_payload).await;
+                                last_heartbeat_sent = Some(now);
+                            }
+                        }
+                    } else {
+                        // First window detected
+                        last_window = Some((current_app, current_title, current.timestamp));
+                        last_heartbeat_sent = Some(current.timestamp);
+                    }
                 }
             }
-        }
-    });
+        });
+    }
 
     // Heartbeat task (online/offline + idle status)
     let publisher_clone = publisher.clone();
@@ -700,270 +708,292 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         }
     });
     
-    // Spawn USB detection task
-    let mut usb_monitor = UsbMonitor::new();
-    let publisher_clone = publisher.clone();
-    let cache_clone = cache.clone();
-    let auth_token_clone = auth_token.clone();
-    let hostname_clone = hostname.clone();
-    let mac_clone = mac_address.clone();
-    let device_id_clone_for_usb = device_identity.device_id;
-    let envelope_metadata_clone = envelope_metadata.clone();
-    
-    tokio::spawn(async move {
-        let mut interval = interval(Duration::from_secs(30)); // Check every 30 seconds
-        loop {
-            interval.tick().await;
-            
-            match usb_monitor.scan_devices().await {
-                Ok(events) => {
-                    for mut event in events {
-                        event.device_id = device_id_clone_for_usb;
+    // Spawn USB/System monitoring task - Only in Service Mode
+    if !is_user_mode {
+        let publisher_clone = publisher.clone();
+        let cache_clone = cache.clone();
+        let device_id_clone = device_id_str.clone();
+        let hostname_clone = hostname.clone();
+        let mac_clone = mac_address.clone();
+        let auth_token_clone = auth_token.clone();
+        let envelope_metadata_clone = envelope_metadata.clone();
 
-                        let usb_payload = build_event_envelope(
-                            "usb",
-                            1,
-                            &event.device_id.to_string(),
-                            &hostname_clone,
-                            &mac_clone,
-                            &auth_token_clone,
-                            envelope_metadata_clone.as_ref(),
-                            serde_json::json!({
-                                "device_name": event.usb_device.device_name,
-                                "serial_number": event.usb_device.serial_number,
-                                "action": match event.action {
-                                    usb_detection::UsbAction::Connected => "IN",
-                                    usb_detection::UsbAction::Disconnected => "OUT",
-                                },
-                                "timestamp": event.timestamp.to_rfc3339(),
-                            }),
-                        );
+        tokio::spawn(async move {
+            let mut usb_monitor = UsbMonitor::new();
+            let mut interval = interval(Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                match usb_monitor.scan_devices().await {
+                    Ok(events) => {
+                        for mut event in events {
+                            event.device_id = device_identity.device_id; // Using device_identity from parent scope logic if needed, or capturing correctly
+                            let usb_payload = build_event_envelope(
+                                "usb",
+                                1,
+                                &device_id_clone,
+                                &hostname_clone,
+                                &mac_clone,
+                                &auth_token_clone,
+                                envelope_metadata_clone.as_ref(),
+                                serde_json::json!({
+                                    "device_name": event.usb_device.device_name,
+                                    "serial_number": event.usb_device.serial_number,
+                                    "action": match event.action {
+                                        usb_detection::UsbAction::Connected => "IN",
+                                        usb_detection::UsbAction::Disconnected => "OUT",
+                                    },
+                                    "timestamp": event.timestamp.to_rfc3339(),
+                                }),
+                            );
 
-                        publish_or_cache(&publisher_clone, &cache_clone, "usb", usb_payload).await;
+                            publish_or_cache(&publisher_clone, &cache_clone, "usb", usb_payload).await;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("USB scan error: {}", e);
                     }
                 }
-                Err(e) => {
-                    tracing::warn!("USB scan error: {}", e);
-                }
             }
-        }
-    });
+        });
 
-    // Detect file writes/copies to removable USB drives and emit security events.
-    let publisher_clone = publisher.clone();
-    let cache_clone = cache.clone();
-    let device_id_clone = device_id_str.clone();
-    let hostname_clone = hostname.clone();
-    let mac_clone = mac_address.clone();
-    let auth_token_clone = auth_token.clone();
-    let envelope_metadata_clone = envelope_metadata.clone();
-    tokio::spawn(async move {
-        let mut detector = usb_file_copy_detection::UsbFileCopyMonitor::new(900);
-        let mut interval = interval(Duration::from_secs(20));
+        // Spawn USB File Copy Monitor
+        let publisher_clone = publisher.clone();
+        let cache_clone = cache.clone();
+        let device_id_clone = device_id_str.clone();
+        let hostname_clone = hostname.clone();
+        let mac_clone = mac_address.clone();
+        let auth_token_clone = auth_token.clone();
+        let envelope_metadata_clone = envelope_metadata.clone();
 
-        loop {
-            interval.tick().await;
+        tokio::spawn(async move {
+            let mut detector = usb_file_copy_detection::UsbFileCopyMonitor::new(900);
+            let mut interval = interval(Duration::from_secs(45));
+            loop {
+                interval.tick().await;
+                let findings = match detector.scan_recent_writes(1800, 200).await {
+                    Ok(items) => items,
+                    Err(e) => {
+                        tracing::warn!("USB copy detector scan failed: {}", e);
+                        continue;
+                    }
+                };
 
-            // Wider lookback/cap helps on larger USB volumes where recursive scans
-            // can be slower and recent writes might otherwise fall out of the window.
-            let findings = match detector.scan_recent_writes(1800, 200).await {
-                Ok(items) => items,
-                Err(e) => {
-                    tracing::warn!("USB copy detector scan failed: {}", e);
-                    continue;
-                }
-            };
-
-            if !findings.is_empty() {
-                tracing::info!(
-                    "USB copy detector found {} candidate file write(s)",
-                    findings.len()
-                );
-            }
-
-            for finding in findings {
-                let drive_letter = finding.drive_letter;
-                let file_name = finding.file_name;
-                let file_path = finding.file_path;
-                let size_bytes = finding.size_bytes;
-                let modified_utc = finding.modified_utc;
-                let fingerprint = finding.fingerprint;
-                let description = format!(
-                    "Copia a USB detectada: {} en {} ({} bytes)",
-                    file_name,
-                    drive_letter,
-                    size_bytes,
-                );
-
-                let security_payload = build_event_envelope(
-                    "security",
-                    1,
-                    &device_id_clone,
-                    &hostname_clone,
-                    &mac_clone,
-                    &auth_token_clone,
-                    envelope_metadata_clone.as_ref(),
-                    serde_json::json!({
-                        "alert_type": "USB_FILE_COPY_DETECTED",
-                        "description": description,
-                        "app_name": "usb_copy_monitor",
-                        "query_name": "usb_file_copy_detected",
-                        "query_pack": "usb_data_loss_prevention",
-                        "mitre_technique": "T1052.001",
-                        "severity": "HIGH",
-                        "raw_data": {
-                            "source": "usb_copy_monitor",
-                            "drive_letter": drive_letter,
-                            "file_name": file_name,
-                            "file_path": file_path,
-                            "size_bytes": size_bytes,
-                            "modified_utc": modified_utc.to_rfc3339(),
-                        },
-                        "event_fingerprint": fingerprint,
-                    }),
-                );
-
-                publish_or_cache(&publisher_clone, &cache_clone, "security", security_payload).await;
-            }
-        }
-    });
-
-    // Spawn WiFi history task
-    let mut wifi_monitor = WifiMonitor::new();
-    // Force an immediate state broadcast so any server that just started
-    // learns the current WiFi state within the first scan.
-    wifi_monitor.force_resend();
-    let publisher_clone = publisher.clone();
-    let cache_clone = cache.clone();
-    let auth_token_clone = auth_token.clone();
-    let hostname_clone = hostname.clone();
-    let mac_clone = mac_address.clone();
-    let device_id_clone_for_wifi = device_identity.device_id.to_string();
-    let envelope_metadata_clone = envelope_metadata.clone();
-    let wifi_resend_flag_wifi = wifi_resend_flag.clone();
-
-    tokio::spawn(async move {
-        let mut interval = interval(Duration::from_secs(60)); // Check every 60 seconds
-        loop {
-            interval.tick().await;
-
-            // If RabbitMQ reconnected since last scan, force a state re-broadcast.
-            if wifi_resend_flag_wifi.swap(false, Ordering::Relaxed) {
-                wifi_monitor.force_resend();
-            }
-
-            match wifi_monitor.scan_and_detect_change().await {
-                Ok(Some(snapshot)) => {
-                    let wifi_payload = build_event_envelope(
-                        "wifi",
+                for finding in findings {
+                    let security_payload = build_event_envelope(
+                        "security",
                         1,
-                        &device_id_clone_for_wifi,
+                        &device_id_clone,
                         &hostname_clone,
                         &mac_clone,
                         &auth_token_clone,
                         envelope_metadata_clone.as_ref(),
                         serde_json::json!({
-                            "interface_name": snapshot.interface_name,
-                            "state": snapshot.state,
-                            "ssid": snapshot.ssid,
-                            "bssid": snapshot.bssid,
-                            "signal_percent": snapshot.signal_percent,
-                            "timestamp": Utc::now().to_rfc3339(),
+                            "alert_type": "USB_FILE_COPY_DETECTED",
+                            "description": format!("Copia a USB detectada: {} en {} ({} bytes)", finding.file_name, finding.drive_letter, finding.size_bytes),
+                            "app_name": "usb_copy_monitor",
+                            "severity": "HIGH",
+                            "raw_data": {
+                                "source": "usb_copy_monitor",
+                                "drive_letter": finding.drive_letter,
+                                "file_name": finding.file_name,
+                                "file_path": finding.file_path,
+                                "size_bytes": finding.size_bytes,
+                                "modified_utc": finding.modified_utc.to_rfc3339(),
+                            },
+                            "event_fingerprint": finding.fingerprint,
                         }),
                     );
 
-                    publish_or_cache(&publisher_clone, &cache_clone, "wifi", wifi_payload).await;
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    tracing::warn!("WiFi scan error: {}", e);
+                    publish_or_cache(&publisher_clone, &cache_clone, "security", security_payload).await;
                 }
             }
-        }
-    });
+        });
 
-    // Spawn open-app snapshot task (visible user windows only)
-    let publisher_clone = publisher.clone();
-    let cache_clone = cache.clone();
-    let auth_token_clone = auth_token.clone();
-    let hostname_clone = hostname.clone();
-    let mac_clone = mac_address.clone();
-    let device_id_clone_for_running_apps = device_identity.device_id.to_string();
-    let envelope_metadata_clone = envelope_metadata.clone();
-    tokio::spawn(async move {
-        let mut monitor = MonitoringLoop::new();
-        let mut interval = interval(Duration::from_secs(20));
-        let mut last_fingerprint = String::new();
+        // Spawn WiFi history task
+        let mut wifi_monitor = WifiMonitor::new();
+        wifi_monitor.force_resend();
+        let publisher_clone = publisher.clone();
+        let cache_clone = cache.clone();
+        let auth_token_clone = auth_token.clone();
+        let hostname_clone = hostname.clone();
+        let mac_clone = mac_address.clone();
+        let device_id_clone_for_wifi = device_id_str.clone();
+        let envelope_metadata_clone = envelope_metadata.clone();
+        let wifi_resend_flag_wifi = wifi_resend_flag.clone();
 
-        loop {
-            interval.tick().await;
+        tokio::spawn(async move {
+            let mut interval = interval(Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                if wifi_resend_flag_wifi.swap(false, Ordering::Relaxed) {
+                    wifi_monitor.force_resend();
+                }
 
-            let apps = monitor.capture_open_apps();
-            let fingerprint = apps
-                .iter()
-                .map(|app| format!("{}|{}|{}", app.app_name, app.window_count, app.primary_title))
-                .collect::<Vec<_>>()
-                .join("||");
+                match wifi_monitor.scan_and_detect_change().await {
+                    Ok(Some(snapshot)) => {
+                        let wifi_payload = build_event_envelope(
+                            "wifi",
+                            1,
+                            &device_id_clone_for_wifi,
+                            &hostname_clone,
+                            &mac_clone,
+                            &auth_token_clone,
+                            envelope_metadata_clone.as_ref(),
+                            serde_json::json!({
+                                "interface_name": snapshot.interface_name,
+                                "state": snapshot.state,
+                                "ssid": snapshot.ssid,
+                                "bssid": snapshot.bssid,
+                                "signal_percent": snapshot.signal_percent,
+                                "timestamp": Utc::now().to_rfc3339(),
+                            }),
+                        );
 
-            if fingerprint == last_fingerprint {
-                continue;
+                        publish_or_cache(&publisher_clone, &cache_clone, "wifi", wifi_payload).await;
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        tracing::warn!("WiFi scan error: {}", e);
+                    }
+                }
             }
-            last_fingerprint = fingerprint;
+        });
+    }
 
-            let running_apps_payload = build_event_envelope(
-                "running_apps",
-                1,
-                &device_id_clone_for_running_apps,
-                &hostname_clone,
-                &mac_clone,
-                &auth_token_clone,
-                envelope_metadata_clone.as_ref(),
-                serde_json::json!({
-                    "detected_at": Utc::now().to_rfc3339(),
-                    "apps": apps.into_iter().map(|app| serde_json::json!({
-                        "app_name": app.app_name,
-                        "primary_title": app.primary_title,
-                        "window_count": app.window_count,
-                        "exe_path": app.exe_path,
-                        "exe_hash": app.exe_hash,
-                    })).collect::<Vec<_>>()
-                }),
-            );
+    // Spawn open-app snapshot task (visible user windows only) - Only in User Mode
+    if is_user_mode {
+        let publisher_clone = publisher.clone();
+        let cache_clone = cache.clone();
+        let auth_token_clone = auth_token.clone();
+        let hostname_clone = hostname.clone();
+        let mac_clone = mac_address.clone();
+        let device_id_clone_for_running_apps = device_id_str.clone();
+        let envelope_metadata_clone = envelope_metadata.clone();
+        tokio::spawn(async move {
+            let mut monitor = MonitoringLoop::new();
+            let mut interval = interval(Duration::from_secs(20));
+            let mut last_fingerprint = String::new();
 
-            publish_or_cache(&publisher_clone, &cache_clone, "running_apps", running_apps_payload).await;
-        }
-    });
+            loop {
+                interval.tick().await;
+
+                let apps = monitor.capture_open_apps();
+                let fingerprint = apps
+                    .iter()
+                    .map(|app| format!("{}|{}|{}", app.app_name, app.window_count, app.primary_title))
+                    .collect::<Vec<_>>()
+                    .join("||");
+
+                if fingerprint == last_fingerprint {
+                    continue;
+                }
+                last_fingerprint = fingerprint;
+
+                let running_apps_payload = build_event_envelope(
+                    "running_apps",
+                    1,
+                    &device_id_clone_for_running_apps,
+                    &hostname_clone,
+                    &mac_clone,
+                    &auth_token_clone,
+                    envelope_metadata_clone.as_ref(),
+                    serde_json::json!({
+                        "detected_at": Utc::now().to_rfc3339(),
+                        "apps": apps.into_iter().map(|app| serde_json::json!({
+                            "app_name": app.app_name,
+                            "primary_title": app.primary_title,
+                            "window_count": app.window_count,
+                            "exe_path": app.exe_path,
+                            "exe_hash": app.exe_hash,
+                        })).collect::<Vec<_>>()
+                    }),
+                );
+
+                publish_or_cache(&publisher_clone, &cache_clone, "running_apps", running_apps_payload).await;
+            }
+        });
+    }
     
-    // Spawn software inventory scan (initial snapshot + every 7 days only new apps)
-    let publisher_clone = publisher.clone();
-    let cache_clone = cache.clone();
-    let device_id_clone = device_id_str.clone();
-    let hostname_clone = hostname.clone();
-    let mac_clone = mac_address.clone();
-    let auth_token_clone = auth_token.clone();
-    let envelope_metadata_clone = envelope_metadata.clone();
-    tokio::spawn(async move {
-        let mut known_inventory_fingerprints: HashSet<String> = HashSet::new();
-        let mut interval = interval(Duration::from_secs(60 * 60 * 24 * 7));
+    // Spawn software inventory scan - Only in Service Mode
+    if !is_user_mode {
+        let publisher_clone = publisher.clone();
+        let cache_clone = cache.clone();
+        let device_id_clone = device_id_str.clone();
+        let hostname_clone = hostname.clone();
+        let mac_clone = mac_address.clone();
+        let auth_token_clone = auth_token.clone();
+        let envelope_metadata_clone = envelope_metadata.clone();
+        tokio::spawn(async move {
+            let mut known_inventory_fingerprints: HashSet<String> = HashSet::new();
+            let mut interval = interval(Duration::from_secs(60 * 60 * 24 * 7));
 
-        // Initial baseline snapshot when agent starts.
-        let initial_apps = match inventory::InventoryScanner::scan_installed_software().await {
-            Ok(apps) => Some(apps),
-            Err(e) => {
-                tracing::warn!("Initial inventory scan error: {}", e);
-                None
+            let initial_apps = match inventory::InventoryScanner::scan_installed_software().await {
+                Ok(apps) => Some(apps),
+                Err(e) => {
+                    tracing::warn!("Initial inventory scan error: {}", e);
+                    None
+                }
+            };
+
+            if let Some(apps) = initial_apps {
+                    for app in &apps {
+                        let key = inventory::InventoryScanner::fingerprint(
+                            &app.app_name,
+                            app.version.as_deref(),
+                            &app.exe_hash,
+                        );
+                        known_inventory_fingerprints.insert(key);
+                    }
+
+                    let detected_at = Utc::now().to_rfc3339();
+                    let inventory_payload = build_event_envelope(
+                        "inventory",
+                        1,
+                        &device_id_clone,
+                        &hostname_clone,
+                        &mac_clone,
+                        &auth_token_clone,
+                        envelope_metadata_clone.as_ref(),
+                        serde_json::json!({
+                            "detected_at": detected_at,
+                            "apps": apps.into_iter().map(|app| serde_json::json!({
+                                "app_name": app.app_name,
+                                "version": app.version,
+                                "exe_hash": app.exe_hash,
+                                "detected_at": detected_at,
+                            })).collect::<Vec<_>>(),
+                        }),
+                    );
+                    publish_or_cache(&publisher_clone, &cache_clone, "inventory", inventory_payload).await;
             }
-        };
 
-        if let Some(apps) = initial_apps {
-                for app in &apps {
+            loop {
+                interval.tick().await;
+                
+                let apps = match inventory::InventoryScanner::scan_installed_software().await {
+                    Ok(apps) => Some(apps),
+                    Err(e) => {
+                        tracing::warn!("Inventory scan error: {}", e);
+                        None
+                    }
+                };
+
+                let Some(apps) = apps else { continue; };
+
+                let mut new_apps = Vec::new();
+                for app in apps {
                     let key = inventory::InventoryScanner::fingerprint(
                         &app.app_name,
                         app.version.as_deref(),
                         &app.exe_hash,
                     );
-                    known_inventory_fingerprints.insert(key);
+
+                    if known_inventory_fingerprints.insert(key) {
+                        new_apps.push(app);
+                    }
                 }
+
+                if new_apps.is_empty() { continue; }
 
                 let detected_at = Utc::now().to_rfc3339();
                 let inventory_payload = build_event_envelope(
@@ -976,7 +1006,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                     envelope_metadata_clone.as_ref(),
                     serde_json::json!({
                         "detected_at": detected_at,
-                        "apps": apps.into_iter().map(|app| serde_json::json!({
+                        "apps": new_apps.into_iter().map(|app| serde_json::json!({
                             "app_name": app.app_name,
                             "version": app.version,
                             "exe_hash": app.exe_hash,
@@ -985,114 +1015,46 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                     }),
                 );
                 publish_or_cache(&publisher_clone, &cache_clone, "inventory", inventory_payload).await;
-                tracing::info!("✅ Initial inventory snapshot published: {} apps", known_inventory_fingerprints.len());
-        }
-
-        loop {
-            interval.tick().await;
-            
-            let apps = match inventory::InventoryScanner::scan_installed_software().await {
-                Ok(apps) => Some(apps),
-                Err(e) => {
-                    tracing::warn!("Inventory scan error: {}", e);
-                    None
-                }
-            };
-
-            let Some(apps) = apps else {
-                continue;
-            };
-
-            let mut new_apps = Vec::new();
-            for app in apps {
-                let key = inventory::InventoryScanner::fingerprint(
-                    &app.app_name,
-                    app.version.as_deref(),
-                    &app.exe_hash,
-                );
-
-                if known_inventory_fingerprints.insert(key) {
-                    new_apps.push(app);
-                }
             }
-
-            if new_apps.is_empty() {
-                tracing::info!("Software inventory weekly scan complete: no new applications detected");
-                continue;
-            }
-
-            tracing::info!(
-                "Software inventory weekly scan complete: {} new apps detected",
-                new_apps.len()
-            );
-
-            let detected_at = Utc::now().to_rfc3339();
-            let inventory_payload = build_event_envelope(
-                "inventory",
-                1,
-                &device_id_clone,
-                &hostname_clone,
-                &mac_clone,
-                &auth_token_clone,
-                envelope_metadata_clone.as_ref(),
-                serde_json::json!({
-                    "detected_at": detected_at,
-                    "apps": new_apps.into_iter().map(|app| serde_json::json!({
-                        "app_name": app.app_name,
-                        "version": app.version,
-                        "exe_hash": app.exe_hash,
-                        "detected_at": detected_at,
-                    })).collect::<Vec<_>>(),
-                }),
-            );
-            publish_or_cache(&publisher_clone, &cache_clone, "inventory", inventory_payload).await;
-        }
-    });
+        });
+    }
     
-    // Spawn input activity heatmap upload task (every hour)
-    let input_tracker_clone = input_tracker.clone();
-    let publisher_clone = publisher.clone();
-    let device_id_clone = device_identity.device_id.clone();
-    let cache_clone = cache.clone();
-    let auth_token_clone = auth_token.clone();
-    let hostname_clone = hostname.clone();
-    let mac_clone = mac_address.clone();
-    let envelope_metadata_clone = envelope_metadata.clone();
-    
-    tokio::spawn(async move {
-        let mut interval = interval(Duration::from_secs(3600));  // Every hour
-        loop {
-            interval.tick().await;
-            
-            // Check if heatmap should be uploaded
-            if input_tracker_clone.should_upload().await {
-                if let Some(heatmap) = input_tracker_clone.get_heatmap_for_upload().await {
-                    tracing::debug!(
-                        "📊 Heatmap ready for upload: {} mouse moves, {} keyboard events",
-                        heatmap.stats.mouse_moves,
-                        heatmap.stats.keyboard_events
-                    );
-                    
-                    let event = build_event_envelope(
-                        "input_heatmap",
-                        1,
-                        &device_id_clone.to_string(),
-                        &hostname_clone,
-                        &mac_clone,
-                        &auth_token_clone,
-                        envelope_metadata_clone.as_ref(),
-                        serde_json::json!({
-                            "heatmap": heatmap,
-                        }),
-                    );
+    // Spawn input activity heatmap upload task - Only in User Mode
+    if is_user_mode {
+        let input_tracker_clone = input_tracker.clone();
+        let publisher_clone = publisher.clone();
+        let device_id_clone = device_identity.device_id.clone();
+        let cache_clone = cache.clone();
+        let auth_token_clone = auth_token.clone();
+        let hostname_clone = hostname.clone();
+        let mac_clone = mac_address.clone();
+        let envelope_metadata_clone = envelope_metadata.clone();
+        
+        tokio::spawn(async move {
+            let mut interval = interval(Duration::from_secs(3600));
+            loop {
+                interval.tick().await;
+                if input_tracker_clone.should_upload().await {
+                    if let Some(heatmap) = input_tracker_clone.get_heatmap_for_upload().await {
+                        let event = build_event_envelope(
+                            "input_heatmap",
+                            1,
+                            &device_id_clone.to_string(),
+                            &hostname_clone,
+                            &mac_clone,
+                            &auth_token_clone,
+                            envelope_metadata_clone.as_ref(),
+                            serde_json::json!({ "heatmap": heatmap }),
+                        );
 
-                    publish_or_cache(&publisher_clone, &cache_clone, "input_heatmaps", event).await;
+                        publish_or_cache(&publisher_clone, &cache_clone, "input_heatmaps", event).await;
+                    }
                 }
             }
-        }
-    });
+        });
+    }
 
-    // Input summary metrics every minute (optional but useful for KPIs)
+    // Input summary metrics every minute
     let keystroke_tracker_clone = keystroke_tracker.clone();
     let publisher_clone = publisher.clone();
     let cache_clone = cache.clone();
@@ -1109,6 +1071,26 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
 
             let key_stats = keystroke_tracker_clone.get_stats().await;
             let resources = resource_monitor.capture_snapshot();
+            
+            // Only report resources in Service Mode, and activity in User Mode
+            let mut payload_data = serde_json::json!({
+                "cpu_percent": resources.cpu_percent,
+                "memory_used_mb": resources.memory_used_mb,
+                "memory_percent": resources.memory_percent,
+                "top_process_name": resources.top_process_name,
+                "top_process_cpu_percent": resources.top_process_cpu_percent,
+                "top_process_memory_mb": resources.top_process_memory_mb,
+            });
+
+            if is_user_mode {
+                payload_data["keys_count"] = serde_json::json!(key_stats.keystroke_count);
+                payload_data["mouse_moves_count"] = serde_json::json!(key_stats.mouse_moves_count);
+                payload_data["clicks_count"] = serde_json::json!(key_stats.mouse_clicks_count);
+                payload_data["idle_seconds"] = serde_json::json!(if key_stats.is_idle { 60 } else { 0 });
+                payload_data["active_seconds"] = serde_json::json!(if key_stats.is_idle { 0 } else { 60 });
+                payload_data["status"] = serde_json::json!(if key_stats.is_idle { "idle" } else { "active" });
+            }
+
             let summary_payload = build_event_envelope(
                 "input_summary",
                 1,
@@ -1117,69 +1099,60 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                 &mac_clone,
                 &auth_token_clone,
                 envelope_metadata_clone.as_ref(),
-                serde_json::json!({
-                    "keys_count": key_stats.keystroke_count,
-                    "mouse_moves_count": key_stats.mouse_moves_count,
-                    "clicks_count": key_stats.mouse_clicks_count,
-                    "idle_seconds": if key_stats.is_idle { 60 } else { 0 },
-                    "active_seconds": if key_stats.is_idle { 0 } else { 60 },
-                    "status": if key_stats.is_idle { "idle" } else { "active" },
-                    "cpu_percent": resources.cpu_percent,
-                    "memory_used_mb": resources.memory_used_mb,
-                    "memory_percent": resources.memory_percent,
-                    "top_process_name": resources.top_process_name,
-                    "top_process_cpu_percent": resources.top_process_cpu_percent,
-                    "top_process_memory_mb": resources.top_process_memory_mb,
-                }),
+                payload_data,
             );
 
             publish_or_cache(&publisher_clone, &cache_clone, "heartbeat", summary_payload).await;
-            keystroke_tracker_clone.reset_minute_counters().await;
+            if is_user_mode {
+                keystroke_tracker_clone.reset_minute_counters().await;
+            }
         }
     });
 
-    // ── osquery security scan scheduler (server policy with local fallback) ─
-    let osquery_scheduler_seconds = resolve_osquery_scheduler_seconds(&device_id_str, &auth_token).await;
+    // osquery security scan scheduler - Only in Service Mode
+    if !is_user_mode {
+        let osquery_scheduler_seconds = resolve_osquery_scheduler_seconds(&device_id_str, &auth_token).await;
 
-    if osquery_scheduler_seconds > 0 {
-        let publisher_clone = publisher.clone();
-        let cache_clone = cache.clone();
-        let device_id_clone = device_id_str.clone();
-        let hostname_clone = hostname.clone();
-        let mac_clone = mac_address.clone();
-        let auth_token_clone = auth_token.clone();
-        let envelope_metadata_clone = envelope_metadata.clone();
-        tokio::spawn(async move {
-            let mut runner = osquery_runner::OsqueryRunner::new();
-            let mut scan_interval = interval(Duration::from_secs(osquery_scheduler_seconds.max(30)));
-            loop {
-                scan_interval.tick().await;
-                let findings = runner.scan_due().await;
-                for finding in findings {
-                    let security_payload = build_event_envelope(
-                        "security",
-                        1,
-                        &device_id_clone,
-                        &hostname_clone,
-                        &mac_clone,
-                        &auth_token_clone,
-                        envelope_metadata_clone.as_ref(),
-                        serde_json::json!({
-                            "query_name":        finding.query_name,
-                            "query_pack":        finding.query_pack,
-                            "mitre_technique":   finding.mitre_technique,
-                            "severity":          finding.severity,
-                            "raw_data":          finding.raw_data,
-                            "event_fingerprint": finding.event_fingerprint,
-                        }),
-                    );
-                    publish_or_cache(&publisher_clone, &cache_clone, "security", security_payload).await;
+        if osquery_scheduler_seconds > 0 {
+            let publisher_clone = publisher.clone();
+            let cache_clone = cache.clone();
+            let device_id_clone = device_id_str.clone();
+            let hostname_clone = hostname.clone();
+            let mac_clone = mac_address.clone();
+            let auth_token_clone = auth_token.clone();
+            let envelope_metadata_clone = envelope_metadata.clone();
+            tokio::spawn(async move {
+                let mut runner = osquery_runner::OsqueryRunner::new();
+                let mut scan_interval = interval(Duration::from_secs(osquery_scheduler_seconds.max(30)));
+                loop {
+                    scan_interval.tick().await;
+                    let findings = runner.scan_due().await;
+                    for finding in findings {
+                        let security_payload = build_event_envelope(
+                            "security",
+                            1,
+                            &device_id_clone,
+                            &hostname_clone,
+                            &mac_clone,
+                            &auth_token_clone,
+                            envelope_metadata_clone.as_ref(),
+                            serde_json::json!({
+                                "query_name":        finding.query_name,
+                                "query_pack":        finding.query_pack,
+                                "mitre_technique":   finding.mitre_technique,
+                                "severity":          finding.severity,
+                                "raw_data":          finding.raw_data,
+                                "event_fingerprint": finding.event_fingerprint,
+                            }),
+                        );
+                        publish_or_cache(&publisher_clone, &cache_clone, "security", security_payload).await;
+                    }
                 }
-            }
-        });
-        tracing::info!("✅ osquery security scheduler enabled ({}s tick; per-query cadence managed internally)", osquery_scheduler_seconds.max(30));
-    } else {
-        tracing::info!("ℹ️ osquery security scan disabled (set server policy or AGENT_OSQUERY_SCHEDULER_SECONDS>0 to enable)");
+            });
+            tracing::info!("✅ osquery security scheduler enabled ({}s tick; per-query cadence managed internally)", osquery_scheduler_seconds.max(30));
+        } else {
+            tracing::info!("ℹ️ osquery security scan disabled (set server policy or AGENT_OSQUERY_SCHEDULER_SECONDS>0 to enable)");
+        }
     }
 
     // Retry unsynced cached events in FIFO order
