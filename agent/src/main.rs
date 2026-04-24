@@ -308,8 +308,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Attempt to load .env from global config path if it exists
     dotenvy::from_path(r"C:\ProgramData\ActivityMonitor\.env").ok();
 
-    // Initialize logging
-    tracing_subscriber::fmt::init();
+    // Initialize logging with both console and file output
+    let log_dir = r"C:\ProgramData\ActivityMonitor\logs";
+    let file_appender = tracing_appender::rolling::daily(log_dir, "agent.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    use tracing_subscriber::{fmt, prelude::*, Registry};
+    let subscriber = Registry::default()
+        .with(fmt::layer().with_ansi(true))
+        .with(fmt::layer().with_writer(non_blocking).with_ansi(false));
+
+    tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
 
     #[cfg(windows)]
     {

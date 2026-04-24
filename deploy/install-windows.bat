@@ -120,7 +120,7 @@ if not "!INPUT_SERVER_URL!"=="" (
     set AGENT_SERVER_URL=!INPUT_SERVER_URL!
 )
 
-set /p INPUT_RABBITMQ_URL="Enter RabbitMQ URL (or press Enter for default amqp://guest:guest@127.0.0.1:5672/): "
+set /p INPUT_RABBITMQ_URL="Enter RabbitMQ URL (or press Enter for default amqp://guest:guest@127.0.0.1:5672/%%2f): "
 if not "!INPUT_RABBITMQ_URL!"=="" (
     set RABBITMQ_URL=!INPUT_RABBITMQ_URL!
 )

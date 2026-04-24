@@ -127,7 +127,7 @@ static QUERIES: &[QueryDef] = &[
         severity: "MEDIUM",
         interval_seconds: 1200,
         max_rows: 200,
-        sql: "SELECT name, path, source, status, username \
+        sql: "SELECT name, path, source \
               FROM autoexec WHERE source LIKE 'Registry%';",
     },
     QueryDef {
@@ -150,10 +150,10 @@ static QUERIES: &[QueryDef] = &[
         severity: "MEDIUM",
         interval_seconds: 1800,
         max_rows: 120,
-        sql: "SELECT p.pid, p.name, p.path, a.signed \
+        sql: "SELECT p.pid, p.name, p.path, a.result \
               FROM processes p \
               JOIN authenticode a ON p.path = a.path \
-              WHERE a.signed = '0' AND p.path LIKE 'C:\\Windows\\%';",
+              WHERE a.result != 'trusted' AND p.path LIKE 'C:\\Windows\\%';",
     },
     QueryDef {
         name: "startup_items_persistence",
