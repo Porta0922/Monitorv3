@@ -313,27 +313,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     #[cfg(windows)]
     {
-        if service_dispatcher::start(SERVICE_NAME, ffi_service_main).is_err() {
-            tracing::info!("Running in console mode...");
-            let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
-            let (tx, rx) = mpsc::channel(1);
-            
-            let tx_clone = tx.clone();
-            rt.spawn(async move {
-                if tokio::signal::ctrl_c().await.is_ok() {
-                    let _ = tx_clone.send(()).await;
-                }
-            });
-
-            rt.block_on(async {
-                run_agent(rx).await
-            })?;
+        // On Windows, always attempt to start as a service dispatcher.
+        // This is a native Windows Service.
+        if let Err(e) = service_dispatcher::start(SERVICE_NAME, ffi_service_main) {
+            tracing::error!("Failed to start service dispatcher: {}. Are you running from a console? This binary is designed to run as a Windows Service.", e);
+            return Err(e.into());
         }
     }
 
     #[cfg(not(windows))]
     {
-        tracing::info!("Running in console mode...");
+        tracing::info!("Running in console mode (Unix)...");
         let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
         let (tx, rx) = mpsc::channel(1);
         
@@ -1093,6 +1083,47 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     });
 
     // Input summary metrics every minute (optional but useful for KPIs)
+    let keystroke_tracker_clone = keystroke_tracker.clone();
+    let publisher_clone = publisher.clone();
+    let cache_clone = cache.clone();
+    let device_id_clone = device_id_str.clone();
+    let hostname_clone = hostname.clone();
+    let mac_clone = mac_address.clone();
+    let auth_token_clone = auth_token.clone();
+    let envelope_metadata_clone = envelope_metadata.clone();
+    // ── Immediate Startup Heartbeat ──
+    // Send a heartbeat right now so the dashboard sees the device "Online" immediately
+    {
+        let mut resource_monitor = ResourceMonitor::new();
+        let key_stats = keystroke_tracker.get_stats().await;
+        let resources = resource_monitor.capture_snapshot();
+        let summary_payload = build_event_envelope(
+            "input_summary",
+            1,
+            &device_id_str,
+            &hostname,
+            &mac_address,
+            &auth_token,
+            envelope_metadata.as_ref(),
+            serde_json::json!({
+                "keys_count": key_stats.keystroke_count,
+                "mouse_moves_count": key_stats.mouse_moves_count,
+                "clicks_count": key_stats.mouse_clicks_count,
+                "idle_seconds": 0,
+                "active_seconds": 0,
+                "status": "online",
+                "cpu_percent": resources.cpu_percent,
+                "memory_used_mb": resources.memory_used_mb,
+                "memory_percent": resources.memory_percent,
+                "top_process_name": resources.top_process_name,
+                "top_process_cpu_percent": resources.top_process_cpu_percent,
+                "top_process_memory_mb": resources.top_process_memory_mb,
+            }),
+        );
+        publish_or_cache(&publisher, &cache, "heartbeat", summary_payload).await;
+        tracing::info!("📡 Initial startup heartbeat sent");
+    }
+
     let keystroke_tracker_clone = keystroke_tracker.clone();
     let publisher_clone = publisher.clone();
     let cache_clone = cache.clone();
