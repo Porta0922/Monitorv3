@@ -38,7 +38,7 @@ const SERVICE_NAME: &str = "ActivityMonitor";
 define_windows_service!(ffi_service_main, my_service_main);
 
 #[cfg(windows)]
-fn my_service_main(_arguments: Vec<std::ffi::OsString>) {
+fn my_service_main(arguments: Vec<std::ffi::OsString>) {
     if let Err(e) = run_service() {
         tracing::error!("Service failed: {:?}", e);
     }
@@ -311,26 +311,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
     tracing_subscriber::fmt::init();
 
-    tracing::info!("Running in Unified Agent Mode...");
-    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
-    let (tx, rx) = mpsc::channel(1);
-    
-    let tx_clone = tx.clone();
-    rt.spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            let _ = tx_clone.send(()).await;
-        }
-    });
+    #[cfg(windows)]
+    {
+        if service_dispatcher::start(SERVICE_NAME, ffi_service_main).is_err() {
+            tracing::info!("Running in console mode...");
+            let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+            let (tx, rx) = mpsc::channel(1);
+            
+            let tx_clone = tx.clone();
+            rt.spawn(async move {
+                if tokio::signal::ctrl_c().await.is_ok() {
+                    let _ = tx_clone.send(()).await;
+                }
+            });
 
-    rt.block_on(async {
-        run_agent(rx).await
-    })?;
+            rt.block_on(async {
+                run_agent(rx).await
+            })?;
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        tracing::info!("Running in console mode...");
+        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let (tx, rx) = mpsc::channel(1);
+        
+        let tx_clone = tx.clone();
+        rt.spawn(async move {
+            if tokio::signal::ctrl_c().await.is_ok() {
+                let _ = tx_clone.send(()).await;
+            }
+        });
+
+        rt.block_on(async {
+            run_agent(rx).await
+        })?;
+    }
 
     Ok(())
 }
 
 async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn std::error::Error>> {
-    tracing::info!("🚀 ActivityMonitor Agent v0.1.0 starting (Unified Mode)");
+    tracing::info!("🚀 ActivityMonitor Agent v0.1.0 starting...");
     
     // Load device identity (or create if new)
     let device_identity = load_or_create_device_identity()?;
@@ -350,9 +373,8 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         .try_into()
         .unwrap_or([0u8; 32]);
     
-    let cache_filename = "agent_offline_cache.db";
     let cache = Arc::new(
-        offline_cache::OfflineCache::new(cache_filename, &encryption_key)
+        offline_cache::OfflineCache::new("agent_offline_cache.db", &encryption_key)
             .unwrap_or_else(|_| {
                 tracing::warn!("Failed to initialize offline cache, continuing without it");
                 offline_cache::OfflineCache::new(":memory:", &encryption_key).unwrap()
@@ -512,7 +534,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         }
     });
 
-    // Spawn activity monitoring task
+    // Spawn monitoring task
     let monitoring = MonitoringLoop::new();
     let publisher_clone = publisher.clone();
     let keystroke_tracker_clone = keystroke_tracker.clone();
@@ -593,9 +615,28 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                         }
                     }
                 } else {
-                    // First window detected
+                    // Initial window capture on startup
                     last_window = Some((current_app, current_title, current.timestamp));
                     last_heartbeat_sent = Some(current.timestamp);
+                    
+                    // Send initial activity event
+                    let activity_payload = build_event_envelope(
+                        "activity",
+                        1,
+                        &device_id_clone_for_activity,
+                        &hostname_clone_for_activity,
+                        &mac_clone_for_activity,
+                        &auth_token_clone,
+                        envelope_metadata_clone.as_ref(),
+                        serde_json::json!({
+                            "app_name": current.app_name,
+                            "window_title": current.window_title,
+                            "duration_seconds": 0,
+                            "timestamp": current.timestamp.to_rfc3339(),
+                        }),
+                    );
+
+                    publish_or_cache(&publisher_clone, &cache_clone, "activity", activity_payload).await;
                 }
             }
         }
@@ -659,28 +700,30 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         }
     });
     
-    // Spawn USB/System monitoring task
+    // Spawn USB detection task
+    let mut usb_monitor = UsbMonitor::new();
     let publisher_clone = publisher.clone();
     let cache_clone = cache.clone();
-    let device_id_clone = device_id_str.clone();
+    let auth_token_clone = auth_token.clone();
     let hostname_clone = hostname.clone();
     let mac_clone = mac_address.clone();
-    let auth_token_clone = auth_token.clone();
+    let device_id_clone_for_usb = device_identity.device_id;
     let envelope_metadata_clone = envelope_metadata.clone();
-
+    
     tokio::spawn(async move {
-        let mut usb_monitor = UsbMonitor::new();
-        let mut interval = interval(Duration::from_secs(30));
+        let mut interval = interval(Duration::from_secs(30)); // Check every 30 seconds
         loop {
             interval.tick().await;
+            
             match usb_monitor.scan_devices().await {
                 Ok(events) => {
                     for mut event in events {
-                        event.device_id = device_identity.device_id;
+                        event.device_id = device_id_clone_for_usb;
+
                         let usb_payload = build_event_envelope(
                             "usb",
                             1,
-                            &device_id_clone,
+                            &event.device_id.to_string(),
                             &hostname_clone,
                             &mac_clone,
                             &auth_token_clone,
@@ -706,7 +749,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         }
     });
 
-    // Spawn USB File Copy Monitor
+    // Detect file writes/copies to removable USB drives and emit security events.
     let publisher_clone = publisher.clone();
     let cache_clone = cache.clone();
     let device_id_clone = device_id_str.clone();
@@ -714,12 +757,15 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let mac_clone = mac_address.clone();
     let auth_token_clone = auth_token.clone();
     let envelope_metadata_clone = envelope_metadata.clone();
-
     tokio::spawn(async move {
         let mut detector = usb_file_copy_detection::UsbFileCopyMonitor::new(900);
-        let mut interval = interval(Duration::from_secs(45));
+        let mut interval = interval(Duration::from_secs(20));
+
         loop {
             interval.tick().await;
+
+            // Wider lookback/cap helps on larger USB volumes where recursive scans
+            // can be slower and recent writes might otherwise fall out of the window.
             let findings = match detector.scan_recent_writes(1800, 200).await {
                 Ok(items) => items,
                 Err(e) => {
@@ -728,7 +774,27 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                 }
             };
 
+            if !findings.is_empty() {
+                tracing::info!(
+                    "USB copy detector found {} candidate file write(s)",
+                    findings.len()
+                );
+            }
+
             for finding in findings {
+                let drive_letter = finding.drive_letter;
+                let file_name = finding.file_name;
+                let file_path = finding.file_path;
+                let size_bytes = finding.size_bytes;
+                let modified_utc = finding.modified_utc;
+                let fingerprint = finding.fingerprint;
+                let description = format!(
+                    "Copia a USB detectada: {} en {} ({} bytes)",
+                    file_name,
+                    drive_letter,
+                    size_bytes,
+                );
+
                 let security_payload = build_event_envelope(
                     "security",
                     1,
@@ -739,18 +805,21 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                     envelope_metadata_clone.as_ref(),
                     serde_json::json!({
                         "alert_type": "USB_FILE_COPY_DETECTED",
-                        "description": format!("Copia a USB detectada: {} en {} ({} bytes)", finding.file_name, finding.drive_letter, finding.size_bytes),
+                        "description": description,
                         "app_name": "usb_copy_monitor",
+                        "query_name": "usb_file_copy_detected",
+                        "query_pack": "usb_data_loss_prevention",
+                        "mitre_technique": "T1052.001",
                         "severity": "HIGH",
                         "raw_data": {
                             "source": "usb_copy_monitor",
-                            "drive_letter": finding.drive_letter,
-                            "file_name": finding.file_name,
-                            "file_path": finding.file_path,
-                            "size_bytes": finding.size_bytes,
-                            "modified_utc": finding.modified_utc.to_rfc3339(),
+                            "drive_letter": drive_letter,
+                            "file_name": file_name,
+                            "file_path": file_path,
+                            "size_bytes": size_bytes,
+                            "modified_utc": modified_utc.to_rfc3339(),
                         },
-                        "event_fingerprint": finding.fingerprint,
+                        "event_fingerprint": fingerprint,
                     }),
                 );
 
@@ -761,20 +830,24 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
 
     // Spawn WiFi history task
     let mut wifi_monitor = WifiMonitor::new();
+    // Force an immediate state broadcast so any server that just started
+    // learns the current WiFi state within the first scan.
     wifi_monitor.force_resend();
     let publisher_clone = publisher.clone();
     let cache_clone = cache.clone();
     let auth_token_clone = auth_token.clone();
     let hostname_clone = hostname.clone();
     let mac_clone = mac_address.clone();
-    let device_id_clone_for_wifi = device_id_str.clone();
+    let device_id_clone_for_wifi = device_identity.device_id.to_string();
     let envelope_metadata_clone = envelope_metadata.clone();
     let wifi_resend_flag_wifi = wifi_resend_flag.clone();
 
     tokio::spawn(async move {
-        let mut interval = interval(Duration::from_secs(60));
+        let mut interval = interval(Duration::from_secs(60)); // Check every 60 seconds
         loop {
             interval.tick().await;
+
+            // If RabbitMQ reconnected since last scan, force a state re-broadcast.
             if wifi_resend_flag_wifi.swap(false, Ordering::Relaxed) {
                 wifi_monitor.force_resend();
             }
@@ -815,7 +888,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let auth_token_clone = auth_token.clone();
     let hostname_clone = hostname.clone();
     let mac_clone = mac_address.clone();
-    let device_id_clone_for_running_apps = device_id_str.clone();
+    let device_id_clone_for_running_apps = device_identity.device_id.to_string();
     let envelope_metadata_clone = envelope_metadata.clone();
     tokio::spawn(async move {
         let mut monitor = MonitoringLoop::new();
@@ -861,7 +934,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         }
     });
     
-    // Spawn software inventory scan
+    // Spawn software inventory scan (initial snapshot + every 7 days only new apps)
     let publisher_clone = publisher.clone();
     let cache_clone = cache.clone();
     let device_id_clone = device_id_str.clone();
@@ -873,6 +946,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         let mut known_inventory_fingerprints: HashSet<String> = HashSet::new();
         let mut interval = interval(Duration::from_secs(60 * 60 * 24 * 7));
 
+        // Initial baseline snapshot when agent starts.
         let initial_apps = match inventory::InventoryScanner::scan_installed_software().await {
             Ok(apps) => Some(apps),
             Err(e) => {
@@ -911,6 +985,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                     }),
                 );
                 publish_or_cache(&publisher_clone, &cache_clone, "inventory", inventory_payload).await;
+                tracing::info!("✅ Initial inventory snapshot published: {} apps", known_inventory_fingerprints.len());
         }
 
         loop {
@@ -924,7 +999,9 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                 }
             };
 
-            let Some(apps) = apps else { continue; };
+            let Some(apps) = apps else {
+                continue;
+            };
 
             let mut new_apps = Vec::new();
             for app in apps {
@@ -939,7 +1016,15 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                 }
             }
 
-            if new_apps.is_empty() { continue; }
+            if new_apps.is_empty() {
+                tracing::info!("Software inventory weekly scan complete: no new applications detected");
+                continue;
+            }
+
+            tracing::info!(
+                "Software inventory weekly scan complete: {} new apps detected",
+                new_apps.len()
+            );
 
             let detected_at = Utc::now().to_rfc3339();
             let inventory_payload = build_event_envelope(
@@ -964,7 +1049,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         }
     });
     
-    // Spawn input activity heatmap upload task
+    // Spawn input activity heatmap upload task (every hour)
     let input_tracker_clone = input_tracker.clone();
     let publisher_clone = publisher.clone();
     let device_id_clone = device_identity.device_id.clone();
@@ -975,11 +1060,19 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let envelope_metadata_clone = envelope_metadata.clone();
     
     tokio::spawn(async move {
-        let mut interval = interval(Duration::from_secs(3600));
+        let mut interval = interval(Duration::from_secs(3600));  // Every hour
         loop {
             interval.tick().await;
+            
+            // Check if heatmap should be uploaded
             if input_tracker_clone.should_upload().await {
                 if let Some(heatmap) = input_tracker_clone.get_heatmap_for_upload().await {
+                    tracing::debug!(
+                        "📊 Heatmap ready for upload: {} mouse moves, {} keyboard events",
+                        heatmap.stats.mouse_moves,
+                        heatmap.stats.keyboard_events
+                    );
+                    
                     let event = build_event_envelope(
                         "input_heatmap",
                         1,
@@ -988,7 +1081,9 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                         &mac_clone,
                         &auth_token_clone,
                         envelope_metadata_clone.as_ref(),
-                        serde_json::json!({ "heatmap": heatmap }),
+                        serde_json::json!({
+                            "heatmap": heatmap,
+                        }),
                     );
 
                     publish_or_cache(&publisher_clone, &cache_clone, "input_heatmaps", event).await;
@@ -997,7 +1092,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         }
     });
 
-    // Input summary metrics every minute
+    // Input summary metrics every minute (optional but useful for KPIs)
     let keystroke_tracker_clone = keystroke_tracker.clone();
     let publisher_clone = publisher.clone();
     let cache_clone = cache.clone();
@@ -1014,7 +1109,6 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
 
             let key_stats = keystroke_tracker_clone.get_stats().await;
             let resources = resource_monitor.capture_snapshot();
-            
             let summary_payload = build_event_envelope(
                 "input_summary",
                 1,
@@ -1024,18 +1118,18 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                 &auth_token_clone,
                 envelope_metadata_clone.as_ref(),
                 serde_json::json!({
-                    "cpu_percent": resources.cpu_percent,
-                    "memory_used_mb": resources.memory_used_mb,
-                    "memory_percent": resources.memory_percent,
-                    "top_process_name": resources.top_process_name,
-                    "top_process_cpu_percent": resources.top_process_cpu_percent,
-                    "top_process_memory_mb": resources.top_process_memory_mb,
                     "keys_count": key_stats.keystroke_count,
                     "mouse_moves_count": key_stats.mouse_moves_count,
                     "clicks_count": key_stats.mouse_clicks_count,
                     "idle_seconds": if key_stats.is_idle { 60 } else { 0 },
                     "active_seconds": if key_stats.is_idle { 0 } else { 60 },
                     "status": if key_stats.is_idle { "idle" } else { "active" },
+                    "cpu_percent": resources.cpu_percent,
+                    "memory_used_mb": resources.memory_used_mb,
+                    "memory_percent": resources.memory_percent,
+                    "top_process_name": resources.top_process_name,
+                    "top_process_cpu_percent": resources.top_process_cpu_percent,
+                    "top_process_memory_mb": resources.top_process_memory_mb,
                 }),
             );
 
@@ -1044,7 +1138,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         }
     });
 
-    // osquery security scan scheduler
+    // ── osquery security scan scheduler (server policy with local fallback) ─
     let osquery_scheduler_seconds = resolve_osquery_scheduler_seconds(&device_id_str, &auth_token).await;
 
     if osquery_scheduler_seconds > 0 {

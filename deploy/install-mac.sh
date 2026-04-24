@@ -22,8 +22,8 @@ PLIST_PATH="$HOME/Library/LaunchAgents/$SERVICE_NAME.plist"
 
 # Default Variables
 AGENT_AUTH_TOKEN="dev-agent-token"
-AGENT_SERVER_URL="http://10.30.0.123:3000"
-RABBITMQ_URL="amqp://eclub:eCLUB123@10.30.0.123:5672/%%2f"
+AGENT_SERVER_URL="http://localhost:3000"
+RABBITMQ_URL="amqp://guest:guest@127.0.0.1:5672/%2f"
 AGENT_OFFLINE_CACHE_KEY="replace-with-32-byte-cache-key!!"
 
 # Check that script is NOT run as root (we want to install as user for UI session)

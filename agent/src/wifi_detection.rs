@@ -25,8 +25,8 @@ impl WifiMonitor {
             last_key: None,
             last_signal: None,
             scans_since_broadcast: 0,
-            // Disable periodic broadcast by setting a very high interval (once every 24 hours)
-            periodic_broadcast_interval: 1440, 
+            // 10 scans × 60 s/scan = 10 minutes max before a periodic re-send.
+            periodic_broadcast_interval: 10,
         }
     }
 

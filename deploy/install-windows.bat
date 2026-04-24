@@ -4,7 +4,6 @@ REM Registers agent as Windows Service using NSSM (Non-Sucking Service Manager)
 
 SETLOCAL ENABLEDELAYEDEXPANSION
 set SERVICE_NAME=ActivityMonitor
-set TASK_NAME=ActivityMonitorAgentTask
 
 REM Check for admin privileges
 net session >nul 2>&1
@@ -98,18 +97,12 @@ if !errorLevel! equ 0 (
 
 echo [*] Deteniendo agente en ejecucion...
 taskkill /F /IM activity-monitor-agent.exe >nul 2>&1
-sc stop %SERVICE_NAME% >nul 2>&1
 
-echo [*] Removiendo Servicio de Windows...
-sc delete %SERVICE_NAME% >nul 2>&1
-
-echo [*] Removiendo Tareas Programadas...
-schtasks /Delete /TN "ActivityMonitorAgentTask" /F >nul 2>&1
-schtasks /Delete /TN "ActivityMonitorUserTask" /F >nul 2>&1
-schtasks /Delete /TN "ActivityMonitorGuardian" /F >nul 2>&1
-
-echo [*] Removiendo de inicio automatico (Registro Run legacy)...
+echo [*] Removiendo de inicio automatico (Registro Run)...
 REG DELETE "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v ActivityMonitorAgent /f >nul 2>&1
+
+echo [*] Removiendo tarea programada (watchdog)...
+schtasks /Delete /TN ActivityMonitorGuardian /F >nul 2>&1
 echo [+] Desinstalacion completada.
 pause
 goto MAIN_MENU
@@ -287,32 +280,39 @@ if not exist "C:\Program Files\osquery\osqueryi.exe" (
     echo [+] osquery already installed
 )
 
-REM Grant permissions so the user-mode agent can read config and write logs
-echo [*] Configurando permisos de acceso...
-icacls "%CONFIG_DIR%" /grant Users:(OI)(CI)F /T >nul 2>&1
-icacls "%LOG_DIR%" /grant Users:(OI)(CI)F /T >nul 2>&1
-
 echo.
-echo [Paso 4/5] Configurando Inicio Automatico (Tarea Programada)...
+echo [Paso 4/5] Registrando como Servicio de Windows...
 
-REM Remove old service if exists (we now use a single elevated task)
-sc stop %SERVICE_NAME% >nul 2>&1
-sc delete %SERVICE_NAME% >nul 2>&1
+REM Remove registry run key if it exists (legacy)
+REG DELETE "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v ActivityMonitorAgent /f >nul 2>&1
 
-set TASK_NAME=ActivityMonitorAgentTask
-schtasks /Delete /TN "%TASK_NAME%" /F >nul 2>&1
-schtasks /Create /F /TN "%TASK_NAME%" /TR "\"%AGENT_BIN%\"" /SC ONLOGON /RL HIGHEST /IT
+REM Create Windows Service
+sc create ActivityMonitor binPath= "\"%AGENT_BIN%\"" start= delayed-auto displayName= "ActivityMonitor Enterprise Agent" >nul
 if %errorLevel% equ 0 (
-    echo [+] Tarea del Agente configurada correctamente (Modo Elevado).
+    echo [+] Servicio registrado correctamente ^(Inicio: Automático Diferido^)
 ) else (
-    echo [-] Error al configurar la tarea programada.
+    REM Check if it already exists, maybe sc create failed because it exists
+    sc query ActivityMonitor >nul 2>&1
+    if !errorLevel! equ 0 (
+        echo [+] El servicio ya esta registrado.
+        sc config ActivityMonitor binPath= "\"%AGENT_BIN%\"" start= delayed-auto >nul
+    ) else (
+        echo [-] Error al registrar el servicio ^(Error: %errorLevel%^)
+        pause
+        exit /b 1
+    )
 )
 
+REM Start agent now
 echo.
-echo [Paso 5/5] Iniciando Agente...
-schtasks /Run /TN "%TASK_NAME%" >nul 2>&1
-
-echo [+] Agente unico en ejecucion.
+echo [Paso 5/5] Iniciando servicio...
+sc start ActivityMonitor >nul 2>&1
+if %errorLevel% equ 0 (
+    echo [+] Servicio iniciado correctamente.
+) else (
+    REM Maybe it's already running
+    echo [*] El servicio ya esta en ejecucion o tardara un momento en iniciar.
+)
 
 REM Remove old guardian watchdog if exists
 schtasks /Delete /TN ActivityMonitorGuardian /F >nul 2>&1
@@ -327,10 +327,10 @@ echo - RabbitMQ:   %RABBITMQ_URL%
 echo - Token:      %AGENT_AUTH_TOKEN%
 echo.
 echo Rutas:
-echo - Tarea Programada: Activada (%TASK_NAME%)
-echo - Ejecutable:       %AGENT_BIN%
-echo - Config:           %CONFIG_DIR%
-echo - Logs:             %LOG_DIR%
+echo - Servicio:   Activado (ActivityMonitor)
+echo - Ejecutable: %AGENT_BIN%
+echo - Config:     %CONFIG_DIR%
+echo - Logs:       %LOG_DIR%
 echo.
 echo To manage the agent:
 echo   Update token/key: Option 2 in this installer
