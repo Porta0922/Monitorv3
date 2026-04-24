@@ -33,7 +33,7 @@ set RABBITMQ_URL=amqp://eclub:eCLUB123@10.30.0.123:5672/%%2f
 :MAIN_MENU
 cls
 echo ========================================
-echo ActivityMonitor Enterprise v3 Installer
+echo ActivityMonitor Enterprise v3.1.0-HYBRID
 echo ========================================
 echo Rutas de instalacion:
 echo - Ejecutable: %AGENT_PATH%
@@ -44,15 +44,17 @@ echo.
 echo Seleccione una opcion:
 echo 1. Instalar (o actualizar) el agente
 echo 2. Modificar credenciales (.env) y reiniciar
-echo 3. Desinstalar
-echo 4. Salir
+echo 3. Actualizar binario (Mantiene configuracion)
+echo 4. Desinstalar
+echo 5. Salir
 echo.
 set /p MENU_OPTION="Opcion: "
 
 if "%MENU_OPTION%"=="1" goto INSTALL_AGENT
 if "%MENU_OPTION%"=="2" goto MODIFY_CREDS
-if "%MENU_OPTION%"=="3" goto UNINSTALL_AGENT
-if "%MENU_OPTION%"=="4" goto END_SCRIPT
+if "%MENU_OPTION%"=="3" goto UPDATE_ONLY
+if "%MENU_OPTION%"=="4" goto UNINSTALL_AGENT
+if "%MENU_OPTION%"=="5" goto END_SCRIPT
 goto MAIN_MENU
 
 :MODIFY_CREDS
@@ -101,11 +103,16 @@ taskkill /F /IM activity-monitor-agent.exe >nul 2>&1
 echo [*] Removiendo de inicio automatico (Registro Run)...
 REG DELETE "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v ActivityMonitorAgent /f >nul 2>&1
 
-echo [*] Removiendo tarea programada (watchdog)...
-schtasks /Delete /TN ActivityMonitorGuardian /F >nul 2>&1
+echo [*] Removiendo tarea programada (User Agent)...
+schtasks /Delete /TN ActivityMonitorUserAgent /F >nul 2>&1
 echo [+] Desinstalacion completada.
 pause
 goto MAIN_MENU
+
+:UPDATE_ONLY
+echo.
+echo [*] Iniciando actualizacion rapida (manteniendo configuracion actual)...
+goto STEP_1
 
 :INSTALL_AGENT
 
@@ -125,16 +132,15 @@ if not "!INPUT_RABBITMQ_URL!"=="" (
     set RABBITMQ_URL=!INPUT_RABBITMQ_URL!
 )
 
-REM Create config directory
+:STEP_1
 echo.
-echo [Paso 1/5] Preparando directorios y configuracion...
+echo [1/8] Preparando directorios...
 if not exist "%CONFIG_DIR%" mkdir "%CONFIG_DIR%"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
-echo [+] Created config directory: %CONFIG_DIR%
+echo     ^> Directorios listos en %CONFIG_DIR% [OK]
 
-REM Create .env file with variables used by current agent
+echo [2/8] Configurando archivo .env...
 if not exist "%ENV_FILE%" (
-    echo Creating configuration file...
     (
         echo # ActivityMonitor Agent Configuration
         echo AGENT_AUTH_TOKEN=!AGENT_AUTH_TOKEN!
@@ -142,9 +148,9 @@ if not exist "%ENV_FILE%" (
         echo AGENT_SERVER_URL=!AGENT_SERVER_URL!
         echo RABBITMQ_URL=!RABBITMQ_URL!
     ) > "%ENV_FILE%"
-    echo [+] Created configuration: %ENV_FILE%
+    echo     ^> Archivo .env creado en %ENV_FILE% [OK]
 ) else (
-    echo [!] Configuration file already exists
+    echo     ^> Archivo .env ya existe - se mantiene actual [OK]
 )
 
 REM Cleanup old service if it exists
@@ -230,92 +236,70 @@ if not exist "%AGENT_PATH%" (
 )
 echo [+] Release agent ready: %AGENT_PATH%
 
-echo.
-echo [Paso 2.5/5] Copiando binario a ruta local...
+echo [4/8] Desplegando binario en la ruta local...
 if not exist "%BIN_DIR%" mkdir "%BIN_DIR%"
 copy /Y "%AGENT_PATH%" "%AGENT_BIN%" >nul
 if %errorLevel% neq 0 (
-    echo [-] Error al copiar el binario a %AGENT_BIN%
+    echo     [-] Error: No se pudo copiar el binario a %AGENT_BIN%
     pause
     exit /b 1
 )
-echo [+] Binario copiado a: %AGENT_BIN%
+echo     ^> Binario copiado a %AGENT_BIN% [OK]
 
 REM Install osquery if not present
-echo.
-echo [Paso 3/5] Verificando dependencias (OSQuery)...
+echo [5/8] Verificando dependencias (OSQuery)...
 if not exist "C:\Program Files\osquery\osqueryi.exe" (
-    echo [*] osquery not found. Installing...
-
+    echo     [*] osquery no encontrado. Iniciando instalacion...
     where choco >nul 2>&1
     if !errorLevel! equ 0 (
-        echo [*] Chocolatey detected. Installing osquery from Chocolatey repository...
         choco install osquery -y --no-progress
     ) else (
-        echo [!] Chocolatey not found. Falling back to direct MSI download [%OSQUERY_VERSION%]...
         powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -Uri '%OSQUERY_MSI_URL%' -OutFile '%OSQUERY_MSI_PATH%'"
         if not exist "%OSQUERY_MSI_PATH%" (
-            echo [-] Failed to download osquery MSI
+            echo     [-] Error: No se pudo descargar el instalador de osquery.
             pause
             exit /b 1
         )
-
         msiexec /i "%OSQUERY_MSI_PATH%" /qn /norestart
     )
-
-    if !errorLevel! neq 0 (
-        echo [-] osquery installation command failed
-        pause
-        exit /b 1
-    )
-
     if not exist "C:\Program Files\osquery\osqueryi.exe" (
-        echo [-] osquery installation did not produce osqueryi.exe
+        echo     [-] Error: osquery no se instalo correctamente.
         pause
         exit /b 1
     )
-
-    echo [+] osquery installed successfully
+    echo     ^> osquery instalado y verificado [OK]
 ) else (
-    echo [+] osquery already installed
+    echo     ^> osquery ya esta instalado [OK]
 )
 
-echo.
-echo [Paso 4/5] Registrando como Servicio de Windows...
-
-REM Remove registry run key if it exists (legacy)
+echo [6/8] Registrando Servicio de Windows (Sesion 0)...
 REG DELETE "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v ActivityMonitorAgent /f >nul 2>&1
-
-REM Create Windows Service
 sc create ActivityMonitor binPath= "\"%AGENT_BIN%\"" start= delayed-auto displayName= "ActivityMonitor Enterprise Agent" >nul
 if %errorLevel% equ 0 (
-    echo [+] Servicio registrado correctamente ^(Inicio: Automático Diferido^)
+    echo     ^> Servicio registrado correctamente [OK]
 ) else (
-    REM Check if it already exists, maybe sc create failed because it exists
     sc query ActivityMonitor >nul 2>&1
     if !errorLevel! equ 0 (
-        echo [+] El servicio ya esta registrado.
         sc config ActivityMonitor binPath= "\"%AGENT_BIN%\"" start= delayed-auto >nul
+        echo     ^> Servicio actualizado [OK]
     ) else (
-        echo [-] Error al registrar el servicio ^(Error: %errorLevel%^)
+        echo     [-] Error: No se pudo registrar el servicio.
         pause
         exit /b 1
     )
 )
 
-REM Start agent now
-echo.
-echo [Paso 5/5] Iniciando servicio...
-sc start ActivityMonitor >nul 2>&1
+echo [7/8] Configurando tarea de Sesion de Usuario...
+schtasks /Create /SC ONLOGON /TN "ActivityMonitorUserAgent" /TR "\"%AGENT_BIN%\"" /F >nul 2>&1
 if %errorLevel% equ 0 (
-    echo [+] Servicio iniciado correctamente.
-) else (
-    REM Maybe it's already running
-    echo [*] El servicio ya esta en ejecucion o tardara un momento en iniciar.
+    echo     ^> Tarea de inicio de sesion creada [OK]
+    schtasks /Run /TN "ActivityMonitorUserAgent" >nul 2>&1
+    echo     ^> Captura de actividad iniciada [OK]
 )
 
-REM Remove old guardian watchdog if exists
-schtasks /Delete /TN ActivityMonitorGuardian /F >nul 2>&1
+echo [8/8] Iniciando servicios...
+sc start ActivityMonitor >nul 2>&1
+echo     ^> Proceso finalizado [OK]
 
 echo.
 echo ========================================
@@ -340,3 +324,4 @@ pause
 goto MAIN_MENU
 
 :END_SCRIPT
+exit

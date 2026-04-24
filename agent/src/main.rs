@@ -310,7 +310,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize logging with both console and file output
     let log_dir = r"C:\ProgramData\ActivityMonitor\logs";
-    let file_appender = tracing_appender::rolling::daily(log_dir, "agent.log");
+    let is_session_0 = is_running_in_session_0();
+    let log_filename = if is_session_0 { "agent_service.log" } else { "agent_user.log" };
+    
+    let file_appender = tracing_appender::rolling::daily(log_dir, log_filename);
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
     use tracing_subscriber::{fmt, prelude::*, Registry};
@@ -319,14 +322,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with(fmt::layer().with_writer(non_blocking).with_ansi(false));
 
     tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
+    
+    let version = env!("CARGO_PKG_VERSION");
+    println!("ActivityMonitor Agent v{}", version);
+    tracing::info!("Starting ActivityMonitor Agent v{}...", version);
 
     #[cfg(windows)]
     {
-        // On Windows, always attempt to start as a service dispatcher.
-        // This is a native Windows Service.
+        // On Windows, try to start as a service dispatcher first.
+        // If it fails, we assume we're running in a user session/console.
         if let Err(e) = service_dispatcher::start(SERVICE_NAME, ffi_service_main) {
-            tracing::error!("Failed to start service dispatcher: {}. Are you running from a console? This binary is designed to run as a Windows Service.", e);
-            return Err(e.into());
+            tracing::info!("Service dispatcher failed ({}). Falling back to console mode...", e);
+            
+            let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+            let (tx, rx) = mpsc::channel(1);
+            
+            let tx_clone = tx.clone();
+            rt.spawn(async move {
+                if tokio::signal::ctrl_c().await.is_ok() {
+                    let _ = tx_clone.send(()).await;
+                }
+            });
+
+            rt.block_on(async {
+                run_agent(rx).await
+            })?;
         }
     }
 
@@ -552,6 +572,12 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         loop {
             interval.tick().await;
             
+            // Session 0 (Windows Service) cannot see user windows or capture input.
+            // We skip these monitors if running as a system service.
+            if is_running_in_session_0() {
+                continue;
+            }
+
             // Update idle status based on recent activity
             keystroke_tracker_clone.update_idle_status().await;
             
@@ -614,28 +640,9 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                         }
                     }
                 } else {
-                    // Initial window capture on startup
+                    // First window captured
                     last_window = Some((current_app, current_title, current.timestamp));
                     last_heartbeat_sent = Some(current.timestamp);
-                    
-                    // Send initial activity event
-                    let activity_payload = build_event_envelope(
-                        "activity",
-                        1,
-                        &device_id_clone_for_activity,
-                        &hostname_clone_for_activity,
-                        &mac_clone_for_activity,
-                        &auth_token_clone,
-                        envelope_metadata_clone.as_ref(),
-                        serde_json::json!({
-                            "app_name": current.app_name,
-                            "window_title": current.window_title,
-                            "duration_seconds": 0,
-                            "timestamp": current.timestamp.to_rfc3339(),
-                        }),
-                    );
-
-                    publish_or_cache(&publisher_clone, &cache_clone, "activity", activity_payload).await;
                 }
             }
         }
@@ -1271,3 +1278,23 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     Ok(())
 }
 
+
+fn is_running_in_session_0() -> bool {
+    #[cfg(windows)]
+    {
+        use winapi::um::processthreadsapi::GetCurrentProcessId;
+        use winapi::um::processthreadsapi::ProcessIdToSessionId;
+
+        unsafe {
+            let mut session_id: u32 = 0;
+            if ProcessIdToSessionId(GetCurrentProcessId(), &mut session_id) != 0 {
+                return session_id == 0;
+            }
+        }
+        true // Fallback to true (assume service) if check fails
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
