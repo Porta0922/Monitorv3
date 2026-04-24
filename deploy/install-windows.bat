@@ -98,12 +98,18 @@ if !errorLevel! equ 0 (
 
 echo [*] Deteniendo agente en ejecucion...
 taskkill /F /IM activity-monitor-agent.exe >nul 2>&1
+sc stop %SERVICE_NAME% >nul 2>&1
 
-echo [*] Removiendo de inicio automatico (Registro Run)...
+echo [*] Removiendo Servicio de Windows...
+sc delete %SERVICE_NAME% >nul 2>&1
+
+echo [*] Removiendo Tareas Programadas...
+schtasks /Delete /TN "ActivityMonitorAgentTask" /F >nul 2>&1
+schtasks /Delete /TN "ActivityMonitorUserTask" /F >nul 2>&1
+schtasks /Delete /TN "ActivityMonitorGuardian" /F >nul 2>&1
+
+echo [*] Removiendo de inicio automatico (Registro Run legacy)...
 REG DELETE "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v ActivityMonitorAgent /f >nul 2>&1
-
-echo [*] Removiendo tarea programada (watchdog)...
-schtasks /Delete /TN ActivityMonitorGuardian /F >nul 2>&1
 echo [+] Desinstalacion completada.
 pause
 goto MAIN_MENU
@@ -281,37 +287,32 @@ if not exist "C:\Program Files\osquery\osqueryi.exe" (
     echo [+] osquery already installed
 )
 
-echo.
-echo [Paso 4/5] Configurando Modo Hibrido (Servicio + Tarea Programada)...
+REM Grant permissions so the user-mode agent can read config and write logs
+echo [*] Configurando permisos de acceso...
+icacls "%CONFIG_DIR%" /grant Users:(OI)(CI)F /T >nul 2>&1
+icacls "%LOG_DIR%" /grant Users:(OI)(CI)F /T >nul 2>&1
 
-REM 1. Register the System Service (for Persistence & Resources)
+echo.
+echo [Paso 4/5] Configurando Inicio Automatico (Tarea Programada)...
+
+REM Remove old service if exists (we now use a single elevated task)
 sc stop %SERVICE_NAME% >nul 2>&1
 sc delete %SERVICE_NAME% >nul 2>&1
 
-sc create %SERVICE_NAME% binPath= "\"%AGENT_BIN%\"" start= delayed-auto displayName= "ActivityMonitor Enterprise Agent" >nul
-if %errorLevel% equ 0 (
-    echo [+] Servicio de Sistema registrado correctamente.
-) else (
-    echo [-] Error al registrar el servicio.
-)
-
-REM 2. Register the User Task (for Input & Activity)
-set TASK_NAME=ActivityMonitorUserTask
+set TASK_NAME=ActivityMonitorAgentTask
 schtasks /Delete /TN "%TASK_NAME%" /F >nul 2>&1
-schtasks /Create /F /TN "%TASK_NAME%" /TR "\"%AGENT_BIN%\" --user-mode" /SC ONLOGON /RL HIGHEST /IT
+schtasks /Create /F /TN "%TASK_NAME%" /TR "\"%AGENT_BIN%\"" /SC ONLOGON /RL HIGHEST /IT
 if %errorLevel% equ 0 (
-    echo [+] Tarea de Actividad de Usuario configurada correctamente.
+    echo [+] Tarea del Agente configurada correctamente (Modo Elevado).
 ) else (
-    echo [-] Error al configurar la tarea de usuario.
+    echo [-] Error al configurar la tarea programada.
 )
 
-REM Start both now
 echo.
-echo [Paso 5/5] Iniciando componentes...
-sc start %SERVICE_NAME% >nul 2>&1
+echo [Paso 5/5] Iniciando Agente...
 schtasks /Run /TN "%TASK_NAME%" >nul 2>&1
 
-echo [+] Agente Hibrido en ejecucion.
+echo [+] Agente unico en ejecucion.
 
 REM Remove old guardian watchdog if exists
 schtasks /Delete /TN ActivityMonitorGuardian /F >nul 2>&1
@@ -326,10 +327,10 @@ echo - RabbitMQ:   %RABBITMQ_URL%
 echo - Token:      %AGENT_AUTH_TOKEN%
 echo.
 echo Rutas:
-echo - Servicio:   Activado (ActivityMonitor)
-echo - Ejecutable: %AGENT_BIN%
-echo - Config:     %CONFIG_DIR%
-echo - Logs:       %LOG_DIR%
+echo - Tarea Programada: Activada (%TASK_NAME%)
+echo - Ejecutable:       %AGENT_BIN%
+echo - Config:           %CONFIG_DIR%
+echo - Logs:             %LOG_DIR%
 echo.
 echo To manage the agent:
 echo   Update token/key: Option 2 in this installer
