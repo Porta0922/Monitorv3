@@ -21,9 +21,9 @@ NICKNAME_FILE="$DATA_DIR/device_nickname.txt"
 PLIST_PATH="$HOME/Library/LaunchAgents/$SERVICE_NAME.plist"
 
 # Default Variables
-AGENT_AUTH_TOKEN="dev-agent-token"
-AGENT_SERVER_URL="http://localhost:3000"
-RABBITMQ_URL="amqp://guest:guest@127.0.0.1:5672/%2f"
+AGENT_AUTH_TOKEN="change-me-in-production"
+AGENT_SERVER_URL="http://10.30.0.123:3000"
+RABBITMQ_URL="amqp://eclub:eCLUB123@10.30.0.123:5672/%2f"
 AGENT_OFFLINE_CACHE_KEY="replace-with-32-byte-cache-key!!"
 
 # Check that script is NOT run as root (we want to install as user for UI session)
@@ -40,7 +40,7 @@ fi
 show_menu() {
     clear
     echo "========================================"
-    echo "ActivityMonitor Enterprise v3 Installer (macOS)"
+    echo "ActivityMonitor Enterprise v3.1.0-HYBRID (macOS)"
     echo "========================================"
     echo "Rutas de instalacion:"
     echo "- Ejecutable: $AGENT_PATH"
@@ -51,16 +51,18 @@ show_menu() {
     echo "Seleccione una opcion:"
     echo "1. Instalar (o actualizar) el agente"
     echo "2. Modificar credenciales (.env) y reiniciar"
-    echo "3. Desinstalar"
-    echo "4. Salir"
+    echo "3. Actualizar binario (Mantiene configuracion)"
+    echo "4. Desinstalar"
+    echo "5. Salir"
     echo ""
     read -p "Opcion: " MENU_OPTION
 
     case $MENU_OPTION in
         1) install_agent ;;
         2) modify_creds ;;
-        3) uninstall_agent ;;
-        4) exit 0 ;;
+        3) update_only ;;
+        4) uninstall_agent ;;
+        5) exit 0 ;;
         *) show_menu ;;
     esac
 }
@@ -124,6 +126,12 @@ uninstall_agent() {
     show_menu
 }
 
+update_only() {
+    echo ""
+    echo "[*] Iniciando actualizacion rapida (manteniendo configuracion actual)..."
+    execute_steps
+}
+
 install_agent() {
     echo ""
     echo "=== Instalando Agente ==="
@@ -146,26 +154,37 @@ install_agent() {
         fi
     fi
 
+    execute_steps
+}
+
+execute_steps() {
     echo ""
-    echo "[Paso 1/4] Preparando directorios y configuracion..."
+    echo "[1/5] Preparando directorios..."
     mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR"
     mkdir -p "$BASE_DIR/bin"
     mkdir -p "$HOME/Library/LaunchAgents"
+    echo "    > Directorios listos [OK]"
 
-    cat > "$ENV_FILE" << ENVEOF
+    echo "[2/5] Configurando archivo .env..."
+    if [ ! -f "$ENV_FILE" ] || [ "$MENU_OPTION" == "1" ]; then
+        cat > "$ENV_FILE" << ENVEOF
 # ActivityMonitor Agent Configuration
 AGENT_AUTH_TOKEN=$AGENT_AUTH_TOKEN
 AGENT_OFFLINE_CACHE_KEY=$AGENT_OFFLINE_CACHE_KEY
 AGENT_SERVER_URL=$AGENT_SERVER_URL
 RABBITMQ_URL=$RABBITMQ_URL
 ENVEOF
-    chmod 600 "$ENV_FILE"
+        chmod 600 "$ENV_FILE"
+        echo "    > Archivo .env configurado [OK]"
+    else
+        echo "    > Archivo .env ya existe - se mantiene actual [OK]"
+    fi
 
     if [ -n "$DEVICE_NICKNAME" ]; then
         echo "$DEVICE_NICKNAME" > "$NICKNAME_FILE"
     fi
 
-    echo "[Paso 2/4] Verificando/Compilando el agente..."
+    echo "[3/5] Verificando/Compilando el agente..."
     CARGO_FOUND=0
     if command -v cargo &> /dev/null; then
         CARGO_FOUND=1
@@ -209,16 +228,14 @@ ENVEOF
         echo "[+] Usando binario en $TARGET_BIN"
     fi
 
-    echo "[*] Deteniendo servicio si esta en ejecucion..."
+    echo "[4/5] Desplegando binario en la ruta local..."
     launchctl unload -w "$PLIST_PATH" 2>/dev/null || true
     pkill -f "$AGENT_NAME" || true
-
-    echo "[*] Copiando binario a $AGENT_PATH..."
     cp -f "$TARGET_BIN" "$AGENT_PATH"
     chmod 755 "$AGENT_PATH"
+    echo "    > Binario copiado a $AGENT_PATH [OK]"
 
-    echo ""
-    echo "[Paso 3/4] Generando plist LaunchAgent..."
+    echo "[5/5] Configurando e iniciando LaunchAgent..."
     cat > "$PLIST_PATH" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -256,7 +273,7 @@ ENVEOF
 EOF
 
     echo ""
-    echo "[Paso 4/4] Configurando e iniciando LaunchAgent..."
+    echo "[*] Iniciando servicio..."
     launchctl load -w "$PLIST_PATH"
 
     if launchctl list | grep -q "$SERVICE_NAME"; then
