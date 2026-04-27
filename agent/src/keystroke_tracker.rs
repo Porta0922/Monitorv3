@@ -86,13 +86,22 @@ impl KeystrokeTracker {
     pub async fn update_idle_status(&self) {
         let mut stats = self.stats.lock().await;
 
-        let seconds_idle = if let Some(os_idle_seconds) = platform_idle_seconds() {
+        let mut seconds_idle = if let Some(os_idle_seconds) = platform_idle_seconds() {
             os_idle_seconds
         } else {
             let now = Utc::now();
             let last_activity = self.last_activity_time.lock().await;
             now.signed_duration_since(*last_activity).num_seconds().max(0) as u64
         };
+
+        // Cap idle duration by seconds elapsed since midnight local time
+        use chrono::{Local, Timelike};
+        let now_local = Local::now();
+        let seconds_since_midnight = now_local.time().num_seconds_from_midnight() as u64;
+
+        if seconds_idle > seconds_since_midnight {
+            seconds_idle = seconds_since_midnight;
+        }
         
         if seconds_idle >= IDLE_THRESHOLD_SECONDS {
             stats.is_idle = true;
