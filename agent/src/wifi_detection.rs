@@ -54,24 +54,13 @@ impl WifiMonitor {
 
         let state_changed = self.last_key.as_ref() != Some(&current_key);
 
-        // Detect significant signal drop (>= 20 percentage points)
-        let signal_dropped = match (self.last_signal, snapshot.signal_percent) {
-            (Some(last), Some(current)) => last - current >= 20,
-            _ => false,
-        };
-
-        self.scans_since_broadcast += 1;
-        let periodic_due = self.scans_since_broadcast >= self.periodic_broadcast_interval;
-
-        if state_changed || signal_dropped || periodic_due {
+        if state_changed {
             self.last_key = Some(current_key);
             self.last_signal = snapshot.signal_percent;
             self.scans_since_broadcast = 0;
             return Ok(Some(snapshot));
         }
 
-        // Always update tracked signal so drops are measured from current level
-        self.last_signal = snapshot.signal_percent;
         Ok(None)
     }
 }
