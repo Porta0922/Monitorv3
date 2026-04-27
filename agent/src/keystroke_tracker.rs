@@ -17,6 +17,8 @@ pub struct KeystrokeStats {
     pub last_keystroke_time: Option<DateTime<Utc>>,
     pub is_idle: bool,
     pub idle_duration_seconds: u64,
+    pub total_inactive_seconds_today: u64,
+    pub last_idle_accumulation_time: Option<DateTime<Utc>>,
 }
 
 /// Input activity detector and keystroke tracker
@@ -37,6 +39,8 @@ impl KeystrokeTracker {
                 last_keystroke_time: Some(now),
                 is_idle: false,
                 idle_duration_seconds: 0,
+                total_inactive_seconds_today: 0,
+                last_idle_accumulation_time: Some(now),
             })),
             last_activity_time: Arc::new(Mutex::new(now)),
         }
@@ -85,31 +89,51 @@ impl KeystrokeTracker {
     /// Check idle status based on last activity time
     pub async fn update_idle_status(&self) {
         let mut stats = self.stats.lock().await;
+        let now = Utc::now();
+
+        // Daily Reset Logic
+        use chrono::{Local, Timelike, Datelike};
+        let now_local = Local::now();
+        
+        // If last accumulation was on a different day, reset counters
+        if let Some(last_time) = stats.last_idle_accumulation_time {
+            let last_local: DateTime<Local> = DateTime::from(last_time);
+            if last_local.date_naive() != now_local.date_naive() {
+                stats.total_inactive_seconds_today = 0;
+            }
+        }
 
         let mut seconds_idle = if let Some(os_idle_seconds) = platform_idle_seconds() {
             os_idle_seconds
         } else {
-            let now = Utc::now();
             let last_activity = self.last_activity_time.lock().await;
             now.signed_duration_since(*last_activity).num_seconds().max(0) as u64
         };
 
         // Cap idle duration by seconds elapsed since midnight local time
-        use chrono::{Local, Timelike};
-        let now_local = Local::now();
         let seconds_since_midnight = now_local.time().num_seconds_from_midnight() as u64;
-
         if seconds_idle > seconds_since_midnight {
             seconds_idle = seconds_since_midnight;
         }
         
+        let was_idle = stats.is_idle;
         if seconds_idle >= IDLE_THRESHOLD_SECONDS {
             stats.is_idle = true;
             stats.idle_duration_seconds = seconds_idle;
+            
+            // Accumulate total idle time
+            if let Some(last_time) = stats.last_idle_accumulation_time {
+                let delta = now.signed_duration_since(last_time).num_seconds().max(0) as u64;
+                // We only accumulate if we were already considered idle or just became idle
+                // To avoid double counting, we use a simple delta since last update call
+                stats.total_inactive_seconds_today += delta;
+            }
         } else {
             stats.is_idle = false;
             stats.idle_duration_seconds = 0;
         }
+
+        stats.last_idle_accumulation_time = Some(now);
     }
 
     /// Get current keystroke statistics

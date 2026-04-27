@@ -580,6 +580,36 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
 
             // Update idle status based on recent activity
             keystroke_tracker_clone.update_idle_status().await;
+            let stats = keystroke_tracker_clone.get_stats().await;
+            
+            if stats.is_idle {
+                // If user is idle, we "pause" activity reporting.
+                // We also clear last_window so that when they return, it starts a new session.
+                if let Some((last_app, last_title, started_at)) = last_window.take() {
+                    let now = Utc::now();
+                    let duration_reference = last_heartbeat_sent.unwrap_or(started_at);
+                    let duration_seconds = (now - duration_reference).num_seconds().max(1);
+                    
+                    let activity_payload = build_event_envelope(
+                        "activity",
+                        1,
+                        &device_id_clone_for_activity,
+                        &hostname_clone_for_activity,
+                        &mac_clone_for_activity,
+                        &auth_token_clone,
+                        envelope_metadata_clone.as_ref(),
+                        serde_json::json!({
+                            "app_name": last_app,
+                            "window_title": last_title,
+                            "duration_seconds": duration_seconds,
+                            "timestamp": now.to_rfc3339(),
+                        }),
+                    );
+                    publish_or_cache(&publisher_clone, &cache_clone, "activity", activity_payload).await;
+                }
+                last_heartbeat_sent = None;
+                continue;
+            }
             
             if let Some(current) = monitoring.capture_active_window() {
                 let (current_app, current_title) = sanitize_activity_fields(&current.app_name, &current.window_title);
@@ -680,6 +710,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                     "last_seen": Utc::now().to_rfc3339(),
                     "status": if is_idle { "idle" } else { "active" },
                     "idle_seconds": stats.idle_duration_seconds,
+                    "total_idle_seconds_today": stats.total_inactive_seconds_today,
                 }),
             );
 
