@@ -306,10 +306,20 @@ async fn publish_or_cache(
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Attempt to load .env from global config path if it exists
-    dotenvy::from_path(r"C:\ProgramData\ActivityMonitor\.env").ok();
+    let env_path = if cfg!(windows) {
+        r"C:\ProgramData\ActivityMonitor\.env"
+    } else {
+        "/etc/activity-monitor/.env"
+    };
+    dotenvy::from_path(env_path).ok();
 
     // Initialize logging with both console and file output
-    let log_dir = r"C:\ProgramData\ActivityMonitor\logs";
+    let log_dir = if cfg!(windows) {
+        r"C:\ProgramData\ActivityMonitor\logs"
+    } else {
+        "/var/log/activity-monitor"
+    };
+    
     let is_session_0 = is_running_in_session_0();
     let log_filename = if is_session_0 { "agent_service.log" } else { "agent_user.log" };
     

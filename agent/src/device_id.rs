@@ -4,8 +4,21 @@ use uuid::Uuid;
 use std::fs;
 use std::path::Path;
 
-const DEVICE_ID_FILE: &str = "/var/lib/activity-monitor/device_id.json";
-const DEVICE_NICKNAME_FILE: &str = "/var/lib/activity-monitor/device_nickname.txt";
+fn get_data_dir() -> String {
+    if cfg!(windows) {
+        r"C:\ProgramData\ActivityMonitor".to_string()
+    } else {
+        "/var/lib/activity-monitor".to_string()
+    }
+}
+
+fn get_device_id_file() -> String {
+    format!("{}/device_id.json", get_data_dir())
+}
+
+fn get_device_nickname_file() -> String {
+    format!("{}/device_nickname.txt", get_data_dir())
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DeviceIdentity {
@@ -99,7 +112,8 @@ pub fn get_hostname() -> Result<String, Box<dyn std::error::Error>> {
 
 /// Load or create device identity
 pub fn load_or_create_device_identity() -> Result<DeviceIdentity, Box<dyn std::error::Error>> {
-    let config_path = Path::new(DEVICE_ID_FILE);
+    let config_path_str = get_device_id_file();
+    let config_path = Path::new(&config_path_str);
     
     // Try to load existing identity
     if config_path.exists() {
@@ -137,7 +151,8 @@ pub fn load_or_create_device_identity() -> Result<DeviceIdentity, Box<dyn std::e
 
 /// Set device nickname (from server)
 pub fn set_device_nickname(nickname: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let nickname_path = Path::new(DEVICE_NICKNAME_FILE);
+    let nickname_path_str = get_device_nickname_file();
+    let nickname_path = Path::new(&nickname_path_str);
     
     if let Some(parent) = nickname_path.parent() {
         fs::create_dir_all(parent).ok();
@@ -149,7 +164,8 @@ pub fn set_device_nickname(nickname: &str) -> Result<(), Box<dyn std::error::Err
 
 /// Get device nickname if set
 pub fn get_device_nickname() -> Option<String> {
-    let nickname_path = Path::new(DEVICE_NICKNAME_FILE);
+    let nickname_path_str = get_device_nickname_file();
+    let nickname_path = Path::new(&nickname_path_str);
     
     if nickname_path.exists() {
         fs::read_to_string(nickname_path).ok()
