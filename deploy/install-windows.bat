@@ -18,7 +18,9 @@ set AGENT_NAME=ActivityMonitorAgent
 set AGENT_VERSION=0.1.0
 set AGENT_PATH=%~dp0\..\target\release\activity-monitor-agent.exe
 set CONFIG_DIR=%PROGRAMDATA%\ActivityMonitor
+set INSTALL_DIR=%PROGRAMDATA%\ActivityMonitor
 set BIN_DIR=%PROGRAMDATA%\ActivityMonitor\Bin
+set DATA_DIR=%PROGRAMDATA%\ActivityMonitor\Data
 set AGENT_BIN=%BIN_DIR%\activity-monitor-agent.exe
 set LOG_DIR=%PROGRAMDATA%\ActivityMonitor\logs
 set ENV_FILE=%CONFIG_DIR%\.env
@@ -140,10 +142,12 @@ if not "!INPUT_RABBITMQ_URL!"=="" (
 :STEP_1
 echo.
 echo [1/8] Preparando directorios...
+if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 if not exist "%CONFIG_DIR%" mkdir "%CONFIG_DIR%"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 if not exist "%BIN_DIR%" mkdir "%BIN_DIR%"
 if not exist "%DATA_DIR%" mkdir "%DATA_DIR%"
+echo [*] Aplicando permisos de escritura para usuarios...
 icacls "%INSTALL_DIR%" /grant:r *S-1-5-32-545:(OI)(CI)M /T >nul 2>&1
 echo     ^> Directorios y permisos listos en %INSTALL_DIR% [OK]
 
