@@ -38,7 +38,7 @@ const SERVICE_NAME: &str = "ActivityMonitor";
 define_windows_service!(ffi_service_main, my_service_main);
 
 #[cfg(windows)]
-fn my_service_main(arguments: Vec<std::ffi::OsString>) {
+fn my_service_main(_arguments: Vec<std::ffi::OsString>) {
     if let Err(e) = run_service() {
         tracing::error!("Service failed: {:?}", e);
     }
@@ -1149,14 +1149,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     });
 
     // Input summary metrics every minute (optional but useful for KPIs)
-    let keystroke_tracker_clone = keystroke_tracker.clone();
-    let _publisher_clone = publisher.clone();
-let _cache_clone = cache.clone();
-let _device_id_clone = device_id_str.clone();
-let _hostname_clone = hostname.clone();
-let _mac_clone = mac_address.clone();
-let _auth_token_clone = auth_token.clone();
-let _envelope_metadata_clone = envelope_metadata.clone();
+
     // ── Immediate Startup Heartbeat ──
     // Send a heartbeat right now so the dashboard sees the device "Online" immediately
     {
@@ -1258,13 +1251,13 @@ let _envelope_metadata_clone = envelope_metadata.clone();
     let osquery_scheduler_seconds = resolve_osquery_scheduler_seconds(&device_id_str, &auth_token).await;
 
     if osquery_scheduler_seconds > 0 {
-        // let publisher_clone = publisher.clone();
-        // let cache_clone = cache.clone();
-        // let device_id_clone = device_id_str.clone();
-        // let hostname_clone = hostname.clone();
-        // let mac_clone = mac_address.clone();
-        // let auth_token_clone = auth_token.clone();
-        // let envelope_metadata_clone = envelope_metadata.clone();
+        let publisher_clone = publisher.clone();
+        let cache_clone = cache.clone();
+        let device_id_clone = device_id_str.clone();
+        let hostname_clone = hostname.clone();
+        let mac_clone = mac_address.clone();
+        let auth_token_clone = auth_token.clone();
+        let envelope_metadata_clone = envelope_metadata.clone();
         tokio::spawn(async move {
             let mut runner = osquery_runner::OsqueryRunner::new();
             let mut scan_interval = interval(Duration::from_secs(osquery_scheduler_seconds.max(30)));

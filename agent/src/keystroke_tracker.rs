@@ -124,7 +124,7 @@ impl KeystrokeTracker {
             seconds_idle = seconds_since_midnight;
         }
         
-        let was_idle = stats.is_idle;
+        let _was_idle = stats.is_idle;
         if seconds_idle >= IDLE_THRESHOLD_SECONDS {
             stats.is_idle = true;
             stats.idle_duration_seconds = seconds_idle;
