@@ -142,7 +142,7 @@ COMMIT;
 -- DELETE FROM input_activity_metrics WHERE timestamp < NOW() - INTERVAL '30 days';
 
 -- -----------------------------------------------------------------------------
--- PARTE 5: LIMPIEZA TOTAL (¡CUIDADO! BORRA TODO)
+-- PARTE 5: LIMPIEZA TOTAL DE SEGURIDAD (¡CUIDADO!)
 -- -----------------------------------------------------------------------------
 
 -- Si deseas vaciar completamente las tablas de seguridad (Alertas y Eventos) 
@@ -160,4 +160,35 @@ TRUNCATE TABLE security_events RESTART IDENTITY CASCADE;
 TRUNCATE TABLE process_termination_attempts RESTART IDENTITY CASCADE;
 
 COMMIT;
+*/
+
+
+-- -----------------------------------------------------------------------------
+-- PARTE 6: REINICIO TOTAL (ELIMINAR TODOS LOS DISPOSITIVOS Y DATOS)
+-- -----------------------------------------------------------------------------
+
+-- ¡ATENCIÓN! Este bloque eliminará absolutamente TODOS los dispositivos registrados
+-- y toda su actividad histórica. Úsalo solo para un reinicio total de pruebas.
+-- Al ejecutar esto, la base de datos quedará en 0.
+
+/* 
+DO $$
+BEGIN
+    -- Borrar datos de todas las tablas principales
+    TRUNCATE TABLE 
+        activity_logs,
+        usb_events,
+        wifi_events,
+        inventory,
+        input_activity_metrics,
+        node_resource_metrics,
+        security_alerts,
+        security_events,
+        process_termination_attempts,
+        running_apps_current,
+        devices
+    RESTART IDENTITY CASCADE;
+
+    RAISE NOTICE 'REINICIO COMPLETADO: Todos los dispositivos y datos asociados han sido eliminados.';
+END $$;
 */
