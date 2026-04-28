@@ -212,6 +212,17 @@ ENVEOF
         fi
     fi
 
+    # Install build dependencies for OpenSSL and compilation
+    echo "[*] Verificando dependencias de compilacion (OpenSSL, pkg-config)..."
+    if command -v apt-get &> /dev/null; then
+        apt-get update -y &> /dev/null
+        apt-get install -y libssl-dev pkg-config build-essential &> /dev/null
+        echo "    > Dependencias instaladas [OK]"
+    elif command -v dnf &> /dev/null; then
+        dnf install -y openssl-devel pkgconf-pkg-config @development-tools &> /dev/null
+        echo "    > Dependencias instaladas [OK]"
+    fi
+
     if [ $CARGO_FOUND -eq 1 ]; then
         echo "[*] cargo encontrado. Compilando la ultima version del agente..."
         pushd "$SCRIPT_DIR/.." > /dev/null
