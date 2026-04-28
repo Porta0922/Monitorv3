@@ -324,10 +324,40 @@ pub mod windows_input_listener {
 pub mod linux_input_listener {
     use super::*;
     use std::sync::Arc;
+    use rdev::{listen, EventType};
 
-    /// Initialize Linux input listener (placeholder)
-    pub async fn init_input_listener(_tracker: Arc<KeystrokeTracker>) -> Result<(), Box<dyn std::error::Error>> {
-        tracing::warn!("Linux input listener not yet implemented. Keystroke tracking disabled.");
+    pub async fn init_input_listener(tracker: Arc<KeystrokeTracker>) -> Result<(), Box<dyn std::error::Error>> {
+        tracing::info!("Initializing Linux input listener (rdev)...");
+        
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap();
+
+            tracing::info!("Starting rdev listener thread...");
+            if let Err(error) = listen(move |event| {
+                match event.event_type {
+                    EventType::KeyPress(key) => {
+                        tracing::info!("Activity detected: Key pressed ({:?})", key);
+                        rt.block_on(tracker.record_keystroke());
+                    }
+                    EventType::MouseMove { x, y } => {
+                        // Keep mouse moves as trace/debug to avoid spamming journalctl
+                        tracing::debug!("Mouse move: {}, {}", x, y);
+                        rt.block_on(tracker.record_mouse_movement());
+                    }
+                    EventType::ButtonPress(button) => {
+                        tracing::info!("Activity detected: Mouse button pressed ({:?})", button);
+                        rt.block_on(tracker.record_mouse_click());
+                    }
+                    _ => {}
+                }
+            }) {
+                tracing::error!("FATAL: Error in Linux input listener: {:?}", error);
+                tracing::error!("Hint: Check if the user is in the 'input' group and has permissions for /dev/input/event*");
+            }
+        });
+        
         Ok(())
     }
 }

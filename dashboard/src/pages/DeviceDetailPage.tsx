@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import React, { Fragment, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import { AppShell } from '../components/AppShell';
@@ -187,10 +187,10 @@ export function DeviceDetailPage() {
         : 'border-[#223462] bg-[#111a35] text-[#8ea0cf] hover:border-[#00d9ff]/50 hover:text-[#dce6ff]'
     }`;
 
-  const maxHourlyValue = Math.max(1, ...hourly.map((item) => item.active_seconds + item.idle_seconds));
-
+  const maxHourlyValue = Math.max(1, ...hourly.map((item: HourlyItem) => item.active_seconds + item.idle_seconds));
+ 
   const toggleHourlyProgram = (key: string) => {
-    setExpandedHourlyPrograms((prev) => ({
+    setExpandedHourlyPrograms((prev: Record<string, boolean>) => ({
       ...prev,
       [key]: !prev[key],
     }));
@@ -201,12 +201,12 @@ export function DeviceDetailPage() {
       return null;
     }
 
-    return resourceMetrics.reduce((best, current) => {
+    return resourceMetrics.reduce((best: NodeResourceMetric | null, current: NodeResourceMetric) => {
       if (!best) return current;
       const bestScore = (best.cpu_percent || 0) + (best.memory_percent || 0);
       const currentScore = (current.cpu_percent || 0) + (current.memory_percent || 0);
       return currentScore > bestScore ? current : best;
-    }, resourceMetrics[0] as NodeResourceMetric);
+    }, resourceMetrics[0] || null);
   }, [resourceMetrics]);
 
   const usbSummaryRows = useMemo<UsbSummaryRow[]>(() => {
@@ -285,7 +285,7 @@ export function DeviceDetailPage() {
   }, [usbEvents]);
 
   const wifiEventsWithDuration = useMemo<WifiEventWithDuration[]>(() => {
-    return wifiEvents.map((event, index) => {
+    return wifiEvents.map((event: WifiEvent, index: number) => {
       const startedAtMs = new Date(event.timestamp).getTime();
       const endedAtMs =
         index === 0
@@ -305,7 +305,7 @@ export function DeviceDetailPage() {
   }, [wifiEvents]);
 
   const filteredWifiEvents = useMemo(() => {
-    return wifiEventsWithDuration.filter((event) => {
+    return wifiEventsWithDuration.filter((event: WifiEventWithDuration) => {
       const stateMatches =
         wifiStateFilter === 'all' ? true : event.state.toLowerCase() === wifiStateFilter;
 
@@ -451,7 +451,7 @@ export function DeviceDetailPage() {
               type="date"
               value={selectedDate}
               max={dateToday}
-              onChange={(e) => setSelectedDate(e.target.value || dateToday)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSelectedDate(e.target.value || dateToday)}
               className="rounded-full border border-[#223462] bg-[#111a35] px-3 py-1.5 font-mono text-[11px] text-[#dce6ff] cursor-pointer"
             />
             <button
@@ -469,7 +469,7 @@ export function DeviceDetailPage() {
             <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Estado</span>
             <select
               value={wifiStateFilter}
-              onChange={(event) => setWifiStateFilter(event.target.value as WifiStateFilter)}
+              onChange={(event: React.ChangeEvent<HTMLSelectElement>) => setWifiStateFilter(event.target.value as WifiStateFilter)}
               className="rounded-full border border-[#223462] bg-[#111a35] px-3 py-1.5 text-[11px] text-[#dce6ff]"
             >
               <option value="all">Todos</option>
@@ -484,7 +484,7 @@ export function DeviceDetailPage() {
         <section className="rounded-2xl border border-[#1b2b56] bg-[linear-gradient(160deg,#0f1d43,#0b1329)] p-4 shadow-[0_12px_26px_rgba(0,0,0,0.32)]">
           <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.18em] text-[#8ea0cf]">Actividad por Hora</p>
           <div className="flex h-32 items-end gap-1 overflow-hidden rounded-xl border border-[#20315a] bg-[#0a122a] p-2">
-            {hourly.map((item) => {
+            {hourly.map((item: HourlyItem) => {
               const total = item.active_seconds + item.idle_seconds;
               const activePct = total > 0 ? Math.round((item.active_seconds / maxHourlyValue) * 100) : 0;
               const idlePct = total > 0 ? Math.round((item.idle_seconds / maxHourlyValue) * 100) : 0;
@@ -539,7 +539,7 @@ export function DeviceDetailPage() {
                 <div className="py-8 text-center text-[#8fa0c9]">No hay actividad para esta fecha.</div>
               ) : (
                 <div className="space-y-3 p-3">
-                  {hourlyPrograms.map((group) => (
+                  {hourlyPrograms.map((group: HourlyProgramsGroup) => (
                     <section key={group.hour} className="rounded-xl border border-[#21325d] bg-[#0a122a]">
                       <header className="flex items-center justify-between border-b border-[#1b2a4f] px-4 py-2">
                         <h3 className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#8ea0cf]">{group.label}</h3>
@@ -557,7 +557,7 @@ export function DeviceDetailPage() {
                             </tr>
                           </thead>
                           <tbody>
-                            {group.programs.map((program, idx) => (
+                            {group.programs.map((program: HourlyProgramItem, idx: number) => (
                               <Fragment key={`${group.hour}-${program.app}-${idx}`}>
                                 <tr>
                                   <td className="max-w-[420px] truncate font-mono text-[12px] text-[#dce6ff]" title={program.app}>
@@ -587,7 +587,7 @@ export function DeviceDetailPage() {
                                   <tr>
                                     <td colSpan={4} className="bg-[#0b1734] px-4 py-2">
                                       <div className="space-y-1.5">
-                                        {program.windows.map((windowItem, windowIdx) => (
+                                        {program.windows.map((windowItem: { title: string; duration: string; intervals: number }, windowIdx: number) => (
                                           <div
                                             key={`${group.hour}-${program.app}-${idx}-${windowIdx}`}
                                             className="flex items-center justify-between rounded-md border border-[#1f2d53] bg-[#0a122a] px-3 py-1.5"
@@ -639,7 +639,7 @@ export function DeviceDetailPage() {
                           <td colSpan={4} className="py-8 text-center text-[#8fa0c9]">Sin snapshot de apps abiertas para este equipo.</td>
                         </tr>
                       ) : (
-                        runningApps.map((app) => (
+                        runningApps.map((app: RunningAppInfo) => (
                           <tr key={app.id}>
                             <td className="max-w-[260px] truncate text-[12px] text-[#dce6ff]" title={app.app_name}>{shortAppName(app.app_name)}</td>
                             <td className="whitespace-nowrap font-mono text-[11px] text-[#00d9ff]">{app.window_count}</td>
@@ -674,7 +674,7 @@ export function DeviceDetailPage() {
                           <td colSpan={4} className="py-8 text-center text-[#8fa0c9]">Sin datos de inventario para este equipo.</td>
                         </tr>
                       ) : (
-                        inventory.map((app, idx) => (
+                        inventory.map((app: AppInfo, idx: number) => (
                           <tr key={`${app.app_name}-${idx}`}>
                             <td className="max-w-[360px] truncate text-[12px] text-[#dce6ff]" title={app.app_name}>{app.app_name}</td>
                             <td className="text-[12px] text-[#9eb0dc]">{app.version || 'Unknown'}</td>
@@ -713,7 +713,7 @@ export function DeviceDetailPage() {
                       <td colSpan={6} className="py-8 text-center text-[#8fa0c9]">Sin eventos USB para este equipo.</td>
                     </tr>
                   ) : (
-                    usbSummaryRows.map((event) => (
+                    usbSummaryRows.map((event: UsbSummaryRow) => (
                       <tr key={event.key}>
                         <td className="whitespace-nowrap font-mono text-[11px] text-[#8ea0cf]">
                           {event.pair_id.split('#').pop()}
@@ -772,7 +772,7 @@ export function DeviceDetailPage() {
                   <p className="font-mono text-[11px] text-[#8fa0c9]">Sin tiempo conectado acumulado para el filtro actual.</p>
                 ) : (
                   <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                    {wifiTotalsBySsid.map((item) => (
+                    {wifiTotalsBySsid.map((item: { ssid: string; seconds: number }) => (
                       <div key={item.ssid} className="flex items-center justify-between rounded-lg border border-[#243665] bg-[#0d1733] px-3 py-2">
                         <p className="max-w-[70%] truncate font-mono text-[11px] text-[#dce6ff]" title={item.ssid}>{item.ssid}</p>
                         <p className="font-mono text-[11px] text-[#00ff88]">{formatLongDuration(item.seconds)}</p>
@@ -801,7 +801,7 @@ export function DeviceDetailPage() {
                         <td colSpan={7} className="py-8 text-center text-[#8fa0c9]">Sin historial WiFi para el filtro seleccionado.</td>
                       </tr>
                     ) : (
-                      filteredWifiEvents.map((event, idx) => (
+                      filteredWifiEvents.map((event: WifiEventWithDuration, idx: number) => (
                         <tr key={`${event.timestamp}-${idx}`}>
                           <td className="whitespace-nowrap font-mono text-[11px] text-[#9eb0dc]">{new Date(event.timestamp).toLocaleString()}</td>
                           <td className="max-w-[280px] truncate text-[12px] text-[#dce6ff]" title={event.ssid}>{event.ssid || 'N/A'}</td>

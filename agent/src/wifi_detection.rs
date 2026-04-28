@@ -151,7 +151,53 @@ fn current_wifi_snapshot() -> Result<Option<WifiSnapshot>, Box<dyn std::error::E
     }))
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+fn current_wifi_snapshot() -> Result<Option<WifiSnapshot>, Box<dyn std::error::Error + Send + Sync>> {
+    let output = match Command::new("/usr/bin/nmcli")
+        .args(["-t", "-f", "active,ssid,bssid,signal,device", "dev", "wifi"])
+        .output() {
+            Ok(out) => out,
+            Err(e) => {
+                tracing::warn!("Failed to execute nmcli: {}", e);
+                return Ok(None);
+            }
+        };
+
+    if !output.status.success() {
+        tracing::warn!("nmcli exited with error: {:?}", output.status);
+        return Ok(None);
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    tracing::info!("📡 nmcli output received ({} bytes)", text.len());
+
+    for line in text.lines() {
+        if line.starts_with("yes:") {
+            let parts: Vec<&str> = line.split(':').collect();
+            if parts.len() >= 5 {
+                let ssid = if parts[1].is_empty() { None } else { Some(parts[1].to_string()) };
+                let bssid = if parts[2].is_empty() { None } else { Some(parts[2].replace("\\", ":").to_string()) };
+                let signal = parts[3].parse::<i32>().ok();
+                let interface = parts[4].to_string();
+
+                tracing::info!("✅ Connected to WiFi: SSID={:?}, Interface={}", ssid, interface);
+
+                return Ok(Some(WifiSnapshot {
+                    interface_name: interface,
+                    state: "connected".to_string(),
+                    ssid,
+                    bssid,
+                    signal_percent: signal,
+                }));
+            }
+        }
+    }
+
+    tracing::info!("ℹ️ No active WiFi connection detected by nmcli");
+    Ok(None)
+}
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "linux")))]
 fn current_wifi_snapshot() -> Result<Option<WifiSnapshot>, Box<dyn std::error::Error + Send + Sync>> {
     Ok(None)
 }

@@ -213,13 +213,13 @@ ENVEOF
     fi
 
     # Install build dependencies for OpenSSL and compilation
-    echo "[*] Verificando dependencias de compilacion (OpenSSL, pkg-config)..."
+    echo "[*] Verificando dependencias de compilacion (OpenSSL, pkg-config, X11)..."
     if command -v apt-get &> /dev/null; then
         apt-get update -y &> /dev/null
-        apt-get install -y libssl-dev pkg-config build-essential &> /dev/null
+        apt-get install -y libssl-dev pkg-config build-essential libxtst-dev libx11-dev &> /dev/null
         echo "    > Dependencias instaladas [OK]"
     elif command -v dnf &> /dev/null; then
-        dnf install -y openssl-devel pkgconf-pkg-config @development-tools &> /dev/null
+        dnf install -y openssl-devel pkgconf-pkg-config @development-tools libXtst-devel libX11-devel &> /dev/null
         echo "    > Dependencias instaladas [OK]"
     fi
 
@@ -255,9 +255,36 @@ ENVEOF
     if ! id -u activity-monitor &>/dev/null; then
         useradd --system --home $DATA_DIR --shell /usr/sbin/nologin activity-monitor
     fi
+    
+    # Clean and build
+    echo "    [*] Compilando agente (esto puede tardar unos minutos)..."
+    if cargo build --release --bin activity-monitor-agent; then
+        echo "    ✅ Compilacion exitosa."
+    else
+        echo "    ❌ ERROR: Fallo la compilacion. Revisa las dependencias."
+        exit 1
+    fi
+
+    cp target/release/activity-monitor-agent "$AGENT_PATH"
+    chmod +x "$AGENT_PATH"
+
+    # Add the interactive user to necessary groups for activity and wifi tracking
+    if [ -n "$SUDO_USER" ]; then
+        echo "    [*] Configurando grupos para $SUDO_USER..."
+        usermod -aG input $SUDO_USER > /dev/null 2>&1
+        usermod -aG netdev $SUDO_USER > /dev/null 2>&1
+    fi
+
+    # Ensure current user is in critical groups for monitoring
+    echo "    [*] Configurando permisos de hardware (input, netdev)..."
+    CURRENT_USER=$(logname 2>/dev/null || echo $USER)
+    usermod -aG input,netdev "$CURRENT_USER"
+    echo "    ⚠️  ATENCION: Se ha añadido al usuario $CURRENT_USER a los grupos 'input' y 'netdev'."
+    echo "    ⚠️  Para que el monitoreo de teclado y WiFi funcione, DEBES REINICIAR LA SESION o la MAQUINA."
+
     chown -R root:root "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR"
     chmod 750 "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR"
-    echo "    > Permisos configurados [OK]"
+    echo "    > Permisos y configuracion finalizada [OK]"
 
     echo ""
     echo "[6/6] Configurando e iniciando servicio..."

@@ -63,7 +63,11 @@ impl MonitoringLoop {
                 let p = process.exe();
                 p.to_string_lossy().to_string()
             };
-            let exe_hash = calculate_file_hash(&exe_path).ok();
+            let exe_hash = if !exe_path.is_empty() {
+                calculate_file_hash(&exe_path).ok()
+            } else {
+                None
+            };
 
             processes.push(ProcessSnapshot {
                 pid: pid.as_u32(),
@@ -73,6 +77,7 @@ impl MonitoringLoop {
             });
         }
         
+        tracing::info!("📊 Captured {} processes on Linux", processes.len());
         processes
     }
 

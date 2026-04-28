@@ -212,21 +212,38 @@ impl InventoryScanner {
         }
         
         // Also try dpkg for installed packages (Debian/Ubuntu)
-        if let Ok(output) = Command::new("dpkg").arg("-l").output() {
+        if let Ok(output) = Command::new("/usr/bin/dpkg-query").args(["-W", "-f=${Package}|${Version}|${Architecture}\n"]).output() {
             let output_str = String::from_utf8_lossy(&output.stdout);
             for line in output_str.lines() {
-                if line.starts_with("ii") {
-                    let parts: Vec<&str> = line.split_whitespace().collect();
-                    if parts.len() >= 3 {
-                        let app = InstalledApp {
-                            app_name: parts[1].to_string(),
-                            version: parts.get(2).map(|s| s.to_string()),
-                            exe_path: String::new(),
-                            exe_hash: String::new(),
-                            installed_date: None,
-                        };
-                        apps.push(app);
-                    }
+                let parts: Vec<&str> = line.split('|').collect();
+                if parts.len() >= 2 {
+                    let app = InstalledApp {
+                        app_name: parts[0].to_string(),
+                        version: Some(parts[1].to_string()),
+                        exe_path: format!("/usr/bin/{}", parts[0]),
+                        exe_hash: String::new(),
+                        installed_date: None,
+                    };
+                    apps.push(app);
+                }
+            }
+        }
+
+        // Try snap list if available
+        if let Ok(output) = Command::new("/usr/bin/snap").arg("list").output() {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            for (i, line) in output_str.lines().enumerate() {
+                if i == 0 { continue; } // Skip header
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    let app = InstalledApp {
+                        app_name: parts[0].to_string(),
+                        version: Some(parts[1].to_string()),
+                        exe_path: format!("/snap/bin/{}", parts[0]),
+                        exe_hash: String::new(),
+                        installed_date: None,
+                    };
+                    apps.push(app);
                 }
             }
         }
