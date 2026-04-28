@@ -92,13 +92,19 @@ impl KeystrokeTracker {
         let now = Utc::now();
 
         // Daily Reset Logic
-        use chrono::{Local, Timelike, Datelike};
+        use chrono::{Local, Datelike};
         let now_local = Local::now();
         
         // If last accumulation was on a different day, reset counters
         if let Some(last_time) = stats.last_idle_accumulation_time {
             let last_local: DateTime<Local> = DateTime::from(last_time);
             if last_local.date_naive() != now_local.date_naive() {
+                tracing::info!(
+                    "📅 New day detected ({} -> {}). Resetting daily idle counter (was {}s).",
+                    last_local.date_naive(),
+                    now_local.date_naive(),
+                    stats.total_inactive_seconds_today
+                );
                 stats.total_inactive_seconds_today = 0;
             }
         }

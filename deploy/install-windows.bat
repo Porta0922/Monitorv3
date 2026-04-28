@@ -42,19 +42,23 @@ echo - Logs: %LOG_DIR%
 echo ========================================
 echo.
 echo Seleccione una opcion:
-echo 1. Instalar (o actualizar) el agente
-echo 2. Modificar credenciales (.env) y reiniciar
-echo 3. Actualizar binario (Mantiene configuracion)
-echo 4. Desinstalar
-echo 5. Salir
+echo 1. Instalacion COMPLETA (Servicio + Tarea de Usuario)
+echo 2. Instalar solo SERVICIO (Segundo plano/Admin)
+echo 3. Instalar solo TAREA DE USUARIO (Captura Actividad/Idle)
+echo 4. Modificar credenciales (.env) y reiniciar
+echo 5. Actualizar binario (Mantiene configuracion)
+echo 6. Desinstalar TODO
+echo 7. Salir
 echo.
 set /p MENU_OPTION="Opcion: "
 
-if "%MENU_OPTION%"=="1" goto INSTALL_AGENT
-if "%MENU_OPTION%"=="2" goto MODIFY_CREDS
-if "%MENU_OPTION%"=="3" goto UPDATE_ONLY
-if "%MENU_OPTION%"=="4" goto UNINSTALL_AGENT
-if "%MENU_OPTION%"=="5" goto END_SCRIPT
+if "%MENU_OPTION%"=="1" set MODE=FULL & goto INSTALL_AGENT
+if "%MENU_OPTION%"=="2" set MODE=SERVICE & goto INSTALL_AGENT
+if "%MENU_OPTION%"=="3" set MODE=USER & goto INSTALL_AGENT
+if "%MENU_OPTION%"=="4" goto MODIFY_CREDS
+if "%MENU_OPTION%"=="5" goto UPDATE_ONLY
+if "%MENU_OPTION%"=="6" goto UNINSTALL_AGENT
+if "%MENU_OPTION%"=="7" goto END_SCRIPT
 goto MAIN_MENU
 
 :MODIFY_CREDS
