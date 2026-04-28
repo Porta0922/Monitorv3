@@ -116,6 +116,7 @@ goto MAIN_MENU
 :UPDATE_ONLY
 echo.
 echo [*] Iniciando actualizacion rapida (manteniendo configuracion actual)...
+set MODE=FULL
 goto STEP_1
 
 :INSTALL_AGENT
@@ -278,7 +279,7 @@ if not exist "C:\Program Files\osquery\osqueryi.exe" (
 
 echo [6/8] Registrando Servicio de Windows (Sesion 0)...
 if "%MODE%"=="USER" (
-    echo     ^> Saltando registro de servicio (Modo Solo Usuario) [SKIP]
+    echo     ^> Saltando registro de servicio ^(Modo Solo Usuario^) [SKIP]
 ) else (
     REG DELETE "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v ActivityMonitorAgent /f >nul 2>&1
     sc create ActivityMonitor binPath= "\"%AGENT_BIN%\"" start= delayed-auto displayName= "ActivityMonitor Enterprise Agent" >nul
@@ -299,7 +300,7 @@ if "%MODE%"=="USER" (
 
 echo [7/8] Configurando tarea de Sesion de Usuario...
 if "%MODE%"=="SERVICE" (
-    echo     ^> Saltando registro de tarea de usuario (Modo Solo Servicio) [SKIP]
+    echo     ^> Saltando registro de tarea de usuario ^(Modo Solo Servicio^) [SKIP]
 ) else (
     schtasks /Create /SC ONLOGON /TN "ActivityMonitorUserAgent" /TR "\"%AGENT_BIN%\"" /F >nul 2>&1
     if %errorLevel% equ 0 (
