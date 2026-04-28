@@ -1,4 +1,5 @@
 # README - Instalacion del Server en Produccion
+*Actualizado: 28 de Abril, 2026*
 
 Guia operativa para desplegar ActivityMonitor Server en produccion y entregarla a otra persona del equipo.
 
@@ -208,7 +209,7 @@ En TimescaleDB, toda clave unica/primaria debe incluir la columna de particion (
 
 ### Estado en este repo
 
-La migracion [migrations/002_input_heatmaps_and_alerts.sql](migrations/002_input_heatmaps_and_alerts.sql) ya fue corregida para usar PK compuesta (timestamp, id) en:
+La migracion [migrations/002_input_heatmaps_and_alerts.sql](migrations/002_input_heatmaps_and_alerts.sql) y [migrations/003_security_events.sql](migrations/003_security_events.sql) ya fueron corregidas para usar PK compuesta (timestamp, id) en:
 - input_activity_heatmaps
 - security_alerts
 - process_termination_attempts

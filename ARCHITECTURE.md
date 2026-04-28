@@ -1,4 +1,5 @@
-# ActivityMonitor Enterprise v3.1.0 — System Architecture & Technical Reference
+# ActivityMonitor Enterprise v3.2.0 — System Architecture & Technical Reference
+*Actualizado: 28 de Abril, 2026*
 
 **Complete Technical Documentation**  
 For Architects, Developers, DevOps Teams, and Advanced Users
@@ -28,6 +29,7 @@ For Architects, Developers, DevOps Teams, and Advanced Users
 ┌─────────────────────────────────────────────────────────────┐
 │ TIER 1: AGENTS (Client-Side Monitoring)                    │
 │ - Windows/Linux/macOS Rust binaries                         │
+│ - Hybrid Deployment: System Service + User Session Agent    │
 │ - Process capture, USB tracking, input monitoring           │
 │ - Local offline cache (SQLite + AES-256-GCM)               │
 └────────────────────┬────────────────────────────────────────┘
@@ -587,7 +589,7 @@ Agent: Process Monitor
    ↓
 Event Object:
 {
-  timestamp: "2026-04-01T14:35:22.123Z",
+  timestamp: "2026-04-28T14:35:22.123Z",
   device_id: "uuid...",
   app_name: "firefox.exe",
   window_title: "GitHub - Inbox",
@@ -621,7 +623,7 @@ Agent: USB Detector
    ↓
 Event Object:
 {
-  timestamp: "2026-04-01T14:35:22Z",
+  timestamp: "2026-04-28T14:35:22Z",
   device_id: "uuid...",
   action: "CONNECT",
   hardware_id: "VID_1234&PID_5678",
@@ -657,7 +659,7 @@ Agent: Input Tracking
    ↓
 Heatmap Object:
 {
-  timestamp: "2026-04-01T14:00:00Z",
+  timestamp: "2026-04-28T14:00:00Z",
   device_id: "uuid...",
   grid_data: [[0,5,10,...], [2,8,15,...], ...],
   screen_width: 1920,
@@ -677,7 +679,7 @@ PostgreSQL INSERT:
   input_activity_heatmaps (timestamp, device_id, grid_data, ...)
    ↓
 Dashboard: Fetch heatmap
-  GET /api/heatmaps/:device_id?date=2026-04-01
+  GET /api/heatmaps/:device_id?date=2026-04-28
    ↓
 [Render 100x100 canvas with color gradient]
 ```
@@ -693,7 +695,7 @@ Agent: Process Protection
    ↓
 Alert Object:
 {
-  timestamp: "2026-04-01T14:35:22Z",
+  timestamp: "2026-04-28T14:35:22Z",
   device_id: "uuid...",
   severity: "CRITICAL",
   alert_type: "TERMINATION_ATTEMPT",
@@ -848,7 +850,7 @@ Response 200:
     "nickname": "my-laptop",
     "hostname": "LAPTOP-ABC123",
     "os_type": "windows",
-    "last_seen": "2026-04-01T14:35:22Z",
+    "last_seen": "2026-04-28T14:35:22Z",
     "is_online": true,
     "activity_count_1h": 360
   }
@@ -867,7 +869,7 @@ Response 200:
   "os_type": "windows",
   "os_version": "Windows 11 23H2",
   "created_at": "2026-03-01T00:00:00Z",
-  "last_seen": "2026-04-01T14:35:22Z",
+  "last_seen": "2026-04-28T14:35:22Z",
   "is_online": true
 }
 ```
@@ -894,7 +896,7 @@ Body:
   "device_id": "uuid",
   "logs": [
     {
-      "timestamp": "2026-04-01T14:35:22Z",
+      "timestamp": "2026-04-28T14:35:22Z",
       "app_name": "firefox.exe",
       "window_title": "GitHub",
       "duration_seconds": 45,
@@ -917,14 +919,14 @@ GET /api/logs
 Query (required/optional):
   device_id=uuid
   ?app_name=firefox
-  ?from=2026-04-01T00:00:00Z
-  ?to=2026-04-01T23:59:59Z
+  ?from=2026-04-28T00:00:00Z
+  ?to=2026-04-28T23:59:59Z
   ?limit=50
   ?offset=0
 Response 200:
 [
   {
-    "timestamp": "2026-04-01T14:35:22Z",
+    "timestamp": "2026-04-28T14:35:22Z",
     "device_id": "uuid",
     "app_name": "firefox.exe",
     "window_title": "GitHub",
@@ -940,7 +942,7 @@ POST /api/heatmaps/upload
 Body:
 {
   "device_id": "uuid",
-  "timestamp": "2026-04-01T14:00:00Z",
+  "timestamp": "2026-04-28T14:00:00Z",
   "grid_data": [[0,5,10,...], ...],
   "screen_width": 1920,
   "screen_height": 1080,
@@ -962,12 +964,12 @@ Response 200:
 ```
 GET /api/heatmaps/:device_id
 Query:
-  ?date=2026-04-01
+  ?date=2026-04-28
   ?hour=14
 Response 200:
 {
   "device_id": "uuid",
-  "timestamp": "2026-04-01T14:00:00Z",
+  "timestamp": "2026-04-28T14:00:00Z",
   "grid_data": [[0,5,10,...], ...],
   "stats": {
     "mouse_moves": 1250,
@@ -984,13 +986,13 @@ Query (optional):
   ?device_id=uuid
   ?severity=CRITICAL
   ?resolved=false
-  ?from=2026-04-01T00:00:00Z
+  ?from=2026-04-28T00:00:00Z
   ?limit=50
 Response 200:
 [
   {
     "id": "uuid",
-    "timestamp": "2026-04-01T14:35:22Z",
+    "timestamp": "2026-04-28T14:35:22Z",
     "device_id": "uuid",
     "severity": "CRITICAL",
     "alert_type": "TERMINATION_ATTEMPT",

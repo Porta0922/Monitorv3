@@ -1,4 +1,5 @@
 # API Reference & Operations Guide
+*Actualizado: 28 de Abril, 2026*
 
 **For API Developers, DevOps, and System Operators**
 
@@ -119,7 +120,7 @@ Response 200:
     "os_type": "windows",
     "os_version": "Windows 11 23H2",
     "created_at": "2026-03-01T00:00:00Z",
-    "last_seen": "2026-04-01T14:35:22Z",
+    "last_seen": "2026-04-28T14:35:22Z",
     "is_online": true,
     "activity_count_1h": 360
   },
@@ -143,7 +144,7 @@ Response 200:
   "os_type": "windows",
   "os_version": "Windows 11 23H2",
   "created_at": "2026-03-01T00:00:00Z",
-  "last_seen": "2026-04-01T14:35:22Z",
+  "last_seen": "2026-04-28T14:35:22Z",
   "is_online": true
 }
 
@@ -190,7 +191,7 @@ Request:
   "device_id": "550e8400-e29b-41d4-a716-446655440000",
   "logs": [
     {
-      "timestamp": "2026-04-01T14:35:22.123Z",
+      "timestamp": "2026-04-28T14:35:22.123Z",
       "app_name": "firefox.exe",
       "window_title": "GitHub - Inbox",
       "duration_seconds": 45,
@@ -199,7 +200,7 @@ Request:
       "memory_mb": 256.5
     },
     {
-      "timestamp": "2026-04-01T14:35:24.456Z",
+      "timestamp": "2026-04-28T14:35:24.456Z",
       "app_name": "VSCode.exe",
       "window_title": "project.ts",
       "duration_seconds": 2,
@@ -237,8 +238,8 @@ Query Parameters:
   device_id=uuid         (REQUIRED)
   ?app_name=firefox      (optional filter)
   ?window_title=GitHub   (optional filter)
-  ?from=2026-04-01T00:00:00Z  (optional, ISO 8601)
-  ?to=2026-04-01T23:59:59Z    (optional, ISO 8601)
+  ?from=2026-04-28T00:00:00Z  (optional, ISO 8601)
+  ?to=2026-04-28T23:59:59Z    (optional, ISO 8601)
   ?limit=50              (default 100, max 1000)
   ?offset=0              (pagination)
   ?order=DESC|ASC        (timestamp order)
@@ -250,7 +251,7 @@ Response 200:
   "has_more": true,
   "logs": [
     {
-      "timestamp": "2026-04-01T14:35:22.123Z",
+      "timestamp": "2026-04-28T14:35:22.123Z",
       "device_id": "uuid",
       "app_name": "firefox.exe",
       "window_title": "GitHub - Inbox",
@@ -280,7 +281,7 @@ POST /api/heatmaps/upload
 Request:
 {
   "device_id": "550e8400-e29b-41d4-a716-446655440000",
-  "timestamp": "2026-04-01T14:00:00Z",
+  "timestamp": "2026-04-28T14:00:00Z",
   "grid_data": [
     [0, 5, 10, 15, ..., 0],      // Row 0 (y=0)
     [2, 8, 20, 25, ..., 1],      // Row 1 (y=1)
@@ -322,14 +323,14 @@ Upload frequency: Hourly per agent
 GET /api/heatmaps/:device_id
 
 Query Parameters:
-  ?date=2026-04-01           (YYYY-MM-DD)
+  ?date=2026-04-28           (YYYY-MM-DD)
   ?hour=14                   (optional, 0-23)
   ?include_stats=true        (default true)
 
 Response 200:
 {
   "device_id": "550e8400-e29b-41d4-a716-446655440000",
-  "timestamp": "2026-04-01T14:00:00Z",
+  "timestamp": "2026-04-28T14:00:00Z",
   "grid_data": [
     [0, 5, 10, ...],
     [2, 8, 20, ...],
@@ -365,8 +366,8 @@ Query Parameters (all optional):
   ?severity=CRITICAL|HIGH|MEDIUM|LOW
   ?alert_type=TERMINATION_ATTEMPT|HASH_MISMATCH|USB_CONNECTED
   ?resolved=true|false
-  ?from=2026-04-01T00:00:00Z
-  ?to=2026-04-01T23:59:59Z
+  ?from=2026-04-28T00:00:00Z
+  ?to=2026-04-28T23:59:59Z
   ?limit=50
   ?offset=0
 
@@ -377,7 +378,7 @@ Response 200:
   "alerts": [
     {
       "id": "alert-uuid",
-      "timestamp": "2026-04-01T14:35:22Z",
+      "timestamp": "2026-04-28T14:35:22Z",
       "device_id": "device-uuid",
       "severity": "CRITICAL",
       "alert_type": "TERMINATION_ATTEMPT",
@@ -414,7 +415,7 @@ GET /api/alerts/:alert_id
 Response 200:
 {
   "id": "alert-uuid",
-  "timestamp": "2026-04-01T14:35:22Z",
+  "timestamp": "2026-04-28T14:35:22Z",
   "device_id": "device-uuid",
   "severity": "CRITICAL",
   "alert_type": "TERMINATION_ATTEMPT",
@@ -853,7 +854,7 @@ curl -X POST http://localhost:3000/api/heatmaps/upload \
   -H "Content-Type: application/json" \
   -d '{
     "device_id":"uuid",
-    "timestamp":"2026-04-01T14:00:00Z",
+    "timestamp":"2026-04-28T14:00:00Z",
     "grid_data":[[0,5,10,...],[2,8,15,...],...],
     "screen_width":1920,
     "screen_height":1080,

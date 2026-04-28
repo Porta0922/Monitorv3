@@ -1,4 +1,5 @@
 # PostgreSQL & Infrastructure Setup Guide
+*Actualizado: 28 de Abril, 2026*
 
 ## Option 1: Docker Compose (Recommended for Development)
 

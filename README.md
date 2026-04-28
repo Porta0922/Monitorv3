@@ -1,12 +1,14 @@
 # ActivityMonitor Enterprise v3
+*Actualizado: 28 de Abril, 2026*
 
 Sistema empresarial de monitoreo de actividad y seguridad con arquitectura distribuida:
 
 - Agente multiplataforma en Rust (Windows/Linux/macOS)
+- **Despliegue Híbrido (Windows)**: Servicio de sistema (Sesión 0) + Agente de usuario para captura de actividad.
 - Backend en Rust (Axum + RabbitMQ + PostgreSQL/TimescaleDB)
 - Dashboard web en React + TypeScript
 
-Incluye monitoreo de aplicaciones en foco, actividad/inactividad, teclado/mouse, USB, inventario de software, eventos de WiFi y detección de amenazas mapeadas al framework MITRE ATT&CK mediante osquery.
+Incluye monitoreo de aplicaciones en foco, actividad/inactividad, teclado/mouse (heatmaps), USB, inventario de software, eventos de WiFi y detección de amenazas mapeadas al framework MITRE ATT&CK mediante osquery.
 
 ## Caracteristicas principales
 
@@ -19,11 +21,12 @@ Incluye monitoreo de aplicaciones en foco, actividad/inactividad, teclado/mouse,
 - Cola de mensajes con RabbitMQ y persistencia en PostgreSQL
 - Dashboard con vistas por dispositivo y exportacion CSV
 - Cache offline en agente con reintentos de sincronizacion
-- **Seguridad MITRE ATT&CK**: deteccion de amenazas via osquery con 11 tecnicas mapeadas
-- **Scheduler osquery por-query**: cada query ejecuta según su intervalo individual (300s-1800s) para minimizar overhead
-- **Deteccion de copia en USB**: identifica archivos recientemente escritos en drives USB (T1052.001)
-- Deduplicacion de eventos de seguridad por fingerprint SHA-256
-- Busqueda y filtrado de dispositivos por MAC address, hostname, apodo o Device ID
+- **Seguridad MITRE ATT&CK**: detección de amenazas vía osquery con 11 técnicas mapeadas.
+- **Detección de copia en USB**: identifica archivos recientemente escritos en drives USB (T1052.001) con deduplicación SHA-256.
+- **Heatmaps de Actividad**: Seguimiento de intensidad de uso de teclado y mouse por hora.
+- **Despliegue como Servicio**: Integración nativa con Windows Service Manager (SCM) para persistencia.
+- **Cache offline**: Almacenamiento local en SQLite para entornos sin conectividad inmediata.
+- Busqueda y filtrado de dispositivos por MAC address, hostname, apodo o Device ID.
 
 ## Arquitectura
 
@@ -97,13 +100,12 @@ Dashboard por defecto: `http://localhost:5173`
 ### 4) Ejecutar el agente
 
 Opcion Windows:
-
 ```bat
 deploy\install-windows.bat
 ```
+*El instalador ofrece opciones para instalación como Servicio, Tarea de Usuario o Híbrida.*
 
 Opciones Linux/macOS:
-
 ```bash
 bash deploy/install-linux.sh
 # o

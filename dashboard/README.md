@@ -1,73 +1,55 @@
-# React + TypeScript + Vite
+# ActivityMonitor Dashboard
+*Actualizado: 28 de Abril, 2026*
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Este es el frontend de la plataforma ActivityMonitor Enterprise v3, desarrollado en React con TypeScript y Vite.
 
-Currently, two official plugins are available:
+## Características
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Visualización en Tiempo Real**: Estado de conexión y actividad de los agentes.
+- **Heatmaps de Actividad**: Intensidad de uso de dispositivos por hora y día.
+- **Centro de Seguridad**: Monitoreo de alertas MITRE ATT&CK detectadas por osquery.
+- **Gestión de Dispositivos**: Búsqueda avanzada y filtrado de endpoints.
+- **Historial de Inventario**: Registro de software, redes WiFi y dispositivos USB.
 
-## React Compiler
+## Tecnologías
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **Framework**: React 18
+- **Lenguaje**: TypeScript
+- **Estilos**: Tailwind CSS / Lucide React (Iconos)
+- **Gráficos**: Recharts / Tremor
+- **Herramienta de Build**: Vite
 
-## Expanding the ESLint configuration
+## Inicio Rápido
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+1. Instalar dependencias:
+   ```bash
+   npm install
+   ```
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+2. Configurar variables de entorno:
+   Crea un archivo `.env` en esta carpeta:
+   ```env
+   VITE_API_URL=http://localhost:3000
+   ```
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+3. Ejecutar en desarrollo:
+   ```bash
+   npm run dev
+   ```
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Build para Producción
+
+Para generar los archivos estáticos optimizados:
+
+```bash
+npm run build
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Los archivos se generarán en la carpeta `dist/`. Pueden ser servidos por Nginx o cualquier servidor de archivos estáticos.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Estructura de Carpetas
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+- `src/components`: Componentes reutilizables de la UI.
+- `src/pages`: Vistas principales (Dashboard, Dispositivos, Seguridad, etc.).
+- `src/hooks`: Lógica de consumo de API y estados globales.
+- `src/utils`: Funciones auxiliares y formateadores.
