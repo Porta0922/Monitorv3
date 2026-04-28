@@ -92,7 +92,7 @@ impl KeystrokeTracker {
         let now = Utc::now();
 
         // Daily Reset Logic
-        use chrono::{Local, Datelike};
+        use chrono::{Local, Datelike, Timelike};
         let now_local = Local::now();
         
         // If last accumulation was on a different day, reset counters
@@ -117,7 +117,9 @@ impl KeystrokeTracker {
         };
 
         // Cap idle duration by seconds elapsed since midnight local time
-        let seconds_since_midnight = now_local.time().num_seconds_from_midnight() as u64;
+        // Compute seconds since midnight using hour, minute, second (Timelike trait)
+        let time = now_local.time();
+        let seconds_since_midnight = (time.hour() as u64) * 3600 + (time.minute() as u64) * 60 + (time.second() as u64);
         if seconds_idle > seconds_since_midnight {
             seconds_idle = seconds_since_midnight;
         }

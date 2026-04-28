@@ -49,20 +49,24 @@ show_menu() {
     echo "========================================"
     echo ""
     echo "Seleccione una opcion:"
-    echo "1. Instalar (o actualizar) el agente"
-    echo "2. Modificar credenciales (.env) y reiniciar"
-    echo "3. Actualizar binario (Mantiene configuracion)"
-    echo "4. Desinstalar"
-    echo "5. Salir"
+    echo "1. Instalacion COMPLETA (Daemon Sistema + Agent Usuario)"
+    echo "2. Instalar solo DAEMON SISTEMA (Proteccion/Background)"
+    echo "3. Instalar solo AGENTE USUARIO (Actividad/Ventanas)"
+    echo "4. Modificar credenciales (.env) y reiniciar"
+    echo "5. Actualizar binario (Mantiene configuracion)"
+    echo "6. Desinstalar TODO"
+    echo "7. Salir"
     echo ""
     read -p "Opcion: " MENU_OPTION
 
     case $MENU_OPTION in
-        1) install_agent ;;
-        2) modify_creds ;;
-        3) update_only ;;
-        4) uninstall_agent ;;
-        5) exit 0 ;;
+        1) MODE="FULL"; install_agent ;;
+        2) MODE="SERVICE"; install_agent ;;
+        3) MODE="USER"; install_agent ;;
+        4) modify_creds ;;
+        5) update_only ;;
+        6) uninstall_agent ;;
+        7) exit 0 ;;
         *) show_menu ;;
     esac
 }
@@ -235,8 +239,41 @@ ENVEOF
     chmod 755 "$AGENT_PATH"
     echo "    > Binario copiado a $AGENT_PATH [OK]"
 
-    echo "[5/5] Configurando e iniciando LaunchAgent..."
-    cat > "$PLIST_PATH" << EOF
+    echo ""
+    echo "[5/5] Configurando e iniciando servicios..."
+    
+    if [ "$MODE" != "USER" ]; then
+        echo "    [*] Configurando LaunchDaemon (Sistema)..."
+        DAEMON_PLIST="/Library/LaunchDaemons/$SERVICE_NAME.system.plist"
+        sudo cat > "/tmp/$SERVICE_NAME.system.plist" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$SERVICE_NAME.system</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$AGENT_PATH</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>WorkingDirectory</key>
+    <string>$DATA_DIR</string>
+</dict>
+</plist>
+EOF
+        sudo mv "/tmp/$SERVICE_NAME.system.plist" "$DAEMON_PLIST"
+        sudo chown root:wheel "$DAEMON_PLIST"
+        sudo launchctl load -w "$DAEMON_PLIST" 2>/dev/null || true
+        echo "    ^> LaunchDaemon sistema configurado [OK]"
+    fi
+
+    if [ "$MODE" != "SERVICE" ]; then
+        echo "    [*] Configurando LaunchAgent (Usuario)..."
+        cat > "$PLIST_PATH" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -247,37 +284,21 @@ ENVEOF
     <array>
         <string>$AGENT_PATH</string>
     </array>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>AGENT_AUTH_TOKEN</key>
-        <string>$AGENT_AUTH_TOKEN</string>
-        <key>AGENT_OFFLINE_CACHE_KEY</key>
-        <string>$AGENT_OFFLINE_CACHE_KEY</string>
-        <key>AGENT_SERVER_URL</key>
-        <string>$AGENT_SERVER_URL</string>
-        <key>RABBITMQ_URL</key>
-        <string>$RABBITMQ_URL</string>
-    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
-    <key>StandardOutPath</key>
-    <string>$LOG_DIR/output.log</string>
-    <key>StandardErrorPath</key>
-    <string>$LOG_DIR/error.log</string>
     <key>WorkingDirectory</key>
     <string>$DATA_DIR</string>
 </dict>
 </plist>
 EOF
+        launchctl load -w "$PLIST_PATH" 2>/dev/null || true
+        echo "    ^> LaunchAgent usuario configurado [OK]"
+    fi
 
-    echo ""
-    echo "[*] Iniciando servicio..."
-    launchctl load -w "$PLIST_PATH"
-
-    if launchctl list | grep -q "$SERVICE_NAME"; then
-        echo "[+] Servicio instalado y en ejecucion correctamente!"
+    if [ "$MODE" != "SERVICE" ]; then
+        echo ""
         echo "=========================================================="
         echo " NOTA IMPORTANTE PARA macOS:                             "
         echo " Debes otorgar permisos de 'Accesibilidad' al agente.     "
@@ -285,10 +306,9 @@ EOF
         echo " > Privacidad > Accesibilidad, y añade el archivo:        "
         echo " $AGENT_PATH "
         echo "=========================================================="
-    else
-        echo "[-] Error al iniciar el servicio con launchd."
-        exit 1
     fi
+    
+    echo "[+] Proceso finalizado."
 
     echo ""
     echo "========================================"

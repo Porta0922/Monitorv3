@@ -277,32 +277,42 @@ if not exist "C:\Program Files\osquery\osqueryi.exe" (
 )
 
 echo [6/8] Registrando Servicio de Windows (Sesion 0)...
-REG DELETE "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v ActivityMonitorAgent /f >nul 2>&1
-sc create ActivityMonitor binPath= "\"%AGENT_BIN%\"" start= delayed-auto displayName= "ActivityMonitor Enterprise Agent" >nul
-if %errorLevel% equ 0 (
-    echo     ^> Servicio registrado correctamente [OK]
+if "%MODE%"=="USER" (
+    echo     ^> Saltando registro de servicio (Modo Solo Usuario) [SKIP]
 ) else (
-    sc query ActivityMonitor >nul 2>&1
-    if !errorLevel! equ 0 (
-        sc config ActivityMonitor binPath= "\"%AGENT_BIN%\"" start= delayed-auto >nul
-        echo     ^> Servicio actualizado [OK]
+    REG DELETE "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v ActivityMonitorAgent /f >nul 2>&1
+    sc create ActivityMonitor binPath= "\"%AGENT_BIN%\"" start= delayed-auto displayName= "ActivityMonitor Enterprise Agent" >nul
+    if %errorLevel% equ 0 (
+        echo     ^> Servicio registrado correctamente [OK]
     ) else (
-        echo     [-] Error: No se pudo registrar el servicio.
-        pause
-        exit /b 1
+        sc query ActivityMonitor >nul 2>&1
+        if !errorLevel! equ 0 (
+            sc config ActivityMonitor binPath= "\"%AGENT_BIN%\"" start= delayed-auto >nul
+            echo     ^> Servicio actualizado [OK]
+        ) else (
+            echo     [-] Error: No se pudo registrar el servicio.
+            pause
+            exit /b 1
+        )
     )
 )
 
 echo [7/8] Configurando tarea de Sesion de Usuario...
-schtasks /Create /SC ONLOGON /TN "ActivityMonitorUserAgent" /TR "\"%AGENT_BIN%\"" /F >nul 2>&1
-if %errorLevel% equ 0 (
-    echo     ^> Tarea de inicio de sesion creada [OK]
-    schtasks /Run /TN "ActivityMonitorUserAgent" >nul 2>&1
-    echo     ^> Captura de actividad iniciada [OK]
+if "%MODE%"=="SERVICE" (
+    echo     ^> Saltando registro de tarea de usuario (Modo Solo Servicio) [SKIP]
+) else (
+    schtasks /Create /SC ONLOGON /TN "ActivityMonitorUserAgent" /TR "\"%AGENT_BIN%\"" /F >nul 2>&1
+    if %errorLevel% equ 0 (
+        echo     ^> Tarea de inicio de sesion creada [OK]
+        schtasks /Run /TN "ActivityMonitorUserAgent" >nul 2>&1
+        echo     ^> Captura de actividad iniciada [OK]
+    )
 )
 
 echo [8/8] Iniciando servicios...
-sc start ActivityMonitor >nul 2>&1
+if not "%MODE%"=="USER" (
+    sc start ActivityMonitor >nul 2>&1
+)
 echo     ^> Proceso finalizado [OK]
 
 echo.

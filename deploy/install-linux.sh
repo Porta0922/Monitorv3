@@ -45,20 +45,24 @@ show_menu() {
     echo "========================================"
     echo ""
     echo "Seleccione una opcion:"
-    echo "1. Instalar (o actualizar) el agente"
-    echo "2. Modificar credenciales (.env) y reiniciar"
-    echo "3. Actualizar binario (Mantiene configuracion)"
-    echo "4. Desinstalar"
-    echo "5. Salir"
+    echo "1. Instalacion COMPLETA (Servicio Systemd + Autostart Usuario)"
+    echo "2. Instalar solo SERVICIO (Systemd / Background)"
+    echo "3. Instalar solo AUTOSTART USUARIO (Activity tracking)"
+    echo "4. Modificar credenciales (.env) y reiniciar"
+    echo "5. Actualizar binario (Mantiene configuracion)"
+    echo "6. Desinstalar TODO"
+    echo "7. Salir"
     echo ""
     read -p "Opcion: " MENU_OPTION
 
     case $MENU_OPTION in
-        1) install_agent ;;
-        2) modify_creds ;;
-        3) update_only ;;
-        4) uninstall_agent ;;
-        5) exit 0 ;;
+        1) MODE="FULL"; install_agent ;;
+        2) MODE="SERVICE"; install_agent ;;
+        3) MODE="USER"; install_agent ;;
+        4) modify_creds ;;
+        5) update_only ;;
+        6) uninstall_agent ;;
+        7) exit 0 ;;
         *) show_menu ;;
     esac
 }
@@ -245,48 +249,67 @@ ENVEOF
     echo "    > Permisos configurados [OK]"
 
     echo ""
-    echo "[6/6] Configurando e iniciando servicio (systemd)..."
-    cat > /etc/systemd/system/$SERVICE_NAME.service << EOF
+    echo "[6/6] Configurando e iniciando servicio..."
+    
+    if [ "$MODE" != "USER" ]; then
+        echo "    [*] Configurando servicio systemd..."
+        cat > /etc/systemd/system/$SERVICE_NAME.service << EOF
 [Unit]
-Description=ActivityMonitor Enterprise Agent
-Documentation=https://github.com/yourrepo/ActivityMonitor-Enterprise-v3
+Description=ActivityMonitor Enterprise Agent (System Service)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=root
-# We must run as root to access /dev/input for keystroke capture natively.
 WorkingDirectory=$DATA_DIR
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=$SERVICE_NAME
-
-# Restart policy
-Restart=on-failure
-RestartSec=10s
-
-# Resource limits
-MemoryLimit=256M
-CPUQuota=50%
-
-# Start command
 EnvironmentFile=-$ENV_FILE
 ExecStart=$AGENT_PATH
+Restart=on-failure
+RestartSec=10s
+MemoryLimit=256M
+CPUQuota=50%
 
 [Install]
 WantedBy=multi-user.target
 EOF
+        systemctl daemon-reload
+        systemctl enable $SERVICE_NAME.service
+        systemctl start $SERVICE_NAME.service
+        echo "    ^> Servicio systemd configurado [OK]"
+    fi
 
-    systemctl daemon-reload
-    systemctl enable $SERVICE_NAME.service
-    systemctl start $SERVICE_NAME.service
+    if [ "$MODE" != "SERVICE" ]; then
+        echo "    [*] Configurando autostart de usuario..."
+        # We look for common user home directories if running as root
+        # This is a bit tricky for all users, but we can target the current non-root user if known
+        # Or just provide instructions.
+        USER_AUTOSTART_DIR="/home/$SUDO_USER/.config/autostart"
+        if [ -d "/home/$SUDO_USER" ]; then
+            mkdir -p "$USER_AUTOSTART_DIR"
+            cat > "$USER_AUTOSTART_DIR/activity-monitor.desktop" << EOF
+[Desktop Entry]
+Type=Application
+Name=ActivityMonitor Agent
+Exec=$AGENT_PATH
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Comment=Capture user activity and window titles
+EOF
+            chown -R $SUDO_USER:$SUDO_USER "/home/$SUDO_USER/.config"
+            echo "    ^> Autostart de usuario configurado para $SUDO_USER [OK]"
+        else
+            echo "    [!] No se pudo encontrar el directorio de autostart para $SUDO_USER"
+        fi
+    fi
 
-    if systemctl is-active --quiet $SERVICE_NAME.service; then
+    if [ "$MODE" != "USER" ] && systemctl is-active --quiet $SERVICE_NAME.service; then
         echo "[+] Servicio instalado y en ejecucion correctamente!"
+    elif [ "$MODE" == "USER" ]; then
+        echo "[+] Autostart configurado. Se iniciara en el proximo login o ejecutando: $AGENT_PATH"
     else
         echo "[-] Error al iniciar el servicio. Revisa los logs con: journalctl -u $SERVICE_NAME.service -n 20"
-        exit 1
     fi
 
     echo ""
