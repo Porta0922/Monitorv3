@@ -142,7 +142,10 @@ echo.
 echo [1/8] Preparando directorios...
 if not exist "%CONFIG_DIR%" mkdir "%CONFIG_DIR%"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
-echo     ^> Directorios listos en %CONFIG_DIR% [OK]
+if not exist "%BIN_DIR%" mkdir "%BIN_DIR%"
+if not exist "%DATA_DIR%" mkdir "%DATA_DIR%"
+icacls "%INSTALL_DIR%" /grant:r *S-1-5-32-545:(OI)(CI)M /T >nul 2>&1
+echo     ^> Directorios y permisos listos en %INSTALL_DIR% [OK]
 
 echo [2/8] Configurando archivo .env...
 if not exist "%ENV_FILE%" (
@@ -279,7 +282,7 @@ if not exist "C:\Program Files\osquery\osqueryi.exe" (
 
 echo [6/8] Registrando Servicio de Windows (Sesion 0)...
 if "%MODE%"=="USER" (
-    echo     ^> Saltando registro de servicio ^(Modo Solo Usuario^) [SKIP]
+    echo     ^> Saltando registro de servicio - Modo Solo Usuario [SKIP]
 ) else (
     REG DELETE "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v ActivityMonitorAgent /f >nul 2>&1
     sc create ActivityMonitor binPath= "\"%AGENT_BIN%\"" start= delayed-auto displayName= "ActivityMonitor Enterprise Agent" >nul
@@ -300,7 +303,7 @@ if "%MODE%"=="USER" (
 
 echo [7/8] Configurando tarea de Sesion de Usuario...
 if "%MODE%"=="SERVICE" (
-    echo     ^> Saltando registro de tarea de usuario ^(Modo Solo Servicio^) [SKIP]
+    echo     ^> Saltando registro de tarea de usuario - Modo Solo Servicio [SKIP]
 ) else (
     schtasks /Create /SC ONLOGON /TN "ActivityMonitorUserAgent" /TR "\"%AGENT_BIN%\"" /F >nul 2>&1
     if %errorLevel% equ 0 (

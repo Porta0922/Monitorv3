@@ -402,10 +402,19 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         .try_into()
         .unwrap_or([0u8; 32]);
     
+    let is_session_0 = is_running_in_session_0();
+    let db_name = if is_session_0 { "agent_service_cache.db" } else { "agent_user_cache.db" };
+    
+    let db_path = if cfg!(windows) {
+        std::path::PathBuf::from(r"C:\ProgramData\ActivityMonitor").join(db_name)
+    } else {
+        std::path::PathBuf::from("/var/lib/activity-monitor").join(db_name)
+    };
+
     let cache = Arc::new(
-        offline_cache::OfflineCache::new("agent_offline_cache.db", &encryption_key)
+        offline_cache::OfflineCache::new(db_path.to_str().unwrap_or(db_name), &encryption_key)
             .unwrap_or_else(|_| {
-                tracing::warn!("Failed to initialize offline cache, continuing without it");
+                tracing::warn!("Failed to initialize offline cache at {:?}, continuing with memory cache", db_path);
                 offline_cache::OfflineCache::new(":memory:", &encryption_key).unwrap()
             })
     );
