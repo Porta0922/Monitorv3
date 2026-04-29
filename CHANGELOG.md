@@ -7,6 +7,10 @@
 - **Doble Actividad**: Añadida protección de instancia única mediante Mutex de Windows para evitar que el agente se ejecute múltiples veces en la misma sesión.
 - **Inconsistencia de Datos**: Refinamiento de roles híbridos; el servicio (Sesión 0) ahora omite tareas de UI y el agente de usuario omite tareas de inventario/sistema.
 - **Rendimiento de Ventanas**: Optimizada la lógica de captura de aplicaciones abiertas para procesar hashes una sola vez por ejecutable único.
+- **Detección de USB**: Refinada la lógica de identificación de dispositivos usando `Win32_DiskDrive` y `USBSTOR` para mayor precisión.
+
+- **Detección de Copiado**: Mejorada la sensibilidad de captura comparando `CreationTime` y `LastWriteTime` para detectar archivos movidos o copiados recientemente.
+- **Powershell Silent Mode**: Implementado `CREATE_NO_WINDOW` para todas las llamadas a PowerShell relacionadas con USB, evitando parpadeos de consola.
 
 ## [3.2.0] - 2026-04-28
 
