@@ -1,5 +1,13 @@
 # Changelog - ActivityMonitor Enterprise v3
 
+## [3.2.1] - 2026-04-29
+
+### Corregido
+- **Optimización de CPU**: Implementada caché de firmas (hashes) de ejecutables para evitar re-escaneos redundantes de disco.
+- **Doble Actividad**: Añadida protección de instancia única mediante Mutex de Windows para evitar que el agente se ejecute múltiples veces en la misma sesión.
+- **Inconsistencia de Datos**: Refinamiento de roles híbridos; el servicio (Sesión 0) ahora omite tareas de UI y el agente de usuario omite tareas de inventario/sistema.
+- **Rendimiento de Ventanas**: Optimizada la lógica de captura de aplicaciones abiertas para procesar hashes una sola vez por ejecutable único.
+
 ## [3.2.0] - 2026-04-28
 
 ### Añadido

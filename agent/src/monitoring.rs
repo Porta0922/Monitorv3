@@ -3,6 +3,30 @@ use chrono::Utc;
 use sysinfo::{System, SystemExt, ProcessExt, PidExt, CpuExt};
 use sha2::{Sha256, Digest};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::sync::OnceLock;
+
+static EXE_HASH_CACHE: OnceLock<Arc<Mutex<HashMap<String, String>>>> = OnceLock::new();
+
+fn get_hash_cache() -> Arc<Mutex<HashMap<String, String>>> {
+    EXE_HASH_CACHE.get_or_init(|| Arc::new(Mutex::new(HashMap::new()))).clone()
+}
+
+pub fn calculate_file_hash_with_cache(file_path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let cache = get_hash_cache();
+    {
+        let guard = cache.lock().unwrap();
+        if let Some(hash) = guard.get(file_path) {
+            return Ok(hash.clone());
+        }
+    }
+    
+    let hash = calculate_file_hash(file_path)?;
+    
+    let mut guard = cache.lock().unwrap();
+    guard.insert(file_path.to_string(), hash.clone());
+    Ok(hash)
+}
 
 #[derive(Debug, Clone)]
 pub struct ProcessSnapshot {
@@ -64,7 +88,7 @@ impl MonitoringLoop {
                 p.to_string_lossy().to_string()
             };
             let exe_hash = if !exe_path.is_empty() {
-                calculate_file_hash(&exe_path).ok()
+                calculate_file_hash_with_cache(&exe_path).ok()
             } else {
                 None
             };
@@ -293,33 +317,42 @@ fn capture_open_apps_windows(sys: &mut System) -> Vec<OpenAppSnapshot> {
         return Vec::new();
     }
 
+    // 1. Group windows by process ID to avoid redundant sysinfo lookups
     sys.refresh_processes();
 
+    // 2. Map PIDs to their executable info (name, path, hash) to avoid redundant hashing
+    let mut pid_to_info: HashMap<u32, (String, Option<String>, Option<String>)> = HashMap::new();
+    
     let mut grouped: HashMap<String, OpenAppSnapshot> = HashMap::new();
     for window in windows {
-        let Some(process) = sys.process(sysinfo::Pid::from_u32(window.pid)) else {
-            continue;
-        };
+        let info = pid_to_info.entry(window.pid).or_insert_with(|| {
+            if let Some(process) = sys.process(sysinfo::Pid::from_u32(window.pid)) {
+                let exe_path = {
+                    let p = process.exe();
+                    let path = p.to_string_lossy().trim().to_string();
+                    if path.is_empty() { None } else { Some(path) }
+                };
+                let process_name = process.name().trim().to_string();
+                let app_name = display_app_name(&process_name, &exe_path);
+                let exe_hash = exe_path.as_deref().and_then(|path| calculate_file_hash_with_cache(path).ok());
+                (app_name, exe_path, exe_hash)
+            } else {
+                ("Unknown".to_string(), None, None)
+            }
+        });
 
-        let exe_path = {
-            let p = process.exe();
-            let path = p.to_string_lossy().trim().to_string();
-            if path.is_empty() { None } else { Some(path) }
-        };
-
-        let process_name = process.name().trim().to_string();
-        if process_name.is_empty() || should_skip_process_name(&process_name) {
+        let (app_name, exe_path, exe_hash) = info;
+        if app_name.is_empty() || should_skip_process_name(app_name) {
             continue;
         }
 
-        let app_name = display_app_name(&process_name, &exe_path);
         let group_key = exe_path.clone().unwrap_or_else(|| app_name.to_lowercase());
 
         let entry = grouped.entry(group_key).or_insert_with(|| OpenAppSnapshot {
-            app_name,
+            app_name: app_name.clone(),
             primary_title: window.title.clone(),
             window_count: 0,
-            exe_hash: exe_path.as_deref().and_then(|path| calculate_file_hash(path).ok()),
+            exe_hash: exe_hash.clone(),
             exe_path: exe_path.clone(),
         });
 
