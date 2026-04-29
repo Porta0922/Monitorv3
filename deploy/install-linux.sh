@@ -258,14 +258,15 @@ ENVEOF
     
     # Clean and build
     echo "    [*] Compilando agente (esto puede tardar unos minutos)..."
-    if cargo build --release --bin activity-monitor-agent; then
+    # Build from the workspace root (one level up from deploy)
+    if (cd .. && cargo build --release --bin activity-monitor-agent); then
         echo "    ✅ Compilacion exitosa."
     else
         echo "    ❌ ERROR: Fallo la compilacion. Revisa las dependencias."
         exit 1
     fi
 
-    cp target/release/activity-monitor-agent "$AGENT_PATH"
+    cp ../target/release/activity-monitor-agent "$AGENT_PATH"
     chmod +x "$AGENT_PATH"
 
     # Add the interactive user to necessary groups for activity and wifi tracking
