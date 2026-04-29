@@ -419,8 +419,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn std::error::Error>> {
-    tracing::info!("🚀 ActivityMonitor Agent v0.1.0 starting...");
+    tracing::info!("🚀 ActivityMonitor Agent v{} starting...", env!("CARGO_PKG_VERSION"));
     
+    let is_session_0 = is_running_in_session_0();
+    tracing::info!("Mode: {}", if is_session_0 { "Service (Session 0)" } else { "Interactive User" });
+
     // Load device identity (or create if new)
     let device_identity = load_or_create_device_identity()?;
     tracing::info!("📱 Device ID: {}", device_identity.device_id);
@@ -745,7 +748,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let envelope_metadata_clone = envelope_metadata.clone();
 
     tokio::spawn(async move {
-        let mut hb = interval(Duration::from_secs(15));
+        let mut hb = interval(Duration::from_secs(30));
         let mut last_idle_state: Option<bool> = None;
         let is_session_0 = is_running_in_session_0();
 
@@ -817,12 +820,20 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     
     tokio::spawn(async move {
         // Only run USB detection in Session 0 (Service) or if not on Windows
+<<<<<<< HEAD
         if cfg!(windows) && !is_running_in_session_0() {
+=======
+        if cfg!(windows) && !is_session_0 {
+>>>>>>> c5f4c68
             tracing::info!("Skipping USB detection task (handled by service)");
             return;
         }
 
+<<<<<<< HEAD
         let mut interval = interval(Duration::from_secs(30)); // Check every 30 seconds
+=======
+        let mut interval = interval(Duration::from_secs(60)); // Check every 60 seconds
+>>>>>>> c5f4c68
         loop {
             interval.tick().await;
             
@@ -955,12 +966,20 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
 
     tokio::spawn(async move {
         // Only run WiFi monitoring in Session 0 (Service) or if not on Windows
+<<<<<<< HEAD
         if cfg!(windows) && !is_running_in_session_0() {
+=======
+        if cfg!(windows) && !is_session_0 {
+>>>>>>> c5f4c68
             tracing::info!("Skipping WiFi monitoring task (handled by service)");
             return;
         }
 
+<<<<<<< HEAD
         let mut interval = interval(Duration::from_secs(60)); // Check every 60 seconds
+=======
+        let mut interval = interval(Duration::from_secs(120)); // Check every 120 seconds
+>>>>>>> c5f4c68
         loop {
             interval.tick().await;
 
@@ -1009,13 +1028,17 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let envelope_metadata_clone = envelope_metadata.clone();
     tokio::spawn(async move {
         // Open app snapshots require a user session
+<<<<<<< HEAD
         if is_running_in_session_0() {
+=======
+        if is_session_0 {
+>>>>>>> c5f4c68
             tracing::info!("Skipping open app snapshots task (requires user session)");
             return;
         }
 
         let mut monitor = MonitoringLoop::new();
-        let mut interval = interval(Duration::from_secs(20));
+        let mut interval = interval(Duration::from_secs(60)); // Slower for "silence"
         let mut last_fingerprint = String::new();
 
         loop {
@@ -1067,13 +1090,17 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let envelope_metadata_clone = envelope_metadata.clone();
     tokio::spawn(async move {
         // Only run inventory scan in Session 0 (Service) or if not on Windows
+<<<<<<< HEAD
         if cfg!(windows) && !is_running_in_session_0() {
+=======
+        if cfg!(windows) && !is_session_0 {
+>>>>>>> c5f4c68
             tracing::info!("Skipping software inventory task (handled by service)");
             return;
         }
 
         let mut known_inventory_fingerprints: HashSet<String> = HashSet::new();
-        let mut interval = interval(Duration::from_secs(60 * 60 * 24 * 7));
+        let mut interval = interval(Duration::from_secs(60 * 60 * 24 * 30)); // Every 30 days
 
         // Initial baseline snapshot when agent starts.
         let initial_apps = match inventory::InventoryScanner::scan_installed_software().await {
@@ -1190,7 +1217,11 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     
     tokio::spawn(async move {
         // Heatmaps require a user session
+<<<<<<< HEAD
         if is_running_in_session_0() {
+=======
+        if is_session_0 {
+>>>>>>> c5f4c68
             tracing::info!("Skipping heatmap task (requires user session)");
             return;
         }

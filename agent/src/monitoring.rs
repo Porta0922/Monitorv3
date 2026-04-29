@@ -1,16 +1,23 @@
-// Process and window monitoring module
 use chrono::Utc;
 use sysinfo::{System, SystemExt, ProcessExt, PidExt, CpuExt};
 use sha2::{Sha256, Digest};
 use std::collections::HashMap;
+<<<<<<< HEAD
 use std::sync::{Arc, Mutex};
 use std::sync::OnceLock;
 
+=======
+use std::sync::{Arc, Mutex, OnceLock};
+
+/// Global cache for executable hashes to avoid redundant I/O and CPU usage.
+/// Map of File Path -> SHA256 Hash
+>>>>>>> c5f4c68
 static EXE_HASH_CACHE: OnceLock<Arc<Mutex<HashMap<String, String>>>> = OnceLock::new();
 
 fn get_hash_cache() -> Arc<Mutex<HashMap<String, String>>> {
     EXE_HASH_CACHE.get_or_init(|| Arc::new(Mutex::new(HashMap::new()))).clone()
 }
+<<<<<<< HEAD
 
 pub fn calculate_file_hash_with_cache(file_path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let cache = get_hash_cache();
@@ -27,6 +34,8 @@ pub fn calculate_file_hash_with_cache(file_path: &str) -> Result<String, Box<dyn
     guard.insert(file_path.to_string(), hash.clone());
     Ok(hash)
 }
+=======
+>>>>>>> c5f4c68
 
 #[derive(Debug, Clone)]
 pub struct ProcessSnapshot {
@@ -79,7 +88,7 @@ impl MonitoringLoop {
 
     /// Capture all running processes
     pub fn capture_processes(&mut self) -> Vec<ProcessSnapshot> {
-        self.sys.refresh_all();
+        self.sys.refresh_processes();
         
         let mut processes = Vec::new();
         for (pid, process) in self.sys.processes() {
@@ -348,6 +357,7 @@ fn capture_open_apps_windows(sys: &mut System) -> Vec<OpenAppSnapshot> {
 
         let group_key = exe_path.clone().unwrap_or_else(|| app_name.to_lowercase());
 
+<<<<<<< HEAD
         let entry = grouped.entry(group_key).or_insert_with(|| OpenAppSnapshot {
             app_name: app_name.clone(),
             primary_title: window.title.clone(),
@@ -355,11 +365,24 @@ fn capture_open_apps_windows(sys: &mut System) -> Vec<OpenAppSnapshot> {
             exe_hash: exe_hash.clone(),
             exe_path: exe_path.clone(),
         });
+=======
+        let entry = grouped.entry(group_key.clone()).or_insert_with(|| {
+            let exe_hash = if let Some(ref path) = exe_path {
+                calculate_file_hash_with_cache(path).ok()
+            } else {
+                None
+            };
+>>>>>>> c5f4c68
 
+            OpenAppSnapshot {
+                app_name,
+                primary_title: window.title.clone(),
+                window_count: 0,
+                exe_path: exe_path.clone(),
+                exe_hash,
+            }
+        });
         entry.window_count += 1;
-        if entry.primary_title.len() < window.title.len() {
-            entry.primary_title = window.title;
-        }
     }
 
     let mut apps: Vec<OpenAppSnapshot> = grouped.into_values().collect();
@@ -371,24 +394,50 @@ fn capture_open_apps_windows(sys: &mut System) -> Vec<OpenAppSnapshot> {
     apps
 }
 
-/// Calculate SHA-256 hash of a file
-pub fn calculate_file_hash(file_path: &str) -> Result<String, Box<dyn std::error::Error>> {
-    use std::fs::File;
-    use std::io::Read;
+/// Calculate SHA256 hash of a file with global caching.
+pub fn calculate_file_hash_with_cache(path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let cache = get_hash_cache();
+    
+    // Check cache first
+    {
+        let guard = cache.lock().unwrap();
+        if let Some(hash) = guard.get(path) {
+            return Ok(hash.clone());
+        }
+    }
 
-    let mut file = File::open(file_path)?;
+    // Hash the file
+    let hash = calculate_file_hash(path)?;
+    
+    // Update cache
+    {
+        let mut guard = cache.lock().unwrap();
+        guard.insert(path.to_string(), hash.clone());
+    }
+    
+    Ok(hash)
+}
+
+/// Calculate SHA256 hash of a file.
+pub fn calculate_file_hash(path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    use std::io::{Read, BufReader};
+    use std::fs::File;
+
+    let file = File::open(path)?;
+    let mut reader = BufReader::new(file);
     let mut hasher = Sha256::new();
     let mut buffer = [0; 8192];
 
     loop {
-        let count = file.read(&mut buffer)?;
+        let count = reader.read(&mut buffer)?;
         if count == 0 {
             break;
         }
         hasher.update(&buffer[..count]);
     }
 
-    Ok(format!("{:x}", hasher.finalize()))
+    let result = hasher.finalize();
+    Ok(format!("{:x}", result))
 }
 
 // Windows implementation using winapi
