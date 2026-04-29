@@ -337,6 +337,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("ActivityMonitor Agent v{}", version);
     tracing::info!("Starting ActivityMonitor Agent v{}...", version);
 
+    let _instance_guard = {
+        #[cfg(windows)]
+        {
+            use winapi::um::synchapi::CreateMutexW;
+            use winapi::um::errhandlingapi::GetLastError;
+            use winapi::shared::winerror::ERROR_ALREADY_EXISTS;
+            use std::ffi::OsStr;
+            use std::os::windows::ffi::OsStrExt;
+
+            let session_id = unsafe {
+                let mut sid: u32 = 0;
+                if winapi::um::processthreadsapi::ProcessIdToSessionId(winapi::um::processthreadsapi::GetCurrentProcessId(), &mut sid) != 0 {
+                    sid
+                } else {
+                    0
+                }
+            };
+
+            let mutex_name = format!("Global\\ActivityMonitor_Agent_Session_{}", session_id);
+            let wide_name: Vec<u16> = OsStr::new(&mutex_name).encode_wide().chain(std::iter::once(0)).collect();
+            
+            unsafe {
+                let handle = CreateMutexW(std::ptr::null_mut(), 0, wide_name.as_ptr());
+                if handle.is_null() {
+                    tracing::error!("Failed to create single-instance mutex");
+                } else if GetLastError() == ERROR_ALREADY_EXISTS {
+                    tracing::warn!("Another instance of ActivityMonitor is already running in session {}. Exiting.", session_id);
+                    winapi::um::handleapi::CloseHandle(handle);
+                    std::process::exit(0);
+                }
+                handle
+            }
+        }
+        #[cfg(not(windows))]
+        { () }
+    };
+
     #[cfg(windows)]
     {
         // On Windows, try to start as a service dispatcher first.
@@ -382,8 +419,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn std::error::Error>> {
-    tracing::info!("🚀 ActivityMonitor Agent v0.1.0 starting...");
+    tracing::info!("🚀 ActivityMonitor Agent v{} starting...", env!("CARGO_PKG_VERSION"));
     
+    let is_session_0 = is_running_in_session_0();
+    tracing::info!("Mode: {}", if is_session_0 { "Service (Session 0)" } else { "Interactive User" });
+
     // Load device identity (or create if new)
     let device_identity = load_or_create_device_identity()?;
     tracing::info!("📱 Device ID: {}", device_identity.device_id);
@@ -708,7 +748,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let envelope_metadata_clone = envelope_metadata.clone();
 
     tokio::spawn(async move {
-        let mut hb = interval(Duration::from_secs(15));
+        let mut hb = interval(Duration::from_secs(30));
         let mut last_idle_state: Option<bool> = None;
         let is_session_0 = is_running_in_session_0();
 
@@ -776,7 +816,13 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let envelope_metadata_clone = envelope_metadata.clone();
     
     tokio::spawn(async move {
-        let mut interval = interval(Duration::from_secs(30)); // Check every 30 seconds
+        // Only run USB detection in Session 0 (Service) or if not on Windows
+        if cfg!(windows) && !is_session_0 {
+            tracing::info!("Skipping USB detection task (handled by service)");
+            return;
+        }
+
+        let mut interval = interval(Duration::from_secs(60)); // Check every 60 seconds
         loop {
             interval.tick().await;
             
@@ -908,7 +954,13 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let wifi_resend_flag_wifi = wifi_resend_flag.clone();
 
     tokio::spawn(async move {
-        let mut interval = interval(Duration::from_secs(60)); // Check every 60 seconds
+        // Only run WiFi monitoring in Session 0 (Service) or if not on Windows
+        if cfg!(windows) && !is_session_0 {
+            tracing::info!("Skipping WiFi monitoring task (handled by service)");
+            return;
+        }
+
+        let mut interval = interval(Duration::from_secs(120)); // Check every 120 seconds
         loop {
             interval.tick().await;
 
@@ -956,8 +1008,14 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let device_id_clone_for_running_apps = device_identity.device_id.to_string();
     let envelope_metadata_clone = envelope_metadata.clone();
     tokio::spawn(async move {
+        // Open app snapshots require a user session
+        if is_session_0 {
+            tracing::info!("Skipping open app snapshots task (requires user session)");
+            return;
+        }
+
         let mut monitor = MonitoringLoop::new();
-        let mut interval = interval(Duration::from_secs(20));
+        let mut interval = interval(Duration::from_secs(60)); // Slower for "silence"
         let mut last_fingerprint = String::new();
 
         loop {
@@ -1008,8 +1066,14 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let auth_token_clone = auth_token.clone();
     let envelope_metadata_clone = envelope_metadata.clone();
     tokio::spawn(async move {
+        // Only run inventory scan in Session 0 (Service) or if not on Windows
+        if cfg!(windows) && !is_session_0 {
+            tracing::info!("Skipping software inventory task (handled by service)");
+            return;
+        }
+
         let mut known_inventory_fingerprints: HashSet<String> = HashSet::new();
-        let mut interval = interval(Duration::from_secs(60 * 60 * 24 * 7));
+        let mut interval = interval(Duration::from_secs(60 * 60 * 24 * 30)); // Every 30 days
 
         // Initial baseline snapshot when agent starts.
         let initial_apps = match inventory::InventoryScanner::scan_installed_software().await {
@@ -1125,6 +1189,12 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let envelope_metadata_clone = envelope_metadata.clone();
     
     tokio::spawn(async move {
+        // Heatmaps require a user session
+        if is_session_0 {
+            tracing::info!("Skipping heatmap task (requires user session)");
+            return;
+        }
+
         let mut interval = interval(Duration::from_secs(3600));  // Every hour
         loop {
             interval.tick().await;
