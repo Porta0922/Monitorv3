@@ -748,7 +748,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let envelope_metadata_clone = envelope_metadata.clone();
 
     tokio::spawn(async move {
-        let mut hb = interval(Duration::from_secs(30));
+        let mut hb = interval(Duration::from_secs(60));
         let mut last_idle_state: Option<bool> = None;
         let is_session_0 = is_running_in_session_0();
 
@@ -873,7 +873,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let envelope_metadata_clone = envelope_metadata.clone();
     tokio::spawn(async move {
         let mut detector = usb_file_copy_detection::UsbFileCopyMonitor::new(900);
-        let mut interval = interval(Duration::from_secs(20));
+        let mut interval = interval(Duration::from_secs(60));
 
         loop {
             interval.tick().await;
@@ -1413,7 +1413,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     });
     
     tracing::info!("✅ Agent started successfully");
-    tracing::info!("📊 Monitoring: focus-activity (2s) | heartbeat (15s) | open apps (20s) | USB (30s) | USB-copy-detect (45s) | WiFi (60s) | inventory (12h) | input summary (60s) | osquery (configurable)");
+    tracing::info!("📊 Monitoring: focus-activity (2s) | heartbeat (60s) | open apps (60s) | USB (60s) | USB-copy-detect (60s) | WiFi (120s) | inventory (30d) | input summary (60s)");
     
     // Keep agent running until shutdown signal is received
     shutdown_rx.recv().await;

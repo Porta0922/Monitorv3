@@ -173,11 +173,7 @@ impl MonitoringLoop {
 
 impl ResourceMonitor {
     pub fn new() -> Self {
-        let mut sys = System::new_all();
-        sys.refresh_cpu();
-        sys.refresh_memory();
-        sys.refresh_processes();
-        Self { sys }
+        Self { sys: System::new() }
     }
 
     pub fn capture_snapshot(&mut self) -> NodeResourceSnapshot {
@@ -341,6 +337,8 @@ fn capture_open_apps_windows(sys: &mut System) -> Vec<OpenAppSnapshot> {
                 };
                 let process_name = process.name().trim().to_string();
                 let app_name = display_app_name(&process_name, &exe_path);
+                
+                // Calculate hash ONLY ONCE per unique process PID
                 let exe_hash = exe_path.as_deref().and_then(|path| calculate_file_hash_with_cache(path).ok());
                 (app_name, exe_path, exe_hash)
             } else {
@@ -355,19 +353,13 @@ fn capture_open_apps_windows(sys: &mut System) -> Vec<OpenAppSnapshot> {
 
         let group_key = exe_path.clone().unwrap_or_else(|| app_name.to_lowercase());
 
-        let entry = grouped.entry(group_key.clone()).or_insert_with(|| {
-            let exe_hash = if let Some(ref path) = exe_path {
-                calculate_file_hash_with_cache(path).ok()
-            } else {
-                None
-            };
-
+        let entry = grouped.entry(group_key).or_insert_with(|| {
             OpenAppSnapshot {
                 app_name: app_name.clone(),
                 primary_title: window.title.clone(),
                 window_count: 0,
                 exe_path: exe_path.clone(),
-                exe_hash,
+                exe_hash: exe_hash.clone(), // Reuse already calculated hash
             }
         });
         entry.window_count += 1;
