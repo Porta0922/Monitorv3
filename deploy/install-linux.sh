@@ -21,12 +21,76 @@ AGENT_AUTH_TOKEN="change-me-in-production"
 AGENT_SERVER_URL="http://10.30.0.123:3000"
 RABBITMQ_URL="amqp://eclub:eCLUB123@10.30.0.123:5672/%2f"
 AGENT_OFFLINE_CACHE_KEY="replace-with-32-byte-cache-key!!"
+FIREWALL_AUTO_FIX=1
+CONNECTED_TO_SERVER=0
 
 # Check for root privileges
 if [[ $EUID -ne 0 ]]; then
    echo "[-] This script must be run as root. (Use: sudo ./install-linux.sh)"
    exit 1
 fi
+
+check_connectivity() {
+    echo ""
+    echo "=== Verificando Conectividad ==="
+    
+    # Extract host and port from AGENT_SERVER_URL
+    SERVER_HOST=$(echo $AGENT_SERVER_URL | sed -e 's|^[^/]*//||' -e 's|[:/]..*||')
+    SERVER_PORT=$(echo $AGENT_SERVER_URL | sed -e 's|^.*:||' -e 's|/.*||')
+    [[ "$SERVER_PORT" == "$SERVER_HOST" ]] && SERVER_PORT=80
+
+    # Extract host and port from RABBITMQ_URL
+    RABBIT_HOST=$(echo $RABBITMQ_URL | sed -e 's|^.*@||' -e 's|[:/]..*||')
+    RABBIT_PORT=$(echo $RABBITMQ_URL | sed -e 's|^.*:||' -e 's|/.*||')
+
+    echo "[*] Probando conexion a la API ($SERVER_HOST:$SERVER_PORT)..."
+    if timeout 2 bash -c "</dev/tcp/$SERVER_HOST/$SERVER_PORT" 2>/dev/null; then
+        echo "    ✅ API alcanzable."
+        CONNECTED_TO_SERVER=1
+    else
+        echo "    ❌ ERROR: No se puede conectar a la API en $SERVER_HOST:$SERVER_PORT"
+        echo "       Pista: Revisa si el servidor esta encendido y si el puerto 3000 esta abierto."
+    fi
+
+    echo "[*] Probando conexion a RabbitMQ ($RABBIT_HOST:$RABBIT_PORT)..."
+    if timeout 2 bash -c "</dev/tcp/$RABBIT_HOST/$RABBIT_PORT" 2>/dev/null; then
+        echo "    ✅ RabbitMQ alcanzable."
+    else
+        echo "    ❌ ERROR: No se puede conectar a RabbitMQ en $RABBIT_HOST:$RABBIT_PORT"
+        echo "       Pista: El puerto 5672 debe estar abierto en el servidor."
+    fi
+
+    if [ $CONNECTED_TO_SERVER -eq 0 ]; then
+        echo ""
+        read -p "[?] Desea continuar con la instalacion de todos modos? (y/n): " CONTINUE_INSTALL
+        if [[ ! $CONTINUE_INSTALL =~ ^[Yy]$ ]]; then
+            echo "[-] Instalacion cancelada por el usuario."
+            exit 1
+        fi
+    fi
+}
+
+configure_firewall() {
+    if command -v ufw > /dev/null; then
+        if ufw status | grep -q "Status: active"; then
+            echo "[*] Detectado firewall UFW activo. Configurando reglas..."
+            
+            SERVER_HOST=$(echo $AGENT_SERVER_URL | sed -e 's|^[^/]*//||' -e 's|[:/]..*||')
+            SERVER_PORT=$(echo $AGENT_SERVER_URL | sed -e 's|^.*:||' -e 's|/.*||')
+            [[ "$SERVER_PORT" == "$SERVER_HOST" ]] && SERVER_PORT=80
+            
+            RABBIT_PORT=$(echo $RABBITMQ_URL | sed -e 's|^.*:||' -e 's|/.*||')
+
+            echo "    > Permitiendo salida al puerto $SERVER_PORT (API)..."
+            ufw allow out to any port $SERVER_PORT proto tcp comment 'ActivityMonitor API'
+            
+            echo "    > Permitiendo salida al puerto $RABBIT_PORT (RabbitMQ)..."
+            ufw allow out to any port $RABBIT_PORT proto tcp comment 'ActivityMonitor RabbitMQ'
+            
+            echo "    ✅ Reglas de firewall aplicadas."
+        fi
+    fi
+}
 
 # Load existing environment variables if present
 if [ -f "$ENV_FILE" ]; then
@@ -157,7 +221,8 @@ install_agent() {
             DEVICE_NICKNAME=$(hostname)
         fi
     fi
-    
+
+    check_connectivity
     execute_steps
 }
 
@@ -290,6 +355,8 @@ ENVEOF
     echo ""
     echo "[6/6] Configurando e iniciando servicio..."
     
+    configure_firewall
+    
     if [ "$MODE" != "USER" ]; then
         echo "    [*] Configurando servicio systemd..."
         cat > /etc/systemd/system/$SERVICE_NAME.service << EOF
@@ -303,6 +370,7 @@ Type=simple
 User=root
 WorkingDirectory=$DATA_DIR
 EnvironmentFile=-$ENV_FILE
+ExecStartPre=/bin/sleep 5
 ExecStart=$AGENT_PATH
 Restart=on-failure
 RestartSec=10s
