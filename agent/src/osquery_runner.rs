@@ -135,7 +135,7 @@ static QUERIES: &[QueryDef] = &[
         pack: "custom_process_chain",
         mitre_technique: Some("T1059.003"),
         severity: "MEDIUM",
-        interval_seconds: 1200,
+        interval_seconds: 3600, // Reduced frequency (1 hour)
         max_rows: 80,
         sql: "SELECT p.pid, p.name, p.cmdline, p.path, pp.name AS parent_name \
               FROM processes p \
@@ -144,23 +144,11 @@ static QUERIES: &[QueryDef] = &[
                 AND pp.name NOT IN ('explorer.exe', 'svchost.exe', 'cmd.exe', 'pwsh.exe', 'WindowsTerminal.exe');",
     },
     QueryDef {
-        name: "unsigned_system_path_processes",
-        pack: "custom_masquerading",
-        mitre_technique: Some("T1036"),
-        severity: "MEDIUM",
-        interval_seconds: 1800,
-        max_rows: 120,
-        sql: "SELECT p.pid, p.name, p.path, a.result \
-              FROM processes p \
-              JOIN authenticode a ON p.path = a.path \
-              WHERE a.result != 'trusted' AND p.path LIKE 'C:\\Windows\\%';",
-    },
-    QueryDef {
         name: "startup_items_persistence",
         pack: "custom_persistence",
         mitre_technique: Some("T1547.009"),
         severity: "LOW",
-        interval_seconds: 1800,
+        interval_seconds: 7200, // Reduced frequency (2 hours)
         max_rows: 200,
         sql: "SELECT name, path, args, type, source, status, username \
               FROM startup_items;",

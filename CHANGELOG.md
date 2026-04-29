@@ -8,6 +8,7 @@
     - Implementada verificación de "Delta de Espacio Libre" en USB; el escaneo recursivo solo se activa si el espacio libre en la unidad ha cambiado.
     - Eliminado el doble cálculo de hash de ejecutables en la captura de aplicaciones abiertas.
     - Sincronizados y espaciados los intervalos de tareas en segundo plano (Heartbeat y USB ahora cada 60s).
+    - **Seguridad (osquery)**: El escaneo de seguridad ahora se ejecuta **únicamente cuando el usuario está en idle**. Se eliminó la consulta de validación de firmas digitales (`authenticode`) que causaba picos del 40% de CPU.
 - **Doble Actividad**: Añadida protección de instancia única mediante Mutex de Windows para evitar que el agente se ejecute múltiples veces en la misma sesión.
 - **Inconsistencia de Datos**: Refinamiento de roles híbridos; el servicio (Sesión 0) ahora omite tareas de UI y el agente de usuario omite tareas de inventario/sistema.
 - **Rendimiento de Ventanas**: Optimizada la lógica de captura de aplicaciones abiertas para procesar hashes una sola vez por ejecutable único.

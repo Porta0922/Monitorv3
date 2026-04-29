@@ -1340,31 +1340,38 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         let mac_clone = mac_address.clone();
         let auth_token_clone = auth_token.clone();
         let envelope_metadata_clone = envelope_metadata.clone();
+        let keystroke_tracker_clone = keystroke_tracker.clone();
         tokio::spawn(async move {
             let mut runner = osquery_runner::OsqueryRunner::new();
-            let mut scan_interval = interval(Duration::from_secs(osquery_scheduler_seconds.max(30)));
+            let mut scan_interval = interval(Duration::from_secs(osquery_scheduler_seconds.max(60)));
             loop {
                 scan_interval.tick().await;
-                let findings = runner.scan_due().await;
-                for finding in findings {
-                    let security_payload = build_event_envelope(
-                        "security",
-                        1,
-                        &device_id_clone,
-                        &hostname_clone,
-                        &mac_clone,
-                        &auth_token_clone,
-                        envelope_metadata_clone.as_ref(),
-                        serde_json::json!({
-                            "query_name":        finding.query_name,
-                            "query_pack":        finding.query_pack,
-                            "mitre_technique":   finding.mitre_technique,
-                            "severity":          finding.severity,
-                            "raw_data":          finding.raw_data,
-                            "event_fingerprint": finding.event_fingerprint,
-                        }),
-                    );
-                    publish_or_cache(&publisher_clone, &cache_clone, "security", security_payload).await;
+
+                // Only run osquery scans if the user is idle to avoid CPU spikes during work
+                if keystroke_tracker_clone.is_idle().await {
+                    let findings = runner.scan_due().await;
+                    for finding in findings {
+                        let security_payload = build_event_envelope(
+                            "security",
+                            1,
+                            &device_id_clone,
+                            &hostname_clone,
+                            &mac_clone,
+                            &auth_token_clone,
+                            envelope_metadata_clone.as_ref(),
+                            serde_json::json!({
+                                "query_name":        finding.query_name,
+                                "query_pack":        finding.query_pack,
+                                "mitre_technique":   finding.mitre_technique,
+                                "severity":          finding.severity,
+                                "raw_data":          finding.raw_data,
+                                "event_fingerprint": finding.event_fingerprint,
+                            }),
+                        );
+                        publish_or_cache(&publisher_clone, &cache_clone, "security", security_payload).await;
+                    }
+                } else {
+                    tracing::debug!("User is active, skipping osquery security scan for this cycle.");
                 }
             }
         });
