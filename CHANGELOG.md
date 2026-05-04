@@ -1,5 +1,13 @@
 # Changelog - ActivityMonitor Enterprise v3
 
+## [3.2.2] - 2026-05-04
+
+### Corregido
+- **Reporte de Actividad Excesivo**: 
+    - Migrado el cálculo de duraciones a relojes monotónicos (`Instant`), eliminando discrepancias causadas por ajustes del reloj del sistema (NTP/Sincronización).
+    - Refactorizado el bucle de monitoreo para asegurar segmentos de tiempo estrictamente no solapados entre cambios de ventana y heartbeats periódicos.
+    - Corregido el reporte de "Segundos Activos" en el resumen de entrada para reflejar el tiempo real transcurrido mediante medición de intervalos exactos.
+
 ## [3.2.1] - 2026-04-29
 
 ### Corregido

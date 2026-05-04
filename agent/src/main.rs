@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::collections::HashSet;
 use tokio::sync::{RwLock, mpsc};
-use tokio::time::{sleep, Duration, interval};
+use tokio::time::{sleep, Duration, interval, Instant};
 use device_id::{load_or_create_device_identity, get_device_nickname};
 use monitoring::{MonitoringLoop, ResourceMonitor};
 
@@ -625,8 +625,8 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(2));
-        let mut last_window: Option<(String, String, DateTime<Utc>)> = None;
-        let mut last_heartbeat_sent: Option<DateTime<Utc>> = None;
+        let mut last_window: Option<(String, String, Instant)> = None;
+        let mut last_report_instant: Option<Instant> = None;
 
         loop {
             interval.tick().await;
@@ -644,10 +644,11 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
             if stats.is_idle {
                 // If user is idle, we "pause" activity reporting.
                 // We also clear last_window so that when they return, it starts a new session.
-                if let Some((last_app, last_title, started_at)) = last_window.take() {
-                    let now = Utc::now();
-                    let duration_reference = last_heartbeat_sent.unwrap_or(started_at);
-                    let duration_seconds = (now - duration_reference).num_seconds().max(1);
+                if let Some((last_app, last_title, _started_at)) = last_window.take() {
+                    let now_utc = Utc::now();
+                    let now_instant = Instant::now();
+                    let duration_reference = last_report_instant.unwrap_or(now_instant);
+                    let duration_seconds = now_instant.duration_since(duration_reference).as_secs();
                     
                     let activity_payload = build_event_envelope(
                         "activity",
@@ -661,25 +662,26 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                             "app_name": last_app,
                             "window_title": last_title,
                             "duration_seconds": duration_seconds,
-                            "timestamp": now.to_rfc3339(),
+                            "timestamp": now_utc.to_rfc3339(),
                         }),
                     );
                     publish_or_cache(&publisher_clone, &cache_clone, "activity", activity_payload).await;
                 }
-                last_heartbeat_sent = None;
+                last_report_instant = None;
                 continue;
             }
             
             if let Some(current) = monitoring.capture_active_window() {
                 let (current_app, current_title) = sanitize_activity_fields(&current.app_name, &current.window_title);
 
-                if let Some((last_app, last_title, started_at)) = &last_window {
+                if let Some((last_app, last_title, _started_at)) = &last_window {
                     let changed = *last_app != current_app || *last_title != current_title;
                     
                     if changed {
                         // Window changed: send activity event for previous window
-                        let duration_reference = last_heartbeat_sent.unwrap_or(*started_at);
-                        let duration_seconds = (current.timestamp - duration_reference).num_seconds().max(1);
+                        let now_instant = Instant::now();
+                        let duration_reference = last_report_instant.unwrap_or(now_instant);
+                        let duration_seconds = now_instant.duration_since(duration_reference).as_secs();
                         let activity_payload = build_event_envelope(
                             "activity",
                             1,
@@ -697,17 +699,19 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                         );
 
                         publish_or_cache(&publisher_clone, &cache_clone, "activity", activity_payload).await;
-                        last_window = Some((current_app.clone(), current_title.clone(), current.timestamp));
-                        last_heartbeat_sent = Some(current.timestamp);
+                        let now_instant = Instant::now();
+                        last_window = Some((current_app.clone(), current_title.clone(), now_instant));
+                        last_report_instant = Some(now_instant);
                     } else {
                         // Window unchanged: send activity heartbeat every 30 seconds to show continuation
-                        let now = current.timestamp;
-                        let should_send_heartbeat = last_heartbeat_sent.is_none() || 
-                            (now - last_heartbeat_sent.unwrap()).num_seconds() >= 30;
+                        let now_utc = Utc::now();
+                        let now_instant = Instant::now();
+                        let should_send_heartbeat = last_report_instant.is_none() || 
+                            now_instant.duration_since(last_report_instant.unwrap()).as_secs() >= 30;
                         
                         if should_send_heartbeat {
-                            let duration_reference = last_heartbeat_sent.unwrap_or(*started_at);
-                            let duration_seconds = (now - duration_reference).num_seconds().max(1);
+                            let duration_reference = last_report_instant.unwrap_or(now_instant);
+                            let duration_seconds = now_instant.duration_since(duration_reference).as_secs();
                             let activity_payload = build_event_envelope(
                                 "activity",
                                 1,
@@ -720,18 +724,19 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                                     "app_name": last_app,
                                     "window_title": last_title,
                                     "duration_seconds": duration_seconds,
-                                    "timestamp": now.to_rfc3339(),
+                                    "timestamp": now_utc.to_rfc3339(),
                                 }),
                             );
 
                             publish_or_cache(&publisher_clone, &cache_clone, "activity", activity_payload).await;
-                            last_heartbeat_sent = Some(now);
+                            last_report_instant = Some(now_instant);
                         }
                     }
                 } else {
                     // First window captured
-                    last_window = Some((current_app, current_title, current.timestamp));
-                    last_heartbeat_sent = Some(current.timestamp);
+                    let now_instant = Instant::now();
+                    last_window = Some((current_app, current_title, now_instant));
+                    last_report_instant = Some(now_instant);
                 }
             }
         }
@@ -1279,6 +1284,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     tokio::spawn(async move {
         let mut resource_monitor = ResourceMonitor::new();
         let mut interval = interval(Duration::from_secs(60));
+        let mut last_summary_instant = Instant::now();
         let is_session_0 = is_running_in_session_0();
 
         loop {
@@ -1287,13 +1293,17 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
             let key_stats = keystroke_tracker_clone.get_stats().await;
             let resources = resource_monitor.capture_snapshot();
             
+            let now_instant = Instant::now();
+            let elapsed_secs = now_instant.duration_since(last_summary_instant).as_secs();
+            last_summary_instant = now_instant;
+
             let (status, idle_secs, active_secs) = if is_session_0 {
                 ("service", 0, 0)
             } else {
                 (
                     if key_stats.is_idle { "idle" } else { "active" },
-                    if key_stats.is_idle { 60 } else { 0 },
-                    if key_stats.is_idle { 0 } else { 60 }
+                    if key_stats.is_idle { elapsed_secs as i64 } else { 0 },
+                    if key_stats.is_idle { 0 } else { elapsed_secs as i64 }
                 )
             };
 
