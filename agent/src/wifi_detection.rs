@@ -197,7 +197,72 @@ fn current_wifi_snapshot() -> Result<Option<WifiSnapshot>, Box<dyn std::error::E
     Ok(None)
 }
 
-#[cfg(all(not(target_os = "windows"), not(target_os = "linux")))]
+#[cfg(target_os = "macos")]
+fn current_wifi_snapshot() -> Result<Option<WifiSnapshot>, Box<dyn std::error::Error + Send + Sync>> {
+    let output = match Command::new("/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport")
+        .arg("-I")
+        .output() {
+            Ok(out) => out,
+            Err(e) => {
+                tracing::warn!("Failed to execute airport command: {}", e);
+                return Ok(None);
+            }
+        };
+
+    if !output.status.success() {
+        tracing::warn!("airport command exited with error: {:?}", output.status);
+        return Ok(None);
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut ssid: Option<String> = None;
+    let mut bssid: Option<String> = None;
+    let mut signal_percent: Option<i32> = None;
+    let mut state = "disconnected".to_string();
+
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some((key, value)) = line.split_once(':') {
+            let key = key.trim();
+            let value = value.trim();
+
+            match key {
+                "SSID" => ssid = Some(value.to_string()),
+                "BSSID" => bssid = Some(value.to_string()),
+                "state" => {
+                    if value == "running" {
+                        state = "connected".to_string();
+                    }
+                }
+                "agrCtlRSSI" => {
+                    // RSSI is negative, usually -30 (good) to -90 (bad)
+                    // Let's approximate a percentage
+                    if let Ok(rssi) = value.parse::<f32>() {
+                        let quality = 2.0 * (rssi + 100.0);
+                        signal_percent = Some(quality.clamp(0.0, 100.0) as i32);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if state == "connected" && ssid.is_some() {
+        tracing::info!("✅ Connected to WiFi: SSID={:?}", ssid);
+        Ok(Some(WifiSnapshot {
+            interface_name: "en0".to_string(), // Default on macOS
+            state,
+            ssid,
+            bssid,
+            signal_percent,
+        }))
+    } else {
+        tracing::info!("ℹ️ No active WiFi connection detected by airport");
+        Ok(None)
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
 fn current_wifi_snapshot() -> Result<Option<WifiSnapshot>, Box<dyn std::error::Error + Send + Sync>> {
     Ok(None)
 }

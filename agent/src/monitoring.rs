@@ -119,7 +119,12 @@ impl MonitoringLoop {
             return capture_open_apps_windows(&mut self.sys);
         }
 
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "macos")]
+        {
+            return capture_open_apps_macos(&mut self.sys);
+        }
+
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
         {
             self.capture_processes()
                 .into_iter()
@@ -471,12 +476,100 @@ fn capture_active_window_linux() -> Option<WindowCapture> {
     None
 }
 
-// macOS implementation (requires Cocoa framework)
+// macOS implementation (requires Cocoa framework or osascript)
 #[cfg(target_os = "macos")]
 fn capture_active_window_macos() -> Option<WindowCapture> {
-    // macOS implementation would use Cocoa framework
-    // For now, return None as this requires additional dependencies
-    None
+    use std::process::Command;
+    
+    // Get active app name
+    let app_output = Command::new("osascript")
+        .arg("-e")
+        .arg("tell application \"System Events\" to get name of first application process whose frontmost is true")
+        .output()
+        .ok()?;
+        
+    let app_name = String::from_utf8_lossy(&app_output.stdout).trim().to_string();
+    if app_name.is_empty() {
+        return None;
+    }
+    
+    // Get window title
+    let script = format!(
+        "tell application \"System Events\" to tell process \"{}\" to get name of front window",
+        app_name
+    );
+    let title_output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .ok()?;
+        
+    let window_title = String::from_utf8_lossy(&title_output.stdout).trim().to_string();
+    let window_title = if window_title.starts_with("execution error") || window_title.is_empty() {
+        "Unknown".to_string()
+    } else {
+        window_title
+    };
+    
+    Some(WindowCapture {
+        app_name,
+        window_title,
+        timestamp: chrono::Utc::now(),
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn capture_open_apps_macos(sys: &mut System) -> Vec<OpenAppSnapshot> {
+    use std::process::Command;
+    
+    sys.refresh_processes();
+
+    let output = match Command::new("osascript")
+        .arg("-e")
+        .arg("tell application \"System Events\" to get name of every application process whose background only is false")
+        .output() {
+            Ok(out) => out,
+            Err(_) => return Vec::new(),
+        };
+
+    if !output.status.success() {
+        return Vec::new();
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let apps_names: Vec<&str> = text.split(", ").map(|s| s.trim()).collect();
+    
+    let mut apps = Vec::new();
+    
+    for app_name in apps_names {
+        if app_name.is_empty() {
+            continue;
+        }
+        
+        let mut exe_path = None;
+        let mut exe_hash = None;
+        
+        for (_pid, process) in sys.processes() {
+            if process.name().to_lowercase().contains(&app_name.to_lowercase()) {
+                let path = process.exe().to_string_lossy().to_string();
+                if !path.is_empty() {
+                    exe_path = Some(path.clone());
+                    exe_hash = calculate_file_hash_with_cache(&path).ok();
+                    break;
+                }
+            }
+        }
+        
+        apps.push(OpenAppSnapshot {
+            app_name: app_name.to_string(),
+            primary_title: "".to_string(),
+            window_count: 1,
+            exe_path,
+            exe_hash,
+        });
+    }
+    
+    apps
 }
 
 #[cfg(test)]

@@ -344,10 +344,31 @@ pub mod linux_input_listener {
 pub mod macos_input_listener {
     use super::*;
     use std::sync::Arc;
+    use rdev::{listen, EventType};
 
-    /// Initialize macOS input listener (placeholder)
-    pub async fn init_input_listener(_tracker: Arc<KeystrokeTracker>) -> Result<(), Box<dyn std::error::Error>> {
-        tracing::warn!("macOS input listener not yet implemented. Keystroke tracking disabled.");
+    pub async fn init_input_listener(tracker: Arc<KeystrokeTracker>) -> Result<(), Box<dyn std::error::Error>> {
+        tracing::info!("Initializing macOS input listener (rdev)...");
+        
+        std::thread::spawn(move || {
+            tracing::info!("Starting rdev listener thread on macOS...");
+            if let Err(error) = listen(move |event| {
+                match event.event_type {
+                    EventType::KeyPress(_) => {
+                        tracker.record_keystroke_sync();
+                    }
+                    EventType::MouseMove { .. } => {
+                        tracker.record_mouse_movement_sync();
+                    }
+                    EventType::ButtonPress(_) => {
+                        tracker.record_mouse_click_sync();
+                    }
+                    _ => {}
+                }
+            }) {
+                tracing::error!("FATAL: Error in macOS input listener: {:?}", error);
+            }
+        });
+        
         Ok(())
     }
 }
