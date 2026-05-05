@@ -1,0 +1,39 @@
+# GUÍA DE INSTALACIÓN - ACTIVITY MONITOR (LINUX DESDE USB)
+
+Esta guía detalla los pasos para instalar el Agente de ActivityMonitor. Debido a que el agente se compila específicamente para la arquitectura del equipo destino, el proceso incluye una fase de compilación local.
+
+## 1. Estructura del USB
+Asegúrese de tener esta carpeta en su USB:
+- `Instalacion_ActivityMonitor/`
+  - `deploy/install-linux.sh` (Script de instalación)
+  - `agent/` (Código fuente necesario para compilar)
+  - `.env.example` (Configuración base)
+
+## 2. Requisitos Previos
+- Conexión a Internet (para descargar dependencias de Rust si no están presentes).
+- El script instalará automáticamente: `libssl-dev`, `pkg-config`, `build-essential`, `libxtst-dev`, `libx11-dev`.
+
+## 3. Pasos para la Instalación
+
+1. **Copiar al equipo:** Copie la carpeta `Instalacion_ActivityMonitor` completa desde el USB a su Escritorio o carpeta personal.
+2. **Abrir Terminal:** Navegue hasta la carpeta `deploy` dentro de la carpeta copiada.
+3. **Dar permisos:**
+   ```bash
+   chmod +x install-linux.sh
+   ```
+4. **Ejecutar como ROOT:**
+   ```bash
+   sudo ./install-linux.sh
+   ```
+5. **Configuración:**
+   - Seleccione **Opción 1** (Instalación COMPLETA).
+   - El script detectará si tiene Rust instalado. Si no, lo instalará por usted.
+   - **Compilación:** El script compilará el agente automáticamente desde la carpeta `agent/`. Esto puede tardar unos minutos.
+
+## 4. Post-Instalación
+
+> [!IMPORTANT]
+> Al finalizar, es **OBLIGATORIO REINICIAR LA SESIÓN** del usuario para que los permisos de captura de teclado y WiFi (grupos `input` y `netdev`) se activen.
+
+---
+*ActivityMonitor Enterprise v3 - 2026*

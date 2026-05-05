@@ -1,8 +1,8 @@
 [package]
 name = "activity-monitor-agent"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
+version = "3.2.1"
+edition = "2021"
+authors = ["ActivityMonitor Team"]
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
