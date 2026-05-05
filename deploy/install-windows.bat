@@ -16,7 +16,16 @@ if %errorLevel% neq 0 (
 REM Configuration
 set AGENT_NAME=ActivityMonitorAgent
 set AGENT_VERSION=0.1.0
-set AGENT_PATH=%~dp0\..\target\release\activity-monitor-agent.exe
+if exist "%~dp0activity-monitor-agent.exe" (
+    set AGENT_PATH=%~dp0activity-monitor-agent.exe
+    set SRC_PATH=%~dp0agent
+) else if exist "%~dp0agent\Cargo.toml" (
+    set AGENT_PATH=%~dp0activity-monitor-agent.exe
+    set SRC_PATH=%~dp0agent
+) else (
+    set AGENT_PATH=%~dp0\..\target\release\activity-monitor-agent.exe
+    set SRC_PATH=%~dp0\..
+)
 set CONFIG_DIR=%PROGRAMDATA%\ActivityMonitor
 set INSTALL_DIR=%PROGRAMDATA%\ActivityMonitor
 set BIN_DIR=%PROGRAMDATA%\ActivityMonitor\Bin
@@ -218,8 +227,13 @@ echo [+] Rust instalado y configurado correctamente.
 :CARGO_BUILD
 echo.
 echo [Paso 2/5] Compilando la ultima version del agente con cargo...
-pushd "%~dp0\.."
-cargo build --release -p activity-monitor-agent
+if not exist "%SRC_PATH%\Cargo.toml" (
+    echo [-] No se encontro el codigo fuente en %SRC_PATH% para compilar.
+    pause
+    exit /b 1
+)
+pushd "%SRC_PATH%"
+cargo build --release
 if %errorLevel% neq 0 (
     popd
     echo [-] Failed to build release agent binary.
@@ -227,6 +241,9 @@ if %errorLevel% neq 0 (
     exit /b 1
 )
 popd
+if "%AGENT_PATH%"=="%~dp0activity-monitor-agent.exe" (
+    copy /Y "%SRC_PATH%\target\release\activity-monitor-agent.exe" "%AGENT_PATH%" >nul
+)
 goto VERIFY_BINARY
 
 :CHECK_PREBUILT
