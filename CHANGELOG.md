@@ -1,5 +1,21 @@
 # Changelog - ActivityMonitor Enterprise v3
 
+## [3.2.4] - 2026-05-05
+### Añadido
+- **Mejoras en el Despliegue USB**:
+    - Creada una guía de instalación de Linux paso a paso completa (`Guia_Instalacion_Linux.txt`) en español.
+    - Organizada la estructura del USB con rutas relativas optimizadas para asegurar que los instaladores funcionen en diferentes entornos.
+- **Instalador de Linux Mejorado**:
+    - Refactorizado `install-linux.sh` para manejar correctamente la compilación independiente desde el USB.
+    - Añadida detección e instalación automática de Rust y dependencias del sistema en Linux.
+    - Asegurado que los scripts de instalación de Linux usen terminaciones de línea Unix (LF) para eliminar el requisito de `dos2unix`.
+- **Soporte de Agente Independiente**:
+    - Desvinculado `agent/Cargo.toml` del workspace raíz para permitir la compilación en máquinas sin el código fuente completo del repositorio.
+
+### Corregido
+- **Error de Compilación en Linux**: Resuelto el error "failed to find workspace root" durante la compilación del agente en Linux.
+- **Limpieza de USB**: Eliminados archivos innecesarios del proyecto (código del servidor, cachés locales, artefactos de compilación redundantes) del USB de despliegue para reducir el tamaño y la confusión.
+
 ## [3.2.3] - 2026-05-04
 ### Fixed
 - Resolved activity over-reporting issue (e.g., Chrome usage exceeding real time).
