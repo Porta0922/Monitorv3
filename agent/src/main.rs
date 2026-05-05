@@ -342,7 +342,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         {
             use winapi::um::synchapi::CreateMutexW;
             use winapi::um::errhandlingapi::GetLastError;
-            use winapi::shared::winerror::ERROR_ALREADY_EXISTS;
+            use winapi::shared::winerror::{ERROR_ALREADY_EXISTS, ERROR_ACCESS_DENIED};
             use std::ffi::OsStr;
             use std::os::windows::ffi::OsStrExt;
 
@@ -355,13 +355,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
 
-            let mutex_name = format!("Global\\ActivityMonitor_Agent_Session_{}", session_id);
+            // Use a session-local mutex name (no 'Global\' prefix) to allow non-admin users
+            // to acquire it within their own session namespace.
+            let mutex_name = format!("ActivityMonitor_Agent_Session_{}", session_id);
             let wide_name: Vec<u16> = OsStr::new(&mutex_name).encode_wide().chain(std::iter::once(0)).collect();
             
             unsafe {
                 let handle = CreateMutexW(std::ptr::null_mut(), 0, wide_name.as_ptr());
                 if handle.is_null() {
-                    tracing::error!("Failed to create single-instance mutex");
+                    let err = GetLastError();
+                    tracing::error!("Failed to create single-instance mutex (Error: {}). Exiting.", err);
+                    std::process::exit(1);
                 } else if GetLastError() == ERROR_ALREADY_EXISTS {
                     tracing::warn!("Another instance of ActivityMonitor is already running in session {}. Exiting.", session_id);
                     winapi::um::handleapi::CloseHandle(handle);
@@ -371,7 +375,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         #[cfg(not(windows))]
-        { () }
+        {
+            // Simple fallback for other platforms
+            ()
+        }
     };
 
     #[cfg(windows)]
@@ -682,36 +689,9 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                         let now_instant = Instant::now();
                         let duration_reference = last_report_instant.unwrap_or(now_instant);
                         let duration_seconds = now_instant.duration_since(duration_reference).as_secs();
-                        let activity_payload = build_event_envelope(
-                            "activity",
-                            1,
-                            &device_id_clone_for_activity,
-                            &hostname_clone_for_activity,
-                            &mac_clone_for_activity,
-                            &auth_token_clone,
-                            envelope_metadata_clone.as_ref(),
-                            serde_json::json!({
-                                "app_name": last_app,
-                                "window_title": last_title,
-                                "duration_seconds": duration_seconds,
-                                "timestamp": current.timestamp.to_rfc3339(),
-                            }),
-                        );
-
-                        publish_or_cache(&publisher_clone, &cache_clone, "activity", activity_payload).await;
-                        let now_instant = Instant::now();
-                        last_window = Some((current_app.clone(), current_title.clone(), now_instant));
-                        last_report_instant = Some(now_instant);
-                    } else {
-                        // Window unchanged: send activity heartbeat every 30 seconds to show continuation
-                        let now_utc = Utc::now();
-                        let now_instant = Instant::now();
-                        let should_send_heartbeat = last_report_instant.is_none() || 
-                            now_instant.duration_since(last_report_instant.unwrap()).as_secs() >= 30;
                         
-                        if should_send_heartbeat {
-                            let duration_reference = last_report_instant.unwrap_or(now_instant);
-                            let duration_seconds = now_instant.duration_since(duration_reference).as_secs();
+                        // Only send if we have meaningful duration
+                        if duration_seconds > 0 {
                             let activity_payload = build_event_envelope(
                                 "activity",
                                 1,
@@ -724,11 +704,46 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                                     "app_name": last_app,
                                     "window_title": last_title,
                                     "duration_seconds": duration_seconds,
-                                    "timestamp": now_utc.to_rfc3339(),
+                                    "timestamp": current.timestamp.to_rfc3339(),
                                 }),
                             );
 
                             publish_or_cache(&publisher_clone, &cache_clone, "activity", activity_payload).await;
+                            tracing::info!("[ACTIVITY] Window change: {} -> {} (Duration: {}s)", last_app, current_app, duration_seconds);
+                        }
+
+                        last_window = Some((current_app.clone(), current_title.clone(), now_instant));
+                        last_report_instant = Some(now_instant);
+                    } else {
+                        // Window unchanged: send activity heartbeat every 30 seconds to show continuation
+                        let now_utc = Utc::now();
+                        let now_instant = Instant::now();
+                        let elapsed = last_report_instant.map(|l| now_instant.duration_since(l).as_secs()).unwrap_or(0);
+                        
+                        if elapsed >= 30 {
+                            let duration_reference = last_report_instant.unwrap_or(now_instant);
+                            let duration_seconds = now_instant.duration_since(duration_reference).as_secs();
+                            
+                            if duration_seconds > 0 {
+                                let activity_payload = build_event_envelope(
+                                    "activity",
+                                    1,
+                                    &device_id_clone_for_activity,
+                                    &hostname_clone_for_activity,
+                                    &mac_clone_for_activity,
+                                    &auth_token_clone,
+                                    envelope_metadata_clone.as_ref(),
+                                    serde_json::json!({
+                                        "app_name": last_app,
+                                        "window_title": last_title,
+                                        "duration_seconds": duration_seconds,
+                                        "timestamp": now_utc.to_rfc3339(),
+                                    }),
+                                );
+
+                                publish_or_cache(&publisher_clone, &cache_clone, "activity", activity_payload).await;
+                                tracing::info!("[ACTIVITY] Heartbeat: {} (Duration: {}s)", last_app, duration_seconds);
+                            }
                             last_report_instant = Some(now_instant);
                         }
                     }
@@ -738,6 +753,38 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                     last_window = Some((current_app, current_title, now_instant));
                     last_report_instant = Some(now_instant);
                 }
+            } else {
+                // No window in focus: update last_report_instant so we don't accumulate this time
+                // to the next window that gets focus.
+                let now_instant = Instant::now();
+                if last_window.is_some() {
+                    // If we had a window, we should finalize it before clearing
+                    if let Some((last_app, last_title, _)) = last_window.take() {
+                        let duration_reference = last_report_instant.unwrap_or(now_instant);
+                        let duration_seconds = now_instant.duration_since(duration_reference).as_secs();
+                        
+                        if duration_seconds > 0 {
+                            let activity_payload = build_event_envelope(
+                                "activity",
+                                1,
+                                &device_id_clone_for_activity,
+                                &hostname_clone_for_activity,
+                                &mac_clone_for_activity,
+                                &auth_token_clone,
+                                envelope_metadata_clone.as_ref(),
+                                serde_json::json!({
+                                    "app_name": last_app,
+                                    "window_title": last_title,
+                                    "duration_seconds": duration_seconds,
+                                    "timestamp": Utc::now().to_rfc3339(),
+                                }),
+                            );
+                            publish_or_cache(&publisher_clone, &cache_clone, "activity", activity_payload).await;
+                            tracing::info!("[ACTIVITY] Focus lost: finalized {} (Duration: {}s)", last_app, duration_seconds);
+                        }
+                    }
+                }
+                last_report_instant = Some(now_instant);
             }
         }
     });

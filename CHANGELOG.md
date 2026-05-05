@@ -1,5 +1,12 @@
 # Changelog - ActivityMonitor Enterprise v3
 
+## [3.2.3] - 2026-05-04
+### Fixed
+- Resolved activity over-reporting issue (e.g., Chrome usage exceeding real time).
+- Fixed single-instance mutex logic to correctly handle non-admin sessions and prevent multiple agents from running simultaneously.
+- Eliminated "ghost time" accumulation when no window is in focus.
+- Added detailed activity duration logging for easier auditing.
+
 ## [3.2.2] - 2026-05-04
 
 ### Corregido
