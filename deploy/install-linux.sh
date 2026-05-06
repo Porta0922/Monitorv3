@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # ActivityMonitor Enterprise v3 - Linux Installer
 # Creates systemd service unit for agent
 
@@ -8,10 +8,17 @@ set -e
 AGENT_NAME="activity-monitor-agent"
 SERVICE_NAME="activity-monitor-agent"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Look for binary in agent's target folder
-TARGET_BIN="$SCRIPT_DIR/../agent/target/release/$AGENT_NAME"
-# Fallback to workspace target if needed
-[ ! -f "$TARGET_BIN" ] && TARGET_BIN="$SCRIPT_DIR/../target/release/$AGENT_NAME"
+# Determine path to binary or source
+if [ -f "$SCRIPT_DIR/$AGENT_NAME" ]; then
+    TARGET_BIN="$SCRIPT_DIR/$AGENT_NAME"
+    SRC_PATH="$SCRIPT_DIR/agent"
+elif [ -f "$SCRIPT_DIR/agent/Cargo.toml" ]; then
+    TARGET_BIN="$SCRIPT_DIR/$AGENT_NAME"
+    SRC_PATH="$SCRIPT_DIR/agent"
+else
+    TARGET_BIN="$SCRIPT_DIR/../target/release/$AGENT_NAME"
+    SRC_PATH="$SCRIPT_DIR/.."
+fi
 
 AGENT_PATH="/opt/activity-monitor/bin/$AGENT_NAME"
 CONFIG_DIR="/etc/activity-monitor"
@@ -164,37 +171,42 @@ ENVEOF
     chmod 600 "$ENV_FILE"
 
     echo "[3/6] Compilando agente (Obligatorio en Linux)..."
-    if ! command -v cargo &> /dev/null; then
-        echo "[*] Instalando Rust..."
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-        source "$HOME/.cargo/env"
-    fi
-
-    echo "[*] Instalando dependencias de compilacion..."
-    if command -v apt-get &> /dev/null; then
-        apt-get update -y && apt-get install -y libssl-dev pkg-config build-essential libxtst-dev libx11-dev
-    fi
-
-    if [ -d "$SCRIPT_DIR/../agent" ]; then
-        pushd "$SCRIPT_DIR/../agent" > /dev/null
-        # If there is a root Cargo.toml, it's a workspace
-        if [ -f "$SCRIPT_DIR/../../Cargo.toml" ]; then
-            pushd "$SCRIPT_DIR/../.." > /dev/null
-            cargo build --release -p activity-monitor-agent
-            popd > /dev/null
-        else
-            # Standalone build
-            cargo build --release
-        fi
-        popd > /dev/null
-    else
-        echo "[ERR] No se encontro la carpeta agent/"
-        exit 1
-    fi
-
     if [ ! -f "$TARGET_BIN" ]; then
-        # Check alternative target path
-        [ -f "$SCRIPT_DIR/../target/release/$AGENT_NAME" ] && TARGET_BIN="$SCRIPT_DIR/../target/release/$AGENT_NAME"
+        if ! command -v cargo &> /dev/null; then
+            echo "[*] Instalando Rust..."
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+            source "$HOME/.cargo/env"
+        fi
+
+        echo "[*] Instalando dependencias de compilacion..."
+        if command -v apt-get &> /dev/null; then
+            apt-get update -y && apt-get install -y libssl-dev pkg-config build-essential libxtst-dev libx11-dev
+        fi
+
+        if [ -f "$SRC_PATH/Cargo.toml" ]; then
+            pushd "$SRC_PATH" > /dev/null
+            # If there is a root Cargo.toml, it's a workspace
+            if [ -f "$SRC_PATH/../Cargo.toml" ]; then
+                pushd "$SRC_PATH/.." > /dev/null
+                cargo build --release -p activity-monitor-agent
+                popd > /dev/null
+            else
+                # Standalone build
+                cargo build --release
+            fi
+            popd > /dev/null
+            TARGET_BIN="$SRC_PATH/target/release/$AGENT_NAME"
+            
+            # Copy compiled binary back to script directory if run from portable USB
+            if [ "$SCRIPT_DIR/$AGENT_NAME" != "$TARGET_BIN" ]; then
+                cp "$TARGET_BIN" "$SCRIPT_DIR/$AGENT_NAME" 2>/dev/null || true
+            fi
+        else
+            echo "[ERR] No se encontro la carpeta con codigo fuente ($SRC_PATH/Cargo.toml)"
+            exit 1
+        fi
+    else
+        echo "[+] Usando binario pre-compilado: $TARGET_BIN"
     fi
 
     if [ ! -f "$TARGET_BIN" ]; then
