@@ -388,7 +388,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Err(e) = service_dispatcher::start(SERVICE_NAME, ffi_service_main) {
             tracing::info!("Service dispatcher failed ({}). Falling back to console mode...", e);
             
-            let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("Failed to build Tokio runtime: {}", e))?;
+                
             let (tx, rx) = mpsc::channel(1);
             
             let tx_clone = tx.clone();
@@ -400,14 +404,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             rt.block_on(async {
                 run_agent(rx).await
-            })?;
+            }).map_err(|e| format!("Agent execution failed: {}", e))?;
         }
     }
 
     #[cfg(not(windows))]
     {
         tracing::info!("Running in console mode (Unix)...");
-        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("Failed to build Tokio runtime: {}", e))?;
+            
         let (tx, rx) = mpsc::channel(1);
         
         let tx_clone = tx.clone();
@@ -419,7 +427,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         rt.block_on(async {
             run_agent(rx).await
-        })?;
+        }).map_err(|e| format!("Agent execution failed: {}", e))?;
     }
 
     Ok(())
@@ -430,6 +438,13 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     
     let is_session_0 = is_running_in_session_0();
     tracing::info!("Mode: {}", if is_session_0 { "Service (Session 0)" } else { "Interactive User" });
+
+    if !is_session_0 {
+        // Small delay to ensure the user session/desktop is fully initialized 
+        // before we start capturing window handles and setting hooks.
+        tracing::debug!("User session detected, waiting 3s for desktop initialization...");
+        sleep(Duration::from_secs(3)).await;
+    }
 
     // Load device identity (or create if new)
     let device_identity = load_or_create_device_identity()?;

@@ -1,5 +1,17 @@
 # Changelog - ActivityMonitor Enterprise v3
 
+## [3.2.5] - 2026-05-13
+### Añadido
+- **Resiliencia del Agente (Windows)**:
+    - Implementado un "Watchdog" de 60 minutos en la tarea programada (`/RI 60`) para asegurar el reinicio automático tras fallos o suspensiones del sistema.
+    - Añadido retraso de inicialización (3s) en modo interactivo para garantizar que el escritorio de Windows esté listo antes de capturar actividad.
+- **Robustez de Ejecución**:
+    - Reemplazados `unwrap()` críticos por manejo de errores seguro y logging detallado durante el arranque.
+    - Mejorada la detección de errores en la creación del runtime de Tokio.
+
+### Corregido
+- **Fallo de Detección de Actividad**: Resuelto el problema donde el agente de usuario se detenía silenciosamente tras errores de sesión, restaurando la captura de ventanas y eventos de entrada.
+
 ## [3.2.4] - 2026-05-05
 ### Añadido
 - **Mejoras en el Despliegue USB**:

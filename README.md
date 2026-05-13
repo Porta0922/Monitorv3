@@ -1,5 +1,5 @@
 # ActivityMonitor Enterprise v3
-*Actualizado: 28 de Abril, 2026*
+*Actualizado: 13 de Mayo, 2026*
 
 Sistema empresarial de monitoreo de actividad y seguridad con arquitectura distribuida:
 

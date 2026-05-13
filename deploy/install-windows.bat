@@ -326,9 +326,9 @@ echo [7/8] Configurando tarea de Sesion de Usuario...
 if "%MODE%"=="SERVICE" (
     echo     ^> Saltando registro de tarea de usuario - Modo Solo Servicio [SKIP]
 ) else (
-    schtasks /Create /SC ONLOGON /TN "ActivityMonitorUserAgent" /TR "\"%AGENT_BIN%\"" /F >nul 2>&1
+    schtasks /Create /SC ONLOGON /TN "ActivityMonitorUserAgent" /TR "\"%AGENT_BIN%\"" /F /IT /RI 60 /DU 24:00 >nul 2>&1
     if %errorLevel% equ 0 (
-        echo     ^> Tarea de inicio de sesion creada [OK]
+        echo     ^> Tarea de inicio de sesion creada (con watchdog de 60m) [OK]
         schtasks /Run /TN "ActivityMonitorUserAgent" >nul 2>&1
         echo     ^> Captura de actividad iniciada [OK]
     )
