@@ -198,6 +198,12 @@ struct ServerOsqueryPolicy {
     profile: Option<String>,
 }
 
+fn skip_interval(duration: Duration) -> tokio::time::Interval {
+    let mut int = interval(duration);
+    int.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    int
+}
+
 fn local_osquery_scheduler_seconds() -> u64 {
     std::env::var("AGENT_OSQUERY_SCHEDULER_SECONDS")
         .ok()
@@ -557,7 +563,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let rabbitmq_url_reconnect = rabbitmq_url.clone();
     let wifi_resend_flag_reconnect = wifi_resend_flag.clone();
     tokio::spawn(async move {
-        let mut reconnect_interval = interval(Duration::from_secs(10));
+        let mut reconnect_interval = skip_interval(Duration::from_secs(10));
         loop {
             reconnect_interval.tick().await;
 
@@ -646,9 +652,10 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let envelope_metadata_clone = envelope_metadata.clone();
     
     tokio::spawn(async move {
-        let mut interval = interval(Duration::from_secs(2));
+        let mut interval = skip_interval(Duration::from_secs(2));
         let mut last_window: Option<(String, String, Instant)> = None;
         let mut last_report_instant: Option<Instant> = None;
+        let mut last_loop_time = Instant::now();
 
         loop {
             interval.tick().await;
@@ -658,6 +665,53 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
             if is_running_in_session_0() {
                 continue;
             }
+
+            let now_instant = Instant::now();
+            let time_since_last_loop = now_instant.duration_since(last_loop_time);
+
+            if time_since_last_loop > Duration::from_secs(10) {
+                tracing::info!(
+                    "⏰ System suspension detected. Elapsed since last loop: {}s. Resetting activity duration.",
+                    time_since_last_loop.as_secs()
+                );
+
+                // Finalize the last window using the last_loop_time (before suspension)
+                if let Some((last_app, last_title, _)) = last_window.take() {
+                    if let Some(report_ref) = last_report_instant {
+                        if last_loop_time > report_ref {
+                            let duration_seconds = last_loop_time.duration_since(report_ref).as_secs();
+                            if duration_seconds > 0 {
+                                let activity_payload = build_event_envelope(
+                                    "activity",
+                                    1,
+                                    &device_id_clone_for_activity,
+                                    &hostname_clone_for_activity,
+                                    &mac_clone_for_activity,
+                                    &auth_token_clone,
+                                    envelope_metadata_clone.as_ref(),
+                                    serde_json::json!({
+                                        "app_name": last_app,
+                                        "window_title": last_title,
+                                        "duration_seconds": duration_seconds,
+                                        "timestamp": Utc::now().to_rfc3339(),
+                                    }),
+                                );
+                                publish_or_cache(&publisher_clone, &cache_clone, "activity", activity_payload).await;
+                                tracing::info!(
+                                    "[ACTIVITY] Finalized before sleep: {} (Duration: {}s)",
+                                    last_app,
+                                    duration_seconds
+                                );
+                            }
+                        }
+                    }
+                }
+                
+                last_window = None;
+                last_report_instant = None;
+            }
+
+            last_loop_time = now_instant;
 
             // Update idle status based on recent activity
             keystroke_tracker_clone.update_idle_status().await;
@@ -815,7 +869,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let envelope_metadata_clone = envelope_metadata.clone();
 
     tokio::spawn(async move {
-        let mut hb = interval(Duration::from_secs(60));
+        let mut hb = skip_interval(Duration::from_secs(60));
         let mut last_idle_state: Option<bool> = None;
         let is_session_0 = is_running_in_session_0();
 
@@ -892,7 +946,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
             return;
         }
 
-        let mut interval = interval(Duration::from_secs(60)); // Check every 60 seconds
+        let mut interval = skip_interval(Duration::from_secs(60)); // Check every 60 seconds
         loop {
             interval.tick().await;
             
@@ -940,7 +994,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let envelope_metadata_clone = envelope_metadata.clone();
     tokio::spawn(async move {
         let mut detector = usb_file_copy_detection::UsbFileCopyMonitor::new(900);
-        let mut interval = interval(Duration::from_secs(60));
+        let mut interval = skip_interval(Duration::from_secs(60));
 
         loop {
             interval.tick().await;
@@ -1030,7 +1084,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
             return;
         }
 
-        let mut interval = interval(Duration::from_secs(120)); // Check every 120 seconds
+        let mut interval = skip_interval(Duration::from_secs(120)); // Check every 120 seconds
         loop {
             interval.tick().await;
 
@@ -1085,7 +1139,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         }
 
         let mut monitor = MonitoringLoop::new();
-        let mut interval = interval(Duration::from_secs(60)); // Slower for "silence"
+        let mut interval = skip_interval(Duration::from_secs(60)); // Slower for "silence"
         let mut last_fingerprint = String::new();
 
         loop {
@@ -1143,7 +1197,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         }
 
         let mut known_inventory_fingerprints: HashSet<String> = HashSet::new();
-        let mut interval = interval(Duration::from_secs(60 * 60 * 24 * 30)); // Every 30 days
+        let mut interval = skip_interval(Duration::from_secs(60 * 60 * 24 * 30)); // Every 30 days
 
         // Initial baseline snapshot when agent starts.
         let initial_apps = match inventory::InventoryScanner::scan_installed_software().await {
@@ -1265,7 +1319,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
             return;
         }
 
-        let mut interval = interval(Duration::from_secs(3600));  // Every hour
+        let mut interval = skip_interval(Duration::from_secs(3600));  // Every hour
         loop {
             interval.tick().await;
             
@@ -1345,7 +1399,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let envelope_metadata_clone = envelope_metadata.clone();
     tokio::spawn(async move {
         let mut resource_monitor = ResourceMonitor::new();
-        let mut interval = interval(Duration::from_secs(60));
+        let mut interval = skip_interval(Duration::from_secs(60));
         let mut last_summary_instant = Instant::now();
         let is_session_0 = is_running_in_session_0();
 
@@ -1356,8 +1410,12 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
             let resources = resource_monitor.capture_snapshot();
             
             let now_instant = Instant::now();
-            let elapsed_secs = now_instant.duration_since(last_summary_instant).as_secs();
+            let mut elapsed_secs = now_instant.duration_since(last_summary_instant).as_secs();
             last_summary_instant = now_instant;
+
+            if elapsed_secs > 70 {
+                elapsed_secs = 60;
+            }
 
             let (status, idle_secs, active_secs) = if is_session_0 {
                 ("service", 0, 0)
@@ -1415,7 +1473,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         let keystroke_tracker_clone = keystroke_tracker.clone();
         tokio::spawn(async move {
             let mut runner = osquery_runner::OsqueryRunner::new();
-            let mut scan_interval = interval(Duration::from_secs(osquery_scheduler_seconds.max(60)));
+            let mut scan_interval = skip_interval(Duration::from_secs(osquery_scheduler_seconds.max(60)));
             loop {
                 scan_interval.tick().await;
 
@@ -1456,7 +1514,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let publisher_clone = publisher.clone();
     let cache_clone = cache.clone();
     tokio::spawn(async move {
-        let mut retry_interval = interval(Duration::from_secs(20));
+        let mut retry_interval = skip_interval(Duration::from_secs(20));
         loop {
             retry_interval.tick().await;
 

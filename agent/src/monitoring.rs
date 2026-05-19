@@ -19,20 +19,38 @@ pub fn calculate_file_hash_with_cache(path: &str) -> Result<String, Box<dyn std:
     {
         let guard = cache.lock().unwrap();
         if let Some(hash) = guard.get(path) {
+            if hash == "ERROR" || hash == "FILE_TOO_LARGE" {
+                return Err(format!("Previously failed to hash: {}", hash).into());
+            }
             return Ok(hash.clone());
         }
     }
 
     // Hash the file
-    let hash = calculate_file_hash(path)?;
+    let hash_result = calculate_file_hash(path);
     
     // Update cache
+    let final_hash = match hash_result {
+        Ok(h) => h,
+        Err(e) => {
+            let error_msg = e.to_string();
+            let cache_val = if error_msg.contains("too large") {
+                "FILE_TOO_LARGE".to_string()
+            } else {
+                "ERROR".to_string()
+            };
+            let mut guard = cache.lock().unwrap();
+            guard.insert(path.to_string(), cache_val);
+            return Err(e);
+        }
+    };
+
     {
         let mut guard = cache.lock().unwrap();
-        guard.insert(path.to_string(), hash.clone());
+        guard.insert(path.to_string(), final_hash.clone());
     }
     
-    Ok(hash)
+    Ok(final_hash)
 }
 
 #[derive(Debug, Clone)]
@@ -382,7 +400,14 @@ fn capture_open_apps_windows(sys: &mut System) -> Vec<OpenAppSnapshot> {
 /// Calculate SHA256 hash of a file.
 pub fn calculate_file_hash(path: &str) -> Result<String, Box<dyn std::error::Error>> {
     use std::io::{Read, BufReader};
-    use std::fs::File;
+    use std::fs::{File, metadata};
+
+    // Check file size to avoid blocking the thread on huge files (e.g., > 100MB)
+    if let Ok(meta) = metadata(path) {
+        if meta.len() > 100 * 1024 * 1024 {
+            return Err("File too large to hash safely".into());
+        }
+    }
 
     let file = File::open(path)?;
     let mut reader = BufReader::new(file);

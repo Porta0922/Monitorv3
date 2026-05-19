@@ -3,7 +3,7 @@ use rusqlite::{Connection, Result as SqliteResult};
 use aes_gcm::{KeyInit, Aes256Gcm, aead::Aead};
 use aes_gcm::{Key, Nonce};
 use rand::Rng;
-use serde_json::Value;
+use serde_json::{json, Value};
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -152,8 +152,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_encryption() {
+        let db_path = "test_cache_encryption.db";
+        let _ = std::fs::remove_file(db_path);
+
         let key: [u8; 32] = [0u8; 32];
-        let cache = OfflineCache::new(":memory:", &key)
+        let cache = OfflineCache::new(db_path, &key)
             .expect("Failed to create cache");
 
         let payload = json!({
@@ -173,5 +176,7 @@ mod tests {
 
         assert_eq!(total, 1);
         assert_eq!(unsynced, 1);
+
+        let _ = std::fs::remove_file(db_path);
     }
 }

@@ -123,7 +123,9 @@ impl KeystrokeTracker {
             status.idle_duration_seconds = seconds_idle;
             
             let delta = (now.timestamp() - status.last_idle_accumulation_time.timestamp()).max(0) as u64;
-            status.total_inactive_seconds_today += delta;
+            // Cap the accumulated idle delta if we detect a suspension or lag (> 10s)
+            let capped_delta = if delta > 10 { 2 } else { delta };
+            status.total_inactive_seconds_today += capped_delta;
         } else {
             status.is_idle = false;
             status.idle_duration_seconds = 0;

@@ -1,5 +1,15 @@
 # Changelog - ActivityMonitor Enterprise v3
 
+## [3.2.6] - 2026-05-19
+### Añadido
+- **Detección de Suspensión del Sistema**: Implementada lógica de detección de suspensión/bloqueo de la computadora en el bucle principal de actividad.
+
+### Corregido
+- **Estabilidad post-suspensión (Tokio Missed Ticks)**: Modificados todos los bucles de `tokio::time::interval` (12 en total) para usar `MissedTickBehavior::Skip` en lugar del comportamiento por defecto `Burst`. Esto evita la sobrecarga extrema de CPU y de solicitudes a RabbitMQ al despertar de la suspensión.
+- **Inflación de Duración de Actividad**: Resuelto el problema donde el tiempo en suspensión se reportaba como activo para la última ventana enfocada (ej. `lockapp.exe` durante 3 horas), finalizando la duración de la ventana con la última hora activa real pre-suspensión.
+- **Métricas del Resumen de Entrada e Inactividad**: Corregida la acumulación desmedida de inactividad acumulada durante la suspensión del sistema en las métricas de `keystroke_tracker` y en los reportes de resumen de entrada.
+- **Prueba unitaria de Caché fuera de línea**: Corregido test de encriptación de base de datos en `offline_cache.rs` para usar un archivo temporal en lugar de `:memory:` garantizando persistencia en conexiones cerradas.
+
 ## [3.2.5] - 2026-05-13
 ### Añadido
 - **Resiliencia del Agente (Windows)**:
