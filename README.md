@@ -1,190 +1,230 @@
 # ActivityMonitor Enterprise v3
-*Actualizado: 13 de Mayo, 2026*
 
-Sistema empresarial de monitoreo de actividad y seguridad con arquitectura distribuida:
+[![Version](https://img.shields.io/badge/version-3.3.0-blue.svg)](CHANGELOG.md)
+[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
+[![License](https://img.shields.io/badge/license-Enterprise-red.svg)]()
 
-- Agente multiplataforma en Rust (Windows/Linux/macOS)
-- **Despliegue Híbrido (Windows)**: Servicio de sistema (Sesión 0) + Agente de usuario para captura de actividad.
-- Backend en Rust (Axum + RabbitMQ + PostgreSQL/TimescaleDB)
-- Dashboard web en React + TypeScript
+*Actualizado: 20 de Mayo, 2026*
 
-Incluye monitoreo de aplicaciones en foco, actividad/inactividad, teclado/mouse (heatmaps), USB, inventario de software, eventos de WiFi y detección de amenazas mapeadas al framework MITRE ATT&CK mediante osquery.
+Sistema empresarial de monitoreo de actividad, auditoría de endpoints y seguridad distribuida de alto rendimiento.
 
-## Caracteristicas principales
+## 🚀 Vista General
 
-- Monitoreo de actividad en tiempo casi real
-- Registro de tiempo activo/inactivo por dispositivo
-- Contadores de entrada: teclas, movimientos y clicks
-- Historial de USB (conexiones/desconexiones)
-- Inventario de software instalado
-- Historial de red WiFi (SSID/BSSID/señal/estado)
-- Cola de mensajes con RabbitMQ y persistencia en PostgreSQL
-- Dashboard con vistas por dispositivo y exportacion CSV
-- Cache offline en agente con reintentos de sincronizacion
-- **Seguridad MITRE ATT&CK**: detección de amenazas vía osquery con 11 técnicas mapeadas.
-- **Detección de copia en USB**: identifica archivos recientemente escritos en drives USB (T1052.001) con deduplicación SHA-256.
-- **Heatmaps de Actividad**: Seguimiento de intensidad de uso de teclado y mouse por hora.
-- **Despliegue como Servicio**: Integración nativa con Windows Service Manager (SCM) para persistencia.
-- **Cache offline**: Almacenamiento local en SQLite para entornos sin conectividad inmediata.
-- Busqueda y filtrado de dispositivos por MAC address, hostname, apodo o Device ID.
+ActivityMonitor Enterprise v3 es una solución robusta y multiplataforma diseñada para la supervisión analítica y de seguridad en infraestructuras corporativas:
 
-## Arquitectura
+- **Agente Multiplataforma en Rust**: Cliente ultraligero y modular (`agent/src/tasks/`) de alto rendimiento para Windows, Linux y macOS.
+- **Separación Avanzada de Privilegios y Contextos (Sesión Dual)**:
+  - **Windows**: Servicio de Sistema (Sesión 0, `SYSTEM`) para persistencia, red, USB e inventario + Agente de Usuario Interactivo para captura gráfica en la sesión del usuario.
+  - **macOS**: Configuración dual nativa mediante `LaunchDaemon` (sistema) y `LaunchAgent` (sesión de usuario interactiva).
+  - **Linux**: Servicio `systemd` configurable con soporte completo para Wayland y X11 en sesiones gráficas.
+- **Caché Offline Persistente y de Alto Rendimiento (v3.3.0)**: Base de datos local SQLite con conexión thread-safe reutilizable (`Arc<Mutex<Connection>>`) configurada en modo WAL (Write-Ahead Logging), modo síncrono `NORMAL` y almacenamiento temporal en `MEMORY`, eliminando por completo los cuellos de botella de E/S.
+- **Cifrado Seguro Enlazado a Hardware (v3.3.0)**: Derivación dinámica de claves criptográficas (`resolve_secure_key`) utilizando identificadores de hardware físicos únicos: `MachineGuid` en Windows, `machine-id` en Linux y `IOPlatformUUID` en macOS, impidiendo el descifrado no autorizado de la caché en otros dispositivos.
+- **Poda y Rotación de Logs (v3.3.0)**: Política de retención automática de logs de 7 días para `agent_service.log` y `agent_user.log` en el arranque del agente, protegiendo activamente el almacenamiento del endpoint.
+- **Servidor Backend en Rust**: API REST de alto rendimiento y consumidor asíncrono con Axum, RabbitMQ y PostgreSQL/TimescaleDB.
+- **Dashboard de Control**: Panel web interactivo desarrollado en React, TypeScript y TailwindCSS.
 
-1. El agente captura eventos en el endpoint.
-2. Publica eventos en RabbitMQ (exchange topic `monitoring`).
-3. El servidor consume colas (`monitoring.activity`, `monitoring.heartbeat`, `monitoring.usb`, `monitoring.inventory`, `monitoring.wifi`, `monitoring.security`).
-4. Persiste datos en PostgreSQL/TimescaleDB.
-5. El dashboard consulta API REST para mostrar metricas e historicos.
+---
 
-## Estructura del repositorio
+## 💎 Características Principales
+
+- **Monitoreo en Tiempo Casi Real**: Registro exacto de la aplicación en foco y título de ventana.
+- **Medición Monotónica del Tiempo Activo/Inactivo**: Medición de intervalos robusta basada en `Instant` y comportamiento de ticks `Skip` en Tokio para prevenir sobre-reportes o picos tras suspender el equipo.
+- **Contadores de Entrada de Baja Latencia**: Pulsaciones de teclas, clics y movimiento de mouse capturados eficientemente mediante variables atómicas sin impacto en CPU para heatmaps analíticos por hora.
+- **Monitoreo de Dispositivos USB y DLP Básico**:
+  - Detección instantánea de conexiones/desconexiones.
+  - Alertas de copia de archivos a USB (técnica MITRE T1052.001) analizando metadatos de tiempo en intervalos de 45 segundos.
+  - Deduplicación criptográfica mediante hashes SHA-256 para evitar alertas redundantes.
+- **Inventario de Software**: Escaneo detallado y periódico de aplicaciones instaladas en cada máquina.
+- **Historial de Redes WiFi**: Registro de cambios de conexión, incluyendo SSID, BSSID, intensidad de señal y estado.
+- **Módulo de Seguridad MITRE ATT&CK**: Integración opcional y no invasiva con `osquery` para la ejecución periódica e inteligente de consultas de seguridad (11 técnicas del framework ATT&CK) parametrizadas local o centralmente desde el servidor.
+- **Búsqueda y Filtrado de Flotas**: Gestión interactiva de dispositivos en el dashboard mediante MAC address, hostname, apodos personalizados o Device ID.
+
+---
+
+## 🏛️ Arquitectura del Sistema
+
+```mermaid
+graph TD
+    subgraph Endpoint [Endpoint del Cliente]
+        A1[Agente Servicio - SYSTEM] -->|Monitoreo USB / Hardware| SQLite[(SQLite con WAL Cifrado)]
+        A2[Agente Usuario - Gráfico] -->|Actividad / Teclado / Foco| SQLite
+        SQLite -->|Sincronización AMQP| RMQ[RabbitMQ Broker]
+    end
+    subgraph Server [Backend Central]
+        RMQ -->|Colas de Mensajes| BC[Server Consumidor Axum]
+        BC -->|Escritura de Series Temporales| DB[(PostgreSQL + TimescaleDB)]
+    end
+    subgraph Frontend [Dashboard Web]
+        React[Dashboard React + TS] -->|API REST| BC
+    end
+```
+
+1. **Captura**: El agente en ejecución dual captura eventos en el endpoint de manera optimizada.
+2. **Cola**: Persiste offline de forma segura en SQLite si no hay red, y publica los datos en RabbitMQ (exchange topic `monitoring`) en tiempo real al conectarse.
+3. **Consumo**: El servidor Rust (Axum) consume las colas (`monitoring.activity`, `monitoring.heartbeat`, `monitoring.usb`, `monitoring.inventory`, `monitoring.wifi`, `monitoring.security`).
+4. **Persistencia**: Registra y organiza la telemetría en series temporales en PostgreSQL con la extensión TimescaleDB.
+5. **Visualización**: El Dashboard React consume la API REST del servidor para renderizar métricas, heatmaps e historiales de seguridad.
+
+---
+
+## 📂 Estructura del Repositorio
 
 ```text
 .
-├── agent/          # Cliente de captura (Rust)
-├── server/         # API y consumidor RabbitMQ (Rust)
-├── dashboard/      # Frontend React + Vite + TS
-├── migrations/     # Scripts SQL de esquema
-├── deploy/         # Scripts de instalacion por OS
-└── docs/           # Documentacion adicional
+├── agent/            # Cliente ligero de captura (Rust)
+│   ├── src/tasks/    # Tareas modulares de recolección (Ventanas, USB, Seguridad, etc.)
+│   └── Cargo.toml    # Configuración de dependencias independiente
+├── server/           # API y consumidor RabbitMQ (Rust)
+├── dashboard/        # Frontend interactivo en React + Vite + TS
+├── migrations/       # Migraciones SQL de TimescaleDB y esquemas
+├── deploy/           # Instaladores listos para producción (.bat, .sh) y NSSM
+└── docs/             # Manuales de arquitectura, API y diagnósticos
 ```
 
-## Requisitos
+---
 
-- Rust 1.70+
-- Node.js 18+
-- npm 9+
-- Docker + Docker Compose
+## 🛠️ Requisitos del Sistema
 
-## Inicio rapido
+- **Rust**: Versión 1.75+ (para compilar agentes y servidor)
+- **Node.js**: Versión 18+ y **npm** 9+ (para el dashboard)
+- **Docker & Docker Compose**: Para desplegar rápidamente la infraestructura local
+- **osqueryi** *(Opcional)*: Instalado en el host si se desea habilitar la auditoría MITRE ATT&CK (el instalador de Windows lo descarga automáticamente).
 
-### 1) Levantar infraestructura
+---
 
-Desde la raiz del repo:
+## 🚀 Inicio Rápido (Entorno de Desarrollo)
 
+### 1) Levantar la Infraestructura Corporativa
+
+Inicia los servicios base desde la raíz del repositorio:
 ```bash
 docker compose up -d
 ```
+> [!NOTE]
+> Esto desplegará los siguientes servicios:
+> - **PostgreSQL/TimescaleDB**: `localhost:5432`
+> - **RabbitMQ AMQP Broker**: `localhost:5672` (Panel de administración en `http://localhost:15672` con credenciales `guest/guest`)
+> - **Redis Cache**: `localhost:6379`
 
-Servicios esperados:
-
-- PostgreSQL/TimescaleDB: `localhost:5432`
-- RabbitMQ AMQP: `localhost:5672`
-- RabbitMQ UI: `http://localhost:15672` (guest/guest)
-- Redis: `localhost:6379`
-
-### 2) Compilar y ejecutar el servidor
+### 2) Compilar y Ejecutar el Servidor Backend
 
 ```bash
 cd server
 cargo run
 ```
-
-API por defecto: `http://localhost:3000`
-
-Healthcheck:
-
+La API REST iniciará por defecto en `http://localhost:3000`. Puedes validar su estado usando:
 ```bash
 curl http://localhost:3000/api/health
 ```
 
-### 3) Compilar y ejecutar el dashboard
+### 3) Compilar y Desplegar el Dashboard Web
 
 ```bash
 cd dashboard
 npm install
 npm run dev
 ```
+Accede al panel de control desde tu navegador web preferido en `http://localhost:5173`.
 
-Dashboard por defecto: `http://localhost:5173`
+### 4) Instalar y Ejecutar el Agente de Telemetría
 
-### 4) Ejecutar el agente
+El agente cuenta con scripts de instalación robustos y automatizados según el sistema operativo, los cuales manejan dependencias, permisos, servicios en segundo plano y compatibilidad híbrida:
 
-Opcion Windows:
-```bat
-deploy\install-windows.bat
-```
-*El instalador ofrece opciones para instalación como Servicio, Tarea de Usuario o Híbrida.*
+- **Windows**: Ejecuta la consola como Administrador y lanza:
+  ```bat
+  deploy\install-windows.bat
+  ```
+  *Ofrece opciones de instalación como Servicio (`SYSTEM`), Tarea de Usuario (interactiva) o Híbrida (recomendada).*
 
-Opciones Linux/macOS:
-```bash
-bash deploy/install-linux.sh
-# o
-bash deploy/install-macos.sh
-```
+- **Linux**: Ejecuta con privilegios de root:
+  ```bash
+  sudo bash deploy/install-linux.sh
+  ```
+  *Configura automáticamente las dependencias del sistema, compila e instala el servicio `systemd` e integra compatibilidad con Wayland/X11.*
 
-## Build de produccion
+- **macOS**: Ejecuta con privilegios de root:
+  ```bash
+  sudo bash deploy/install-macos.sh
+  ```
+  *Instala de forma simultánea el `LaunchDaemon` del sistema y el `LaunchAgent` del usuario para captura interactiva en pantalla, guiando en el proceso de concesión de permisos TCC (Accesibilidad y Grabación de Pantalla).*
 
-Servidor:
+---
 
+## 📦 Compilación para Producción
+
+Si deseas generar los artefactos optimizados sin dependencias del entorno de desarrollo:
+
+### Servidor Backend
 ```bash
 cd server
 cargo build --release
 ```
 
-Agente:
-
+### Agente Ligero
 ```bash
 cd agent
 cargo build --release
 ```
 
-Dashboard:
-
+### Dashboard Web
 ```bash
 cd dashboard
 npm run build
 ```
 
-## Endpoints API (resumen)
+---
 
-- `GET /api/health`
-- `GET /api/devices`
-- `GET /api/devices/:id`
-- `GET /api/logs`
-- `GET /api/hourly`
-- `GET /api/overview`
-- `GET /api/usb`
-- `GET /api/wifi`
-- `GET /api/security` — eventos de seguridad con filtros opcionales
-- `GET /api/security/summary` — resumen por severidad y tecnica MITRE
-- `GET /api/security/:device_id` — eventos de seguridad por dispositivo
+## 📡 Referencia de Endpoints API (Resumen)
 
-### Parametros de filtro para `/api/security`
+El servidor expone una API REST moderna para interactuar con los datos persistidos en TimescaleDB:
 
-| Parametro | Descripcion |
-|---|---|
-| `device_id` | UUID del dispositivo |
-| `severity` | `LOW`, `MEDIUM`, `HIGH` o `CRITICAL` |
-| `mitre_technique` | Ej: `T1053.005` |
-| `from` | Timestamp ISO-8601 inicio |
-| `to` | Timestamp ISO-8601 fin |
-| `hours` | Ultimas N horas (alternativa a from/to) |
-| `limit` | Maximo de resultados (default 500) |
+- `GET /api/health` — Estado de conectividad de servicios e infraestructura.
+- `GET /api/devices` — Listado completo de endpoints registrados en el sistema.
+- `GET /api/devices/:id` — Telemetría en detalle de un dispositivo en específico.
+- `GET /api/logs` — Listado y búsqueda global de registros de actividad.
+- `GET /api/hourly` — Métricas de intensidad de entrada agrupadas por hora (Heatmaps).
+- `GET /api/overview` — Métricas resumidas de rendimiento y estado del parque informático.
+- `GET /api/usb` — Historial detallado de conexiones y almacenamiento USB detectado.
+- `GET /api/wifi` — Registro histórico de conexiones inalámbricas por dispositivo.
+- `GET /api/security` — Log de amenazas de seguridad y alertas MITRE ATT&CK registradas.
+- `GET /api/security/summary` — Distribución de eventos por nivel de severidad y técnicas MITRE.
+- `GET /api/security/:device_id` — Alertas de seguridad específicas de un endpoint.
 
-## Modulo de seguridad (osquery + MITRE ATT&CK)
+### Filtros avanzados en `/api/security`
+| Parámetro | Tipo | Descripción |
+|---|---|---|
+| `device_id` | UUID | Identificador único de dispositivo |
+| `severity` | String | Criticidad del evento: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
+| `mitre_technique` | String | Código de técnica del framework (ej: `T1059.001`) |
+| `from` / `to` | ISO-8601 | Rango de fechas de búsqueda de eventos |
+| `hours` | Integer | Ventana de las últimas N horas de telemetría |
+| `limit` | Integer | Límite máximo de resultados devueltos (por defecto: 500) |
 
-El agente ejecuta queries osquery con **scheduler inteligente por-query** (si osqueryi esta instalado; de lo contrario opera en modo silencioso sin afectar el resto del agente).
+---
 
-Cada query ejecuta según su propia frecuencia para optimizar recursos:
+## 🛡️ Detección de Amenazas con osquery y MITRE ATT&CK
 
-| Query | Intervalo | Tecnica MITRE | Severidad |
+El agente cuenta con un planificador inteligente de consultas para interactuar con `osqueryi` si este se encuentra presente en el sistema operativo.
+
+### Cuadrícula de Consultas y Detecciones
+
+| Nombre de Consulta | Frecuencia | Técnica MITRE Mapeada | Criticidad |
 |---|---|---|---|
-| `powershell_encoded_commands` | 5min | T1059.001 — PowerShell Encoding | HIGH |
-| `powershell_download_cradles` | 5min | T1105 — Download Cradles | HIGH |
-| `suspicious_script_hosts` | 5min | T1059.005 — Script Hosts | MEDIUM |
-| `unusual_listening_ports` | 10min | T1021 — Remote Services | MEDIUM |
-| `executable_in_temp_paths` | 10min | T1105 — Ingress Tool Transfer | HIGH |
-| `lolbins_with_remote_content` | 10min | T1218 — LOLBins | HIGH |
-| `scheduled_tasks_hidden` | 20min | T1053.005 — Scheduled Task | HIGH |
-| `autorun_registry_keys` | 20min | T1547.001 — Registry Run Keys | MEDIUM |
-| `cmd_spawned_by_unusual_parent` | 20min | T1059.003 — Command Shell | MEDIUM |
-| `unsigned_system_path_processes` | 30min | T1036 — Masquerading | MEDIUM |
-| `startup_items_persistence` | 30min | T1547.009 — Startup Items | LOW |
+| `powershell_encoded_commands` | 5 min | T1059.001 — PowerShell Encoding | **HIGH** |
+| `powershell_download_cradles` | 5 min | T1105 — Download Cradles | **HIGH** |
+| `suspicious_script_hosts` | 5 min | T1059.005 — Script Hosts | **MEDIUM** |
+| `unusual_listening_ports` | 10 min | T1021 — Remote Services | **MEDIUM** |
+| `executable_in_temp_paths` | 10 min | T1105 — Ingress Tool Transfer | **HIGH** |
+| `lolbins_with_remote_content` | 10 min | T1218 — LOLBins | **HIGH** |
+| `scheduled_tasks_hidden` | 20 min | T1053.005 — Scheduled Task | **HIGH** |
+| `autorun_registry_keys` | 20 min | T1547.001 — Registry Run Keys | **MEDIUM** |
+| `cmd_spawned_by_unusual_parent`| 20 min | T1059.003 — Command Shell | **MEDIUM** |
+| `unsigned_system_path_processes`| 30 min | T1036 — Masquerading | **MEDIUM** |
+| `startup_items_persistence` | 30 min | T1547.009 — Startup Items | **LOW** |
 
-### Configuración del scheduler osquery
+### Configuración del Scheduler en el Agente
 
-Por defecto, el scheduler está **deshabilitado** (no consume recursos). Para activarlo:
-
+Por defecto, el análisis de amenazas locales se encuentra **desactivado**. Para activarlo manualmente mediante variables de entorno en el host:
 ```bash
 # Windows
 set AGENT_OSQUERY_SCHEDULER_SECONDS=30
@@ -192,80 +232,55 @@ set AGENT_OSQUERY_SCHEDULER_SECONDS=30
 # Linux/macOS
 export AGENT_OSQUERY_SCHEDULER_SECONDS=30
 ```
+- `0` o indefinido: Scheduler deshabilitado (valor predeterminado).
+- `30`: Tick del planificador cada 30s. Las consultas se ejecutan cuando les corresponde según su intervalo.
+- `60`: Tick del planificador cada 60s (modo menos agresivo).
 
-Valores recomendados:
-- `0` o no establecida = deshabilitado (default)
-- `30` = tick cada 30s, cada query ejecuta segun su intervalo
-- `60` = tick cada 60s (menos aggressive)
+### Gestión de Políticas Centralizada
 
-### Control central desde servidor (recomendado para flotas)
-
-Ahora el agente puede tomar la política de osquery desde el servidor usando:
-
+Es posible definir perfiles de comportamiento y frecuencias globales de osquery para flotas de agentes directamente desde la API del servidor:
 ```bash
-# En el agente
-set AGENT_SERVER_URL=http://TU-SERVIDOR:3000
-set AGENT_AUTH_TOKEN=dev-agent-token
+# Variables del Agente
+AGENT_SERVER_URL=http://tu-servidor:3000
+AGENT_AUTH_TOKEN=tu-token-seguro
 ```
 
-Endpoint utilizado por el agente:
-- `GET /api/agent/osquery-policy?device_id=<uuid>`
-- Header: `x-agent-token: <AGENT_AUTH_TOKEN>`
+Endpoint de descarga de política del agente:
+`GET /api/agent/osquery-policy?device_id=<uuid>`
 
-Variables de entorno del servidor para controlar la política global:
+En el servidor, puedes ajustar las variables de entorno de control global:
+- `OSQUERY_POLICY_PROFILE`: Perfiles disponibles: `off` (desactivado), `slow` (tick cada 90s), `balanced` (tick cada 60s), `aggressive` (tick cada 30s).
+- `OSQUERY_POLICY_TICK_SECONDS`: Tiempo de tick manual en segundos.
 
-```bash
-OSQUERY_POLICY_PROFILE=balanced
-OSQUERY_POLICY_TICK_SECONDS=60
-AGENT_AUTH_TOKEN=dev-agent-token
-```
+> [!TIP]
+> Si el servidor se encuentra inalcanzable, el agente aplica una política de tolerancia fallback regresando automáticamente a la variable local `AGENT_OSQUERY_SCHEDULER_SECONDS`.
 
-Perfiles soportados:
-- `off` -> desactiva osquery
-- `slow` -> tick default 90s
-- `balanced` -> tick default 60s
-- `aggressive` -> tick default 30s
+---
 
-Notas de rendimiento:
-- El agente aplica limites de seguridad (`min 30s`, `max 900s`) para evitar sobrecarga accidental.
-- Si el servidor no responde, el agente vuelve automaticamente a `AGENT_OSQUERY_SCHEDULER_SECONDS` local.
+## 💾 Monitoreo de Dispositivos Extraíbles (DLP)
 
-### Detección de copia en USB (T1052.001)
+El agente analiza los dispositivos USB acoplados cada **45 segundos**:
+- **Inspección de Escrituras**: Captura archivos que han sido agregados o modificados recientemente (en una ventana de los últimos 180s).
+- **Deduplicación**: Calculates y almacena hashes SHA-256 de las transferencias para evitar inundación de eventos idénticos en la base de datos central.
+- **Mitigación de E/S**: Lee los metadatos de almacenamiento y espacio libre; solo realiza escaneos recursivos detallados si detecta un cambio en el espacio libre del drive USB.
 
-El agente monitorea continuamente drives USB removibles cada **45 segundos** y detecta:
-- Archivos recientemente escritos (últimos 180s)
-- Máximo 20 archivos por drive
-- Deduplicación por SHA-256 para evitar alertas duplicadas
+Las alertas se remiten de inmediato a la cola `monitoring.security` con severidad **HIGH** bajo el mapeo **MITRE T1052.001** (Exfiltración vía medio físico).
 
-Los hallazgos se publican a `monitoring.security` con severidad **HIGH** cuando se detectan escrituras en USB.
+---
 
-### Integración con dashboard
+## 🛠️ Herramientas de Mantenimiento y Diagnóstico
 
-Los hallazgos se publican a la cola `monitoring.security`, el servidor los persiste en la tabla `security_events` y el dashboard los muestra en la pestaña **Seguridad** con:
+El repositorio incluye herramientas avanzadas para la verificación de salud del entorno:
 
-- Tarjetas de resumen (alertas hoy, criticas, dispositivos afectados, tecnica mas frecuente)
-- Filtros por rango de fechas, severidad y tecnica MITRE
-- Enlace directo a `attack.mitre.org` por cada tecnica
-- Vista expandida del JSON `raw_data` de cada evento
-- Búsqueda por MAC address del dispositivo
+1. **`diagnostic.ps1`**: Script interactivo de diagnóstico para Windows. Ejecuta un checklist completo de conectividad, variables de entorno, estado de los servicios duales, osquery y base de datos local SQLite.
+2. **`verify_rabbitmq.ps1`**: Script para verificar el correcto funcionamiento del broker RabbitMQ, colas asociadas, intercambio topic y flujos de publicación del agente.
+3. **`limpiar.ps1`**: Script para depuración rápida de entornos de desarrollo locales en Windows (limpieza de cachés SQLite, logs viejos y reinicio de servicios).
 
-## Documentacion del proyecto
+---
 
-Consulta estos archivos para detalle tecnico y operativo:
+## 📖 Documentación Adicional
 
-- `START_HERE.md`
-- `ARCHITECTURE.md`
-- `API_REFERENCE.md`
-- `DIAGNOSTIC_CHECKLIST.md`
-- `WINDOWS_DEMO_GUIDE.md`
-- `WINDOWS_DEMO_GUIDE_ES.md`
-
-## Notas operativas
-
-- **osquery opcional**: se descarga/instala automáticamente en Windows (`deploy/install-windows.bat`). Si no está disponible, el agente funciona normalmente sin scans de seguridad.
-- **Scheduler deshabilitado por defecto**: establece `AGENT_OSQUERY_SCHEDULER_SECONDS` para activar análisis de amenazas.
-- **USB detection siempre activo**: monitorea 24/7 si está habilitado el agente; no requiere configuración adicional.
-- **Deduplicación SHA-256**: la tabla `security_events` usa fingerprints para evitar duplicados, incluso si una query detecta lo mismo múltiples veces.
-- Si las metricas del dia aparecen infladas, valida colas RabbitMQ y timestamps del evento.
-- Para diagnostico rapido en Windows, usa `diagnostic.ps1`.
-- Para verificar RabbitMQ, usa `verify_rabbitmq.ps1`.
+Para más detalles, consulta la documentación extendida en la raíz del repositorio:
+- [Guía de Arquitectura e Hilos](ARCHITECTURE.md) — Explicación profunda de la sesión dual del agente y flujos del consumidor de colas.
+- [API Reference](API_REFERENCE.md) — Documentación interactiva de todas las rutas REST del servidor.
+- [Changelog](CHANGELOG.md) — Historial de cambios y detalles de la versión **3.3.0**.
