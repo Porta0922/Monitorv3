@@ -1,6 +1,6 @@
 #!/bin/bash
-# ActivityMonitor Enterprise v3 - Linux Installer
-# Creates systemd service unit for agent
+# ActivityMonitor Enterprise v3 - Linux Installer (USB Portable)
+# Creates systemd service unit for agent (Standalone Build)
 
 set -e
 
@@ -8,16 +8,20 @@ set -e
 AGENT_NAME="activity-monitor-agent"
 SERVICE_NAME="activity-monitor-agent"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Determine path to binary or source
+
+# Resilient USB Paths
 if [ -f "$SCRIPT_DIR/$AGENT_NAME" ]; then
     TARGET_BIN="$SCRIPT_DIR/$AGENT_NAME"
-    SRC_PATH="$SCRIPT_DIR/agent"
+    SRC_PATH="$SCRIPT_DIR/../agent"
+elif [ -f "$SCRIPT_DIR/../agent/Cargo.toml" ]; then
+    TARGET_BIN="$SCRIPT_DIR/$AGENT_NAME"
+    SRC_PATH="$SCRIPT_DIR/../agent"
 elif [ -f "$SCRIPT_DIR/agent/Cargo.toml" ]; then
     TARGET_BIN="$SCRIPT_DIR/$AGENT_NAME"
     SRC_PATH="$SCRIPT_DIR/agent"
 else
-    TARGET_BIN="$SCRIPT_DIR/../target/release/$AGENT_NAME"
-    SRC_PATH="$SCRIPT_DIR/.."
+    TARGET_BIN="$SCRIPT_DIR/../../target/release/$AGENT_NAME"
+    SRC_PATH="$SCRIPT_DIR/../.."
 fi
 
 AGENT_PATH="/opt/activity-monitor/bin/$AGENT_NAME"
@@ -37,7 +41,7 @@ CONNECTED_TO_SERVER=0
 
 # Check for root privileges
 if [[ $EUID -ne 0 ]]; then
-   echo "[-] This script must be run as root. (Use: sudo ./install-linux.sh)"
+   echo "[-] Este script debe ejecutarse como root. (Use: sudo ./install-linux.sh)"
    exit 1
 fi
 
@@ -93,13 +97,13 @@ if [ -f "$ENV_FILE" ]; then source "$ENV_FILE"; fi
 
 show_menu() {
     clear
-    echo "========================================"
-    echo "ActivityMonitor Enterprise v3.2.1 (Linux Installer)"
-    echo "========================================"
+    echo "========================================================="
+    echo "ActivityMonitor Enterprise v3.3.3 (Linux Installer - USB)"
+    echo "========================================================="
     echo "Rutas:"
     echo "- Ejecutable: $AGENT_PATH"
     echo "- Config:     $CONFIG_DIR"
-    echo "========================================"
+    echo "========================================================="
     echo ""
     echo "1. Instalacion COMPLETA"
     echo "2. Instalar solo SERVICIO"
@@ -170,7 +174,7 @@ RABBITMQ_URL=$RABBITMQ_URL
 ENVEOF
     chmod 644 "$ENV_FILE"
 
-    echo "[3/6] Compilando agente (Obligatorio en Linux)..."
+    echo "[3/6] Compilando agente (Standalone - Sin requerir carpeta server)..."
     if [ ! -f "$TARGET_BIN" ]; then
         if ! command -v cargo &> /dev/null; then
             echo "[*] Instalando Rust..."
@@ -185,21 +189,15 @@ ENVEOF
 
         if [ -f "$SRC_PATH/Cargo.toml" ]; then
             pushd "$SRC_PATH" > /dev/null
-            # If there is a root Cargo.toml, it's a workspace
-            if [ -f "$SRC_PATH/../Cargo.toml" ]; then
-                pushd "$SRC_PATH/.." > /dev/null
-                cargo build --release -p activity-monitor-agent
-                popd > /dev/null
-            else
-                # Standalone build
-                cargo build --release
-            fi
+            echo "[*] Compilando agente localmente de forma independiente..."
+            cargo build --release
             popd > /dev/null
             TARGET_BIN="$SRC_PATH/target/release/$AGENT_NAME"
             
             # Copy compiled binary back to script directory if run from portable USB
             if [ "$SCRIPT_DIR/$AGENT_NAME" != "$TARGET_BIN" ]; then
                 cp "$TARGET_BIN" "$SCRIPT_DIR/$AGENT_NAME" 2>/dev/null || true
+                TARGET_BIN="$SCRIPT_DIR/$AGENT_NAME"
             fi
         else
             echo "[ERR] No se encontro la carpeta con codigo fuente ($SRC_PATH/Cargo.toml)"
@@ -234,17 +232,14 @@ ENVEOF
     if [ "$XDG_SESSION_TYPE" = "wayland" ] || [ -n "$WAYLAND_DISPLAY" ]; then
         echo ""
         echo "⚠️  ADVERTENCIA: Se detecto una sesion grafica WAYLAND activa."
-        echo "   La captura de teclas global (keystroke tracker) y foco de ventanas"
-        echo "   puede verse limitada bajo Wayland debido a restricciones de seguridad."
-        echo "   Se recomienda utilizar una sesion X11 (Xorg) si experimenta problemas"
-        echo "   de telemetria interactiva de usuario."
+        echo "   La captura de teclas global y foco de ventanas requiere X11 (Xorg)."
+        echo "   Por favor, configure su pantalla de inicio en X11 si nota falta de telemetria."
         echo ""
     fi
 
     # Check input group device permissions
     if [ -d "/dev/input" ]; then
         echo "[*] Verificando permisos de dispositivos de entrada en /dev/input..."
-        # Add udev rules if they don't exist to ensure input group has access
         if [ ! -f "/etc/udev/rules.d/99-input.rules" ]; then
             echo 'KERNEL=="event*", NAME="input/%k", MODE="0660", GROUP="input"' > /etc/udev/rules.d/99-input.rules
             udevadm control --reload-rules && udevadm trigger || true
@@ -301,8 +296,8 @@ EOF
     fi
 
     echo "========================================"
-    echo "INSTALACION COMPLETADA"
-    echo "IMPORTANTE: Reinicie sesion para activar grupos de hardware."
+    echo "INSTALACION COMPLETADA EXITOSAMENTE"
+    echo "IMPORTANTE: Reinicie la sesion de usuario para activar los permisos de hardware."
     echo "========================================"
     read -p "Presione Enter para finalizar..."
     exit 0

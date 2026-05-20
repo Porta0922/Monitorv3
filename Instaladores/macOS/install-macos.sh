@@ -1,9 +1,10 @@
 #!/bin/bash
-# ActivityMonitor Enterprise Agent - macOS Installation Script
-# Supports Dual LaunchDaemon (System Service) and LaunchAgent (User Session Telemetry)
+# ActivityMonitor Enterprise v3 - macOS Installer (USB Portable)
+# Supports LaunchDaemon (System Service) and LaunchAgent (User Session Telemetry)
+# Standalone Build: Does NOT require the server/ folder.
 
 echo "========================================================="
-echo "  Instalador de ActivityMonitor Enterprise Agent (macOS) "
+echo "  ActivityMonitor Enterprise v3.3.3 - Instalador macOS  "
 echo "========================================================="
 echo ""
 
@@ -27,22 +28,33 @@ AGENT_PLIST="/Library/LaunchAgents/com.activitymonitor.agent.plist"
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
-# Determine path to binary or source
+# Resilient USB Paths (Standalone - Does NOT require server folder)
 if [ -f "$SCRIPT_DIR/activity-monitor-agent" ]; then
-    AGENT_PATH="$SCRIPT_DIR/activity-monitor-agent"
-    SRC_PATH="$SCRIPT_DIR/agent"
+    AGENT_PATH_SRC="$SCRIPT_DIR/activity-monitor-agent"
+    SRC_PATH="$SCRIPT_DIR/../agent"
+elif [ -f "$SCRIPT_DIR/../agent/Cargo.toml" ]; then
+    AGENT_PATH_SRC="$SCRIPT_DIR/activity-monitor-agent"
+    SRC_PATH="$SCRIPT_DIR/../agent"
 elif [ -f "$SCRIPT_DIR/agent/Cargo.toml" ]; then
-    AGENT_PATH="$SCRIPT_DIR/activity-monitor-agent"
+    AGENT_PATH_SRC="$SCRIPT_DIR/activity-monitor-agent"
     SRC_PATH="$SCRIPT_DIR/agent"
 else
-    AGENT_PATH="$SCRIPT_DIR/../target/release/activity-monitor-agent"
-    SRC_PATH="$SCRIPT_DIR/.."
+    AGENT_PATH_SRC="$SCRIPT_DIR/../../target/release/activity-monitor-agent"
+    SRC_PATH="$SCRIPT_DIR/../.."
 fi
 
 echo "[1/8] Verificando dependencias (Rust/Cargo)..."
 if ! command -v cargo &> /dev/null; then
     echo "[-] Rust no esta instalado."
     echo "[*] Instalando Rust..."
+    # Check Xcode CLI tools first (required by Rust on macOS)
+    if ! xcode-select -p &>/dev/null; then
+        echo "[*] Instalando Xcode Command Line Tools (requerido para compilar)..."
+        xcode-select --install
+        echo "[*] Por favor, acepte la instalacion de las herramientas de Xcode en el dialogo del sistema"
+        echo "[*] y luego presione Enter para continuar cuando la instalacion haya terminado..."
+        read -p ""
+    fi
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
     source "$HOME/.cargo/env"
     if ! command -v cargo &> /dev/null; then
@@ -53,31 +65,31 @@ else
     echo "[+] Rust/Cargo detectado."
 fi
 
-echo "[2/8] Compilando el binario del agente..."
-if [ ! -f "$AGENT_PATH" ]; then
+echo "[2/8] Compilando el binario del agente (Standalone)..."
+if [ ! -f "$AGENT_PATH_SRC" ]; then
     if [ ! -f "$SRC_PATH/Cargo.toml" ]; then
         echo "[-] Codigo fuente no encontrado en $SRC_PATH"
+        echo "    Asegurese de que la carpeta 'agent' este presente en el USB."
         exit 1
     fi
-    echo "[*] Compilando codigo fuente con 'cargo build --release'..."
-    cd "$SRC_PATH"
-    # Compile workspace or package
-    if [ -f "$SRC_PATH/../Cargo.toml" ]; then
-        cd "$SRC_PATH/.."
-        cargo build --release -p activity-monitor-agent
-        AGENT_PATH="$SRC_PATH/../target/release/activity-monitor-agent"
-    else
-        cargo build --release
-        AGENT_PATH="$SRC_PATH/target/release/activity-monitor-agent"
-    fi
-    cd "$SCRIPT_DIR"
+    echo "[*] Compilando de forma independiente con 'cargo build --release'..."
+    echo "[*] Este proceso puede tomar varios minutos la primera vez..."
+    pushd "$SRC_PATH" > /dev/null
+    cargo build --release
+    popd > /dev/null
+    BUILT_BIN="$SRC_PATH/target/release/activity-monitor-agent"
     
-    # Copy compiled binary back to script directory if run from portable USB
-    if [ "$SCRIPT_DIR/activity-monitor-agent" != "$AGENT_PATH" ]; then
-        cp "$AGENT_PATH" "$SCRIPT_DIR/activity-monitor-agent" 2>/dev/null || true
+    if [ ! -f "$BUILT_BIN" ]; then
+        echo "[-] Error: No se genero el binario en $BUILT_BIN"
+        exit 1
     fi
+    
+    # Cache the binary next to the script for future installs
+    cp "$BUILT_BIN" "$SCRIPT_DIR/activity-monitor-agent" 2>/dev/null || true
+    AGENT_PATH_SRC="$BUILT_BIN"
+    echo "[+] Binario compilado exitosamente."
 else
-    echo "[+] Usando binario pre-compilado: $AGENT_PATH"
+    echo "[+] Usando binario pre-compilado: $AGENT_PATH_SRC"
 fi
 
 echo "[3/8] Preparando directorios..."
@@ -85,20 +97,18 @@ mkdir -p "$BIN_DIR"
 mkdir -p "$LOG_DIR"
 mkdir -p "$DATA_DIR"
 
-# Set up permissions: make logs and data directories sticky/writeable by any session user
-# so that LaunchAgent can create and read the SQLite agent_user_cache.db database file
 chmod 755 "$INSTALL_DIR"
 chmod 755 "$BIN_DIR"
 chmod 1777 "$LOG_DIR"
 chmod 1777 "$DATA_DIR"
-echo "[+] Directorios creados y configurados con permisos de acceso cruzados."
+echo "[+] Directorios creados con permisos correctos."
 
 echo "[4/8] Configurando archivo .env..."
 if [ ! -f "$ENV_FILE" ]; then
     echo "Configurando entorno inicial:"
-    read -p "Token de autenticacion (default: change-me-in-production): " input_token
-    read -p "URL del Servidor (default: http://10.30.0.123:3000): " input_server
-    read -p "URL de RabbitMQ (default: amqp://eclub:eCLUB123@10.30.0.123:5672/%2f): " input_rabbitmq
+    read -p "  Token de autenticacion (Enter para usar 'change-me-in-production'): " input_token
+    read -p "  URL del Servidor (Enter para usar 'http://10.30.0.123:3000'): " input_server
+    read -p "  URL de RabbitMQ (Enter para usar default): " input_rabbitmq
     
     cat > "$ENV_FILE" << EOL
 AGENT_AUTH_TOKEN=${input_token:-change-me-in-production}
@@ -110,15 +120,14 @@ EOL
 else
     echo "[+] Archivo .env existente detectado. Conservando."
 fi
-
-# Must be readable by logged-in users running the LaunchAgent
 chmod 644 "$ENV_FILE"
 
 echo "[5/8] Copiando binario..."
-cp -f "$AGENT_PATH" "$AGENT_BIN"
+cp -f "$AGENT_PATH_SRC" "$AGENT_BIN"
 chmod 755 "$AGENT_BIN"
+echo "[+] Binario copiado a $AGENT_BIN"
 
-echo "[6/8] Registrando LaunchDaemon (Servicio de Sistema - UID 0)..."
+echo "[6/8] Registrando LaunchDaemon (Servicio de Sistema - root)..."
 cat > "$DAEMON_PLIST" << EOL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -151,8 +160,9 @@ cat > "$DAEMON_PLIST" << EOL
 </plist>
 EOL
 chmod 644 "$DAEMON_PLIST"
+echo "[+] LaunchDaemon registrado."
 
-echo "[7/8] Registrando LaunchAgent (Sesion Gráfica de Usuario - UID > 0)..."
+echo "[7/8] Registrando LaunchAgent (Sesion Grafica de Usuario)..."
 cat > "$AGENT_PLIST" << EOL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -185,14 +195,12 @@ cat > "$AGENT_PLIST" << EOL
 </plist>
 EOL
 chmod 644 "$AGENT_PLIST"
+echo "[+] LaunchAgent registrado."
 
 echo "[8/8] Cargando e Iniciando servicios..."
-# Load LaunchDaemon as root
-echo "[*] Iniciando servicio del sistema (Daemon)..."
 launchctl unload "$DAEMON_PLIST" 2>/dev/null || true
 launchctl load -w "$DAEMON_PLIST"
 
-# Load LaunchAgent for current logged-in desktop user
 LOGGED_USER=$(logname 2>/dev/null || echo $SUDO_USER)
 if [ -n "$LOGGED_USER" ] && [ "$LOGGED_USER" != "root" ]; then
     USER_UID=$(id -u "$LOGGED_USER")
@@ -206,19 +214,31 @@ echo "========================================================="
 echo "  Instalacion completada con exito."
 echo "========================================================="
 echo ""
-echo "⚠️  CRÍTICO: IMPORTANTE PARA macOS (Permisos TCC)"
-echo "Para capturar eventos de teclado, ratón y foco de ventana,"
-echo "debes conceder permisos de sistema a la aplicacion."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "⚠️  PASO CRITICO OBLIGATORIO: Permisos de Privacidad TCC"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "1. Conceder permisos de ACCESIBILIDAD a:"
-echo "   - $AGENT_BIN"
-echo "   - Tu aplicación de Terminal (si realizas pruebas manuales)"
+echo "macOS bloquea por defecto la captura de actividad de teclado,"
+echo "raton y titulos de ventanas por motivos de privacidad."
+echo "DEBES otorgar los siguientes permisos manualmente:"
 echo ""
-echo "2. Conceder permisos de GRABACIÓN DE PANTALLA a:"
-echo "   - $AGENT_BIN"
+echo "1. ACCESIBILIDAD (Permite rastrear inactividad y eventos globales)"
+echo "   → Configuracion del Sistema > Privacidad y Seguridad > Accesibilidad"
+echo "   → Haz clic en '+' y agrega:"
+echo "     $AGENT_BIN"
+echo ""
+echo "2. GRABACION DE PANTALLA (Permite leer titulos de ventanas activas)"
+echo "   ℹ️  El agente NO toma capturas. Solo lee el nombre de la ventana activa."
+echo "   → Configuracion del Sistema > Privacidad y Seguridad > Grabacion de Pantalla"
+echo "   → Haz clic en '+' y agrega:"
+echo "     $AGENT_BIN"
+echo ""
+echo "3. TRAS DAR LOS PERMISOS: Cierra la sesion y vuelve a iniciarla"
+echo "   (o reinicia la Mac) para que los permisos TCC surtan efecto."
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-# Ask to open preferences panels automatically
 read -p "¿Desea abrir los paneles de Privacidad y Seguridad ahora? (y/n) [y]: " OPEN_PANELS
 if [[ -z "$OPEN_PANELS" || "$OPEN_PANELS" =~ ^[Yy]$ ]]; then
     echo "[*] Abriendo panel de Accesibilidad..."
@@ -229,5 +249,4 @@ if [[ -z "$OPEN_PANELS" || "$OPEN_PANELS" =~ ^[Yy]$ ]]; then
 fi
 
 echo ""
-echo "Recuerde reiniciar la sesión de usuario si nota que algún evento no se registra."
 echo "========================================================="

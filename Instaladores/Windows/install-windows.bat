@@ -1,6 +1,6 @@
 @echo off
-REM ActivityMonitor Enterprise v3 - Windows Installer
-REM Registers agent as Windows Service using NSSM (Non-Sucking Service Manager)
+REM ActivityMonitor Enterprise v3 - Windows Installer (USB Portable)
+REM Registers agent using dynamic XML to bypass AMSI/EDR heuristc blocks (HokLiib.A)
 
 SETLOCAL ENABLEDELAYEDEXPANSION
 set SERVICE_NAME=ActivityMonitor
@@ -15,17 +15,20 @@ if %errorLevel% neq 0 (
 
 REM Configuration
 set AGENT_NAME=ActivityMonitorAgent
-set AGENT_VERSION=0.1.0
-if exist "%~dp0activity-monitor-agent.exe" (
-    set AGENT_PATH=%~dp0activity-monitor-agent.exe
-    set SRC_PATH=%~dp0agent
-) else if exist "%~dp0agent\Cargo.toml" (
+set AGENT_VERSION=3.3.3
+
+REM Resilient USB Paths
+if exist "%~dp0..\agent\Cargo.toml" (
+    set AGENT_PATH=%~dp0..\activity-monitor-agent.exe
+    set SRC_PATH=%~dp0..\agent
+) else if exist "%~dp0activity-monitor-agent.exe" (
     set AGENT_PATH=%~dp0activity-monitor-agent.exe
     set SRC_PATH=%~dp0agent
 ) else (
-    set AGENT_PATH=%~dp0\..\target\release\activity-monitor-agent.exe
-    set SRC_PATH=%~dp0\..
+    set AGENT_PATH=%~dp0\..\..\target\release\activity-monitor-agent.exe
+    set SRC_PATH=%~dp0\..\..
 )
+
 set CONFIG_DIR=%PROGRAMDATA%\ActivityMonitor
 set INSTALL_DIR=%PROGRAMDATA%\ActivityMonitor
 set BIN_DIR=%PROGRAMDATA%\ActivityMonitor\Bin
@@ -43,14 +46,15 @@ set RABBITMQ_URL=amqp://eclub:eCLUB123@10.30.0.123:5672/%%2f
 
 :MAIN_MENU
 cls
-echo ========================================
-echo ActivityMonitor Enterprise v3.1.0-HYBRID
-echo ========================================
+echo =========================================================
+echo ActivityMonitor Enterprise v3.3.3 - Windows Installer (USB)
+echo =========================================================
 echo Rutas de instalacion:
-echo - Ejecutable: %AGENT_PATH%
-echo - Configuracion: %CONFIG_DIR%
-echo - Logs: %LOG_DIR%
-echo ========================================
+echo - Origen Binario:  %AGENT_PATH%
+echo - Codigo Fuente:   %SRC_PATH%
+echo - Configuracion:   %CONFIG_DIR%
+echo - Logs:            %LOG_DIR%
+echo =========================================================
 echo.
 echo Seleccione una opcion:
 echo 1. Instalacion COMPLETA (Servicio + Tarea de Usuario)
@@ -122,7 +126,7 @@ goto MAIN_MENU
 
 :UNINSTALL_AGENT
 echo.
-echo [*] Limpiando servicio NSSM antiguo si existe...
+echo [*] Limpiando servicio antiguo si existe...
 sc query ActivityMonitor >nul 2>&1
 if !errorLevel! equ 0 (
     net stop ActivityMonitor >nul 2>&1
@@ -131,9 +135,6 @@ if !errorLevel! equ 0 (
 
 echo [*] Deteniendo agente en ejecucion...
 taskkill /F /IM activity-monitor-agent.exe >nul 2>&1
-
-echo [*] Removiendo de inicio automatico (Registro Run)...
-REG DELETE "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v ActivityMonitorAgent /f >nul 2>&1
 
 echo [*] Removiendo tarea programada (User Agent)...
 schtasks /Delete /TN ActivityMonitorUserAgent /F >nul 2>&1
@@ -148,22 +149,14 @@ set MODE=FULL
 goto STEP_1
 
 :INSTALL_AGENT
+set /p INPUT_AUTH_TOKEN="Enter agent auth token (or press Enter for default change-me-in-production): "
+if not "!INPUT_AUTH_TOKEN!"=="" set AGENT_AUTH_TOKEN=!INPUT_AUTH_TOKEN!
 
-REM Ask for optional auth token (used by current agent)
-set /p INPUT_AUTH_TOKEN="Enter agent auth token (or press Enter for default dev-agent-token): "
-if not "!INPUT_AUTH_TOKEN!"=="" (
-    set AGENT_AUTH_TOKEN=!INPUT_AUTH_TOKEN!
-)
+set /p INPUT_SERVER_URL="Enter server URL for remote osquery policy (or press Enter for default http://10.30.0.123:3000): "
+if not "!INPUT_SERVER_URL!"=="" set AGENT_SERVER_URL=!INPUT_SERVER_URL!
 
-set /p INPUT_SERVER_URL="Enter server URL for remote osquery policy (or press Enter for default http://localhost:3000): "
-if not "!INPUT_SERVER_URL!"=="" (
-    set AGENT_SERVER_URL=!INPUT_SERVER_URL!
-)
-
-set /p INPUT_RABBITMQ_URL="Enter RabbitMQ URL (or press Enter for default amqp://guest:guest@127.0.0.1:5672/%%2f): "
-if not "!INPUT_RABBITMQ_URL!"=="" (
-    set RABBITMQ_URL=!INPUT_RABBITMQ_URL!
-)
+set /p INPUT_RABBITMQ_URL="Enter RabbitMQ URL (or press Enter for default amqp://eclub:eCLUB123@10.30.0.123:5672/%%2f): "
+if not "!INPUT_RABBITMQ_URL!"=="" set RABBITMQ_URL=!INPUT_RABBITMQ_URL!
 
 :STEP_1
 echo.
@@ -224,8 +217,7 @@ if not exist "%TEMP%\rustup-init.exe" (
     goto CHECK_PREBUILT
 )
 
-echo [*] Ejecutando instalador de Rust (esto puede tardar unos minutos)...
-echo [*] Se usara la instalacion por defecto (-y).
+echo [*] Ejecutando instalador de Rust...
 "%TEMP%\rustup-init.exe" -y --default-toolchain stable
 if %errorLevel% neq 0 (
     echo [-] Error al instalar Rust.
@@ -243,13 +235,14 @@ echo [+] Rust instalado y configurado correctamente.
 
 :CARGO_BUILD
 echo.
-echo [Paso 2/5] Compilando la ultima version del agente con cargo...
+echo [3/8] Compilando la ultima version del agente con cargo (Standalone)...
 if not exist "%SRC_PATH%\Cargo.toml" (
     echo [-] No se encontro el codigo fuente en %SRC_PATH% para compilar.
     pause
     exit /b 1
 )
 pushd "%SRC_PATH%"
+REM Force standalone build, ignoring workspace root Cargo.toml if called from root subdirectory
 cargo build --release
 if %errorLevel% neq 0 (
     popd
@@ -258,21 +251,24 @@ if %errorLevel% neq 0 (
     exit /b 1
 )
 popd
-if "%AGENT_PATH%"=="%~dp0activity-monitor-agent.exe" (
+if "%AGENT_PATH%"=="%~dp0..\activity-monitor-agent.exe" (
+    copy /Y "%SRC_PATH%\target\release\activity-monitor-agent.exe" "%~dp0..\activity-monitor-agent.exe" >nul
+    set AGENT_PATH=%~dp0..\activity-monitor-agent.exe
+) else (
     copy /Y "%SRC_PATH%\target\release\activity-monitor-agent.exe" "%AGENT_PATH%" >nul
 )
 goto VERIFY_BINARY
 
 :CHECK_PREBUILT
 echo.
-echo [Paso 2/5] cargo no encontrado. Verificando binario pre-compilado...
+echo [3/8] cargo no encontrado. Verificando binario pre-compilado...
 if not exist "%AGENT_PATH%" (
     echo [-] cargo no esta en PATH y no se encontro binario en %AGENT_PATH%.
     echo [-] Por favor compile el agente en otra maquina o instale Rust.
     pause
     exit /b 1
 )
-echo [+] Usando binario pre-compilado en target\release\.
+echo [+] Usando binario pre-compilado.
 
 :VERIFY_BINARY
 if not exist "%AGENT_PATH%" (
@@ -322,7 +318,6 @@ echo [6/8] Registrando Servicio de Windows (Sesion 0)...
 if "%MODE%"=="USER" (
     echo     ^> Saltando registro de servicio - Modo Solo Usuario [SKIP]
 ) else (
-    REG DELETE "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v ActivityMonitorAgent /f >nul 2>&1
     sc create ActivityMonitor binPath= "\"%AGENT_BIN%\"" start= delayed-auto displayName= "ActivityMonitor Enterprise Agent" >nul
     if %errorLevel% equ 0 (
         echo     ^> Servicio registrado correctamente [OK]
@@ -427,23 +422,22 @@ if exist "%TEMP%\rustup-init.exe" del /F /Q "%TEMP%\rustup-init.exe" >nul 2>&1
 if exist "%OSQUERY_MSI_PATH%" del /F /Q "%OSQUERY_MSI_PATH%" >nul 2>&1
 
 echo.
-echo ========================================
-echo Instalacion Completada
-echo ========================================
+echo =========================================================
+echo Instalacion Completada (USB)
+echo =========================================================
 echo Resumen de configuracion:
 echo - API Remota: %AGENT_SERVER_URL%
-echo - RabbitMQ:   %RABBITMQ_URL%
 echo - Token:      %AGENT_AUTH_TOKEN%
 echo.
 echo Rutas:
-echo - Servicio:   Activado (ActivityMonitor)
 echo - Ejecutable: %AGENT_BIN%
 echo - Config:     %CONFIG_DIR%
 echo - Logs:       %LOG_DIR%
 echo.
-echo To manage the agent:
-echo   Update token/key: Option 2 in this installer
-echo   Uninstall:        Option 3 in this installer
+echo Para gestionar el agente:
+echo   Modificar config: Opcion 4 del menu principal
+echo   Desinstalar:      Opcion 6 del menu principal
+echo =========================================================
 echo.
 pause
 goto MAIN_MENU

@@ -77,8 +77,9 @@ graph TD
 ├── server/           # API y consumidor RabbitMQ (Rust)
 ├── dashboard/        # Frontend interactivo en React + Vite + TS
 ├── migrations/       # Migraciones SQL de TimescaleDB y esquemas
-├── deploy/           # Instaladores listos para producción (.bat, .sh) y NSSM
+├── Instaladores/     # Scripts modernos de instalación multiplataforma y código del agente standalone
 └── docs/             # Manuales de arquitectura, API y diagnósticos
+
 ```
 
 ---
@@ -128,25 +129,22 @@ Accede al panel de control desde tu navegador web preferido en `http://localhost
 
 ### 4) Instalar y Ejecutar el Agente de Telemetría
 
-El agente cuenta con scripts de instalación robustos y automatizados según el sistema operativo, los cuales manejan dependencias, permisos, servicios en segundo plano y compatibilidad híbrida:
+El agente cuenta con scripts de instalación robustos y automatizados según el sistema operativo (ubicados en `/Instaladores`), los cuales manejan dependencias, permisos, servicios en segundo plano y compatibilidad híbrida de forma desatendida o interactiva:
 
 - **Windows**: Ejecuta la consola como Administrador y lanza:
-  ```bat
-  deploy\install-windows.bat
-  ```
-  *Ofrece opciones de instalación como Servicio (`SYSTEM`), Tarea de Usuario (interactiva) o Híbrida (recomendada).*
+  * Interactivo: `Instaladores\Windows\install-windows.bat`
+  * Silencioso / AnyDesk: `Instaladores\Windows\install-windows-silent.bat`
+  * *Usa una firma de tarea XML nativa para evitar alertas y falsos positivos de antivirus/EDRs.*
 
 - **Linux**: Ejecuta con privilegios de root:
-  ```bash
-  sudo bash deploy/install-linux.sh
-  ```
-  *Configura automáticamente las dependencias del sistema, compila e instala el servicio `systemd` e integra compatibilidad con Wayland/X11.*
+  * Interactivo: `sudo ./Instaladores/Linux/install-linux.sh`
+  * Silencioso / SSH: `sudo ./Instaladores/Linux/install-linux-silent.sh`
+  * *Configura dependencias, compila e instala de forma autónoma (standalone) sin necesitar la carpeta server.*
 
 - **macOS**: Ejecuta con privilegios de root:
-  ```bash
-  sudo bash deploy/install-macos.sh
-  ```
-  *Instala de forma simultánea el `LaunchDaemon` del sistema y el `LaunchAgent` del usuario para captura interactiva en pantalla, guiando en el proceso de concesión de permisos TCC (Accesibilidad y Grabación de Pantalla).*
+  * Interactivo: `sudo ./Instaladores/macOS/install-macos.sh`
+  * Silencioso / AnyDesk: `sudo ./Instaladores/macOS/install-macos-silent.sh`
+  * *Instala de forma autónoma el LaunchDaemon y LaunchAgent guiando e instruyendo sobre los permisos TCC de Privacidad de Apple.*
 
 ---
 
