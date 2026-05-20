@@ -1,6 +1,6 @@
 # ActivityMonitor Enterprise v3
 
-[![Version](https://img.shields.io/badge/version-3.3.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-3.3.1-blue.svg)](CHANGELOG.md)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-Enterprise-red.svg)]()
 
@@ -17,9 +17,9 @@ ActivityMonitor Enterprise v3 es una solución robusta y multiplataforma diseña
   - **Windows**: Servicio de Sistema (Sesión 0, `SYSTEM`) para persistencia, red, USB e inventario + Agente de Usuario Interactivo para captura gráfica en la sesión del usuario.
   - **macOS**: Configuración dual nativa mediante `LaunchDaemon` (sistema) y `LaunchAgent` (sesión de usuario interactiva).
   - **Linux**: Servicio `systemd` configurable con soporte completo para Wayland y X11 en sesiones gráficas.
-- **Caché Offline Persistente y de Alto Rendimiento (v3.3.0)**: Base de datos local SQLite con conexión thread-safe reutilizable (`Arc<Mutex<Connection>>`) configurada en modo WAL (Write-Ahead Logging), modo síncrono `NORMAL` y almacenamiento temporal en `MEMORY`, eliminando por completo los cuellos de botella de E/S.
-- **Cifrado Seguro Enlazado a Hardware (v3.3.0)**: Derivación dinámica de claves criptográficas (`resolve_secure_key`) utilizando identificadores de hardware físicos únicos: `MachineGuid` en Windows, `machine-id` en Linux y `IOPlatformUUID` en macOS, impidiendo el descifrado no autorizado de la caché en otros dispositivos.
-- **Poda y Rotación de Logs (v3.3.0)**: Política de retención automática de logs de 7 días para `agent_service.log` y `agent_user.log` en el arranque del agente, protegiendo activamente el almacenamiento del endpoint.
+- **Caché Offline Persistente y de Alto Rendimiento (v3.3.1)**: Base de datos local SQLite con conexión thread-safe reutilizable (`Arc<Mutex<Connection>>`) configurada en modo WAL (Write-Ahead Logging), modo síncrono `NORMAL` y almacenamiento temporal en `MEMORY`, con autocuración y límites estrictos de almacenamiento.
+- **Cifrado Seguro Enlazado a Hardware (v3.3.1)**: Derivación dinámica de claves criptográficas (`resolve_secure_key`) utilizando identificadores de hardware físicos únicos: `MachineGuid` en Windows, `machine-id` en Linux y `IOPlatformUUID` en macOS, impidiendo el descifrado no autorizado de la caché en otros dispositivos.
+- **Poda y Rotación de Logs (v3.3.1)**: Política de retención automática de logs de 7 días para `agent_service.log` y `agent_user.log` en el arranque del agente, protegiendo activamente el almacenamiento del endpoint.
 - **Servidor Backend en Rust**: API REST de alto rendimiento y consumidor asíncrono con Axum, RabbitMQ y PostgreSQL/TimescaleDB.
 - **Dashboard de Control**: Panel web interactivo desarrollado en React, TypeScript y TailwindCSS.
 
@@ -283,4 +283,4 @@ El repositorio incluye herramientas avanzadas para la verificación de salud del
 Para más detalles, consulta la documentación extendida en la raíz del repositorio:
 - [Guía de Arquitectura e Hilos](ARCHITECTURE.md) — Explicación profunda de la sesión dual del agente y flujos del consumidor de colas.
 - [API Reference](API_REFERENCE.md) — Documentación interactiva de todas las rutas REST del servidor.
-- [Changelog](CHANGELOG.md) — Historial de cambios y detalles de la versión **3.3.0**.
+- [Changelog](CHANGELOG.md) — Historial de cambios y detalles de la versión **3.3.1**.

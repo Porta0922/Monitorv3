@@ -1,5 +1,11 @@
 # Changelog - ActivityMonitor Enterprise v3
 
+## [3.3.1] - 2026-05-20
+### Añadido
+- **Autocuración de Caché SQLite (Self-Healing Cache)**: Implementado mecanismo automático de diagnóstico y recuperación en la inicialización de `OfflineCache`. Si la base de datos se corrompe por fallos del sistema o cortes de energía, se respalda el archivo dañado y se regenera una base de datos operativa transparente para garantizar la continuidad del monitoreo.
+- **Límite de Almacenamiento Local (Resource Capping)**: Se estableció una capacidad máxima estricta de 20,000 eventos no sincronizados en la base de datos local para evitar el desbordamiento de disco del endpoint durante periodos prolongados sin conexión, aplicando una lógica FIFO para descartar los eventos más antiguos.
+- **Reconexión con Backoff Exponencial y Jitter**: Rediseñado el planificador de reconexión a RabbitMQ en `spawn_reconnector` con retardos exponenciales y fluctuación aleatoria (jitter) de ±15%, previniendo la sobrecarga del canal y saturación de la red corporativa (*thundering herd*).
+
 ## [3.3.0] - 2026-05-20
 ### Añadido
 - **Cifrado Vinculado al Hardware (Hardware-Bound Encryption)**: Implementado enlace de cifrado dinámico y robusto en la base de datos `OfflineCache` del agente. La clave de encriptación se deriva a través de SHA256 combinando la clave del entorno, el UUID estable del dispositivo (`device_id`) y el identificador de máquina nativo del sistema operativo (MachineGuid en Windows, machine-id en Linux y IOPlatformUUID en macOS), previniendo el descifrado no autorizado en otros hosts.

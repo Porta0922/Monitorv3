@@ -17,6 +17,44 @@ pub struct OfflineCache {
 impl OfflineCache {
     /// Initialize offline cache with WAL connection reuse and encryption
     pub fn new(db_path: &str, encryption_key: &[u8; 32]) -> SqliteResult<Self> {
+        match Self::init_db(db_path) {
+            Ok(conn) => {
+                let key = Key::<Aes256Gcm>::from_slice(encryption_key);
+                let cipher = Aes256Gcm::new(key);
+                Ok(Self {
+                    conn: Arc::new(Mutex::new(conn)),
+                    cipher,
+                })
+            }
+            Err(e) => {
+                eprintln!("[!] Fallo crítico al inicializar base de datos SQLite en '{}': {}. Intentando autocuración...", db_path, e);
+                
+                // Intentar renombrar el archivo corrupto
+                if std::path::Path::new(db_path).exists() {
+                    let timestamp = chrono::Utc::now().timestamp();
+                    let backup_path = format!("{}.corrupt-{}", db_path, timestamp);
+                    eprintln!("[!] Respaldando archivo corrupto de base de datos en '{}'", backup_path);
+                    
+                    // También respaldar archivos WAL y SHM si existen
+                    let _ = std::fs::rename(db_path, &backup_path);
+                    let _ = std::fs::rename(format!("{}-wal", db_path), format!("{}-wal", backup_path));
+                    let _ = std::fs::rename(format!("{}-shm", db_path), format!("{}-shm", backup_path));
+                }
+                
+                // Intentar de nuevo tras la limpieza
+                let conn = Self::init_db(db_path)?;
+                let key = Key::<Aes256Gcm>::from_slice(encryption_key);
+                let cipher = Aes256Gcm::new(key);
+                
+                Ok(Self {
+                    conn: Arc::new(Mutex::new(conn)),
+                    cipher,
+                })
+            }
+        }
+    }
+
+    fn init_db(db_path: &str) -> SqliteResult<Connection> {
         let conn = Connection::open(db_path)?;
         
         // Optimizar SQLite para velocidad extrema de escritura y concurrencia segura
@@ -25,6 +63,15 @@ impl OfflineCache {
             PRAGMA synchronous = NORMAL;
             PRAGMA temp_store = MEMORY;
         ")?;
+
+        // Comprobación de integridad rápida de la base de datos
+        if db_path != ":memory:" {
+            if let Ok(integrity) = conn.query_row("PRAGMA integrity_check(1);", [], |row| row.get::<_, String>(0)) {
+                if integrity != "ok" {
+                    return Err(rusqlite::Error::InvalidQuery);
+                }
+            }
+        }
 
         // Create cache table
         conn.execute(
@@ -39,14 +86,7 @@ impl OfflineCache {
             [],
         )?;
         
-        // Initialize cipher
-        let key = Key::<Aes256Gcm>::from_slice(encryption_key);
-        let cipher = Aes256Gcm::new(key);
-        
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-            cipher,
-        })
+        Ok(conn)
     }
 
     /// Save event to offline cache with encryption
@@ -66,6 +106,22 @@ impl OfflineCache {
 
         // Reutilizar la conexión persistente con bloqueo thread-safe
         let conn = self.conn.lock().unwrap();
+        
+        // Enforce maximum capacity of 20,000 unsynced events to protect disk space
+        if let Ok(count) = conn.query_row::<u64, _, _>("SELECT COUNT(*) FROM cache_events WHERE synced = 0", [], |r| r.get(0)) {
+            if count >= 20000 {
+                // Delete the oldest unsynced event (FIFO)
+                let _ = conn.execute(
+                    "DELETE FROM cache_events WHERE id = (
+                        SELECT id FROM cache_events WHERE synced = 0 ORDER BY timestamp ASC LIMIT 1
+                    )",
+                    [],
+                );
+                // Utilizar warn! a través de tracing si está disponible
+                tracing::warn!("Límite máximo de caché local alcanzado (20,000 eventos). Descartando el evento no sincronizado más antiguo.");
+            }
+        }
+
         conn.execute(
             "INSERT INTO cache_events (id, event_type, encrypted_payload, nonce, timestamp, synced)
              VALUES (?1, ?2, ?3, ?4, ?5, 0)",

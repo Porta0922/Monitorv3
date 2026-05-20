@@ -1,6 +1,6 @@
 # ActivityMonitor Agent (Rust)
 
-[![Version](https://img.shields.io/badge/version-3.3.0-blue.svg)](../CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-3.3.1-blue.svg)](../CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)]()
 
 *Actualizado: 20 de Mayo, 2026*
@@ -23,7 +23,7 @@ El agente está organizado bajo una estructura modular de tareas independientes 
 
 ---
 
-## 🏛️ Arquitectura y Optimización (v3.3.0)
+## 🏛️ Arquitectura y Optimización (v3.3.1)
 
 - **Runtime Asíncrono**: Basado en `tokio` para concurrencia ligera de E/S.
 - **Comunicación en Tiempo Real**: Publicación directa sobre colas AMQP mediante RabbitMQ.
