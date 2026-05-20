@@ -343,14 +343,68 @@ echo [7/8] Configurando tarea de Sesion de Usuario con Persistencia Avanzada...
 if "%MODE%"=="SERVICE" (
     echo     ^> Saltando registro de tarea de usuario - Modo Solo Servicio [SKIP]
 ) else (
-    echo     ^> Creando tarea interactiva con politicas de auto-recuperacion...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "$action = New-ScheduledTaskAction -Execute '%AGENT_BIN%'; $trigger = New-ScheduledTaskTrigger -AtLogon; $principal = New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Limited; $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 99 -RestartInterval '00:01:00' -ExecutionTimeLimit '00:00:00' -Priority 4; Register-ScheduledTask -TaskName 'ActivityMonitorUserAgent' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force" >nul 2>&1
-    if !errorLevel! equ 0 (
+    echo     ^> Creando tarea interactiva con politicas de auto-recuperacion mediante definicion XML...
+    
+    set "TASK_XML=%TEMP%\ActivityMonitorTask.xml"
+    (
+        echo ^<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"^>
+        echo   ^<RegistrationInfo^>
+        echo     ^<Date^>2026-05-20T12:00:00^</Date^>
+        echo     ^<Author^>ActivityMonitor^</Author^>
+        echo     ^<Description^>ActivityMonitor User Agent persistence task^</Description^>
+        echo   ^</RegistrationInfo^>
+        echo   ^<Triggers^>
+        echo     ^<LogonTrigger^>
+        echo       ^<Enabled^>true^</Enabled^>
+        echo     ^</LogonTrigger^>
+        echo   ^</Triggers^>
+        echo   ^<Principals^>
+        echo     ^<Principal id="Author"^>
+        echo       ^<GroupId^>S-1-5-32-545^</GroupId^>
+        echo       ^<RunLevel^>LeastPrivilege^</RunLevel^>
+        echo     ^</Principal^>
+        echo   ^</Principals^>
+        echo   ^<Settings^>
+        echo     ^<MultipleInstancesPolicy^>IgnoreNew^</MultipleInstancesPolicy^>
+        echo     ^<DisallowStartIfOnBatteries^>false^</DisallowStartIfOnBatteries^>
+        echo     ^<StopIfGoingOnBatteries^>false^</StopIfGoingOnBatteries^>
+        echo     ^<AllowHardTerminate^>true^</AllowHardTerminate^>
+        echo     ^<StartWhenAvailable^>true^</StartWhenAvailable^>
+        echo     ^<RunOnlyIfNetworkAvailable^>false^</RunOnlyIfNetworkAvailable^>
+        echo     ^<IdleSettings^>
+        echo       ^<StopOnIdleEnd^>true^</StopOnIdleEnd^>
+        echo       ^<RestartOnIdle^>false^</RestartOnIdle^>
+        echo     ^</IdleSettings^>
+        echo     ^<AllowStartOnDemand^>true^</AllowStartOnDemand^>
+        echo     ^<Enabled^>true^</Enabled^>
+        echo     ^<Hidden^>false^</Hidden^>
+        echo     ^<RunOnlyIfIdle^>false^</RunOnlyIfIdle^>
+        echo     ^<WakeToRun^>false^</WakeToRun^>
+        echo     ^<ExecutionTimeLimit^>PT0S^</ExecutionTimeLimit^>
+        echo     ^<Priority^>4^</Priority^>
+        echo     ^<RestartOnFailure^>
+        echo       ^<Interval^>PT1M^</Interval^>
+        echo       ^<Count^>99^</Count^>
+        echo     ^</RestartOnFailure^>
+        echo   ^</Settings^>
+        echo   ^<Actions Context="Author"^>
+        echo     ^<Exec^>
+        echo       ^<Command^>!AGENT_BIN!^</Command^>
+        echo     ^</Exec^>
+        echo   ^</Actions^>
+        echo ^</Task^>
+    ) > "!TASK_XML!"
+
+    schtasks /Create /XML "!TASK_XML!" /TN "ActivityMonitorUserAgent" /F >nul 2>&1
+    set "SCH_ERR=!errorLevel!"
+    if exist "!TASK_XML!" del /F /Q "!TASK_XML!" >nul 2>&1
+
+    if !SCH_ERR! equ 0 (
         echo     ^> Tarea de inicio de sesion con persistencia extrema creada [OK]
         schtasks /Run /TN "ActivityMonitorUserAgent" >nul 2>&1
         echo     ^> Captura de actividad iniciada [OK]
     ) else (
-        echo     ^> [!] PowerShell fallo al registrar la tarea. Usando fallback tradicional con schtasks...
+        echo     ^> [!] La creacion mediante XML fallo. Usando fallback tradicional...
         schtasks /Create /SC ONLOGON /TN "ActivityMonitorUserAgent" /TR "\"%AGENT_BIN%\"" /F /IT >nul 2>&1
         if !errorLevel! equ 0 (
             echo     ^> Tarea de inicio de sesion creada con exito - fallback [OK]

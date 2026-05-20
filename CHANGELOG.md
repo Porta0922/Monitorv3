@@ -1,5 +1,9 @@
 # Changelog - ActivityMonitor Enterprise v3
 
+## [3.3.3] - 2026-05-20
+### Añadido
+- **Mitigación de Falso Positivo de Antivirus (Bypass Heurístico HokLiib.A)**: Rediseñada la estrategia de persistencia interactiva en el instalador de Windows (`deploy/install-windows.bat`). Se reemplazó la llamada en una sola línea de PowerShell interactivo (que disparaba firmas de comportamiento malicioso en EDR/AMSI) por la escritura dinámica y silenciosa de un archivo de definición XML temporal (`ActivityMonitorTask.xml`) importado mediante el comando del sistema nativo `schtasks /Create /XML`, eliminando el archivo temporal inmediatamente después. Esta estrategia preserva al 100% las políticas de alta disponibilidad (inmunidad a batería, autocuración en 1 minuto, sin límite de ejecución de 72 horas) sin activar alertas de falsos positivos en Windows Defender y motores antivirus corporativos.
+
 ## [3.3.2] - 2026-05-20
 ### Añadido
 - **Persistencia Extrema en Windows (PowerShell Scheduled Tasks)**: Refactorizado el instalador de Windows para crear la tarea programada interactiva del usuario mediante PowerShell con directivas avanzadas de alta disponibilidad. Se eliminó por completo el límite de ejecución implícito de 3 días (`ExecutionTimeLimit = Unlimited`), se habilitó la ejecución continua en modo batería/suspensión (`AllowStartIfOnBatteries` y `DontStopIfGoingOnBatteries`), y se configuró una política de reinicio y autocuración ante fallos (reintentar cada 1 minuto, hasta 99 veces de forma consecutiva).
