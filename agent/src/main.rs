@@ -129,6 +129,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
     
+    // Prune logs older than 7 days to prevent unbounded disk growth
+    prune_old_logs(log_dir, if is_session_0 { "agent_service.log" } else { "agent_user.log" }, 7);
+    
     let version = env!("CARGO_PKG_VERSION");
     println!("ActivityMonitor Agent v{}", version);
     tracing::info!("Starting ActivityMonitor Agent v{}...", version);
@@ -253,12 +256,9 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         tracing::info!("📛 Nickname: {}", nickname);
     }
     
-    // Initialize offline cache
-    let encryption_key: [u8; 32] = std::env::var("AGENT_OFFLINE_CACHE_KEY")
-        .unwrap_or_else(|_| "dev-cache-key-change-in-production-".to_string())
-        .as_bytes()
-        .try_into()
-        .unwrap_or([0u8; 32]);
+    // Initialize offline cache with secure hardware-bound key derivation
+    let env_key = std::env::var("AGENT_OFFLINE_CACHE_KEY").ok();
+    let encryption_key = offline_cache::resolve_secure_key(env_key.as_deref(), &device_identity.device_id);
     
     let db_name = if is_session_0 { "agent_service_cache.db" } else { "agent_user_cache.db" };
     
@@ -413,3 +413,27 @@ pub fn is_running_in_session_0() -> bool {
         unsafe { libc::getuid() == 0 }
     }
 }
+
+fn prune_old_logs(log_dir: &str, prefix: &str, max_days: i64) {
+    if let Ok(entries) = std::fs::read_dir(log_dir) {
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(max_days);
+        for entry in entries.flatten() {
+            if let Ok(file_type) = entry.file_type() {
+                if file_type.is_file() {
+                    let file_name = entry.file_name().to_string_lossy().to_string();
+                    if file_name.starts_with(prefix) && file_name != prefix {
+                        if let Ok(metadata) = entry.metadata() {
+                            if let Ok(modified) = metadata.modified() {
+                                let modified_utc: chrono::DateTime<chrono::Utc> = modified.into();
+                                if modified_utc < cutoff {
+                                    let _ = std::fs::remove_file(entry.path());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

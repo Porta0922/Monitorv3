@@ -1,5 +1,13 @@
 # Changelog - ActivityMonitor Enterprise v3
 
+## [3.3.0] - 2026-05-20
+### Añadido
+- **Cifrado Vinculado al Hardware (Hardware-Bound Encryption)**: Implementado enlace de cifrado dinámico y robusto en la base de datos `OfflineCache` del agente. La clave de encriptación se deriva a través de SHA256 combinando la clave del entorno, el UUID estable del dispositivo (`device_id`) y el identificador de máquina nativo del sistema operativo (MachineGuid en Windows, machine-id en Linux y IOPlatformUUID en macOS), previniendo el descifrado no autorizado en otros hosts.
+- **Poda y Rotación de Logs de Telemetría**: Implementada lógica automática de limpieza de registros para evitar que los archivos de log (`agent_service.log` y `agent_user.log`) acumulen espacio de manera indefinida, purgando automáticamente los archivos históricos con antigüedad mayor a 7 días.
+
+### Corregido
+- **Rendimiento de SQLite (Persistent WAL Connection)**: Refactorizado `offline_cache.rs` para reutilizar una conexión única y persistente thread-safe protegida por un `Mutex`, eliminando el costo de E/S de abrir y cerrar el archivo de base de datos en cada evento. Adicionalmente se habilitó el modo Write-Ahead Logging (WAL) junto con temp_store en MEMORY y synchronous NORMAL, multiplicando la velocidad de persistencia.
+
 ## [3.2.6] - 2026-05-19
 ### Añadido
 - **Detección de Suspensión del Sistema**: Implementada lógica de detección de suspensión/bloqueo de la computadora en el bucle principal de actividad.

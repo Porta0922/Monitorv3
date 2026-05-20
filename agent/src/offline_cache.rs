@@ -1,4 +1,4 @@
-// Offline cache using SQLite + AES-GCM encryption
+// Offline cache using SQLite + AES-GCM encryption with WAL and hardware-bound secure key derivation
 use rusqlite::{Connection, Result as SqliteResult};
 use aes_gcm::{KeyInit, Aes256Gcm, aead::Aead};
 use aes_gcm::{Key, Nonce};
@@ -6,18 +6,26 @@ use rand::Rng;
 use serde_json::Value;
 use chrono::Utc;
 use uuid::Uuid;
+use std::sync::{Arc, Mutex};
+use sha2::Digest;
 
 pub struct OfflineCache {
-    db_path: String,
+    conn: Arc<Mutex<Connection>>,
     cipher: Aes256Gcm,
 }
 
 impl OfflineCache {
-    /// Initialize offline cache with encryption
+    /// Initialize offline cache with WAL connection reuse and encryption
     pub fn new(db_path: &str, encryption_key: &[u8; 32]) -> SqliteResult<Self> {
-        // Create database if not exists
         let conn = Connection::open(db_path)?;
         
+        // Optimizar SQLite para velocidad extrema de escritura y concurrencia segura
+        conn.execute_batch("
+            PRAGMA journal_mode = WAL;
+            PRAGMA synchronous = NORMAL;
+            PRAGMA temp_store = MEMORY;
+        ")?;
+
         // Create cache table
         conn.execute(
             "CREATE TABLE IF NOT EXISTS cache_events (
@@ -31,21 +39,18 @@ impl OfflineCache {
             [],
         )?;
         
-        conn.close().ok();
-        
         // Initialize cipher
         let key = Key::<Aes256Gcm>::from_slice(encryption_key);
         let cipher = Aes256Gcm::new(key);
         
         Ok(Self {
-            db_path: db_path.to_string(),
+            conn: Arc::new(Mutex::new(conn)),
             cipher,
         })
     }
 
     /// Save event to offline cache with encryption
     pub async fn save_event(&self, event_type: &str, payload: &Value) -> SqliteResult<String> {
-        let conn = Connection::open(&self.db_path)?;
         let event_id = Uuid::new_v4().to_string();
         let timestamp = Utc::now().to_rfc3339();
 
@@ -59,7 +64,8 @@ impl OfflineCache {
         let ciphertext = self.cipher.encrypt(nonce, plaintext.as_bytes())
             .map_err(|_| rusqlite::Error::InvalidQuery)?;
 
-        // Store encrypted data
+        // Reutilizar la conexión persistente con bloqueo thread-safe
+        let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO cache_events (id, event_type, encrypted_payload, nonce, timestamp, synced)
              VALUES (?1, ?2, ?3, ?4, ?5, 0)",
@@ -71,7 +77,7 @@ impl OfflineCache {
 
     /// Retrieve unsynced events from cache (FIFO order)
     pub async fn get_unsynced_events(&self) -> SqliteResult<Vec<(String, String, Value)>> {
-        let conn = Connection::open(&self.db_path)?;
+        let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, event_type, encrypted_payload, nonce FROM cache_events 
              WHERE synced = 0 ORDER BY timestamp ASC"
@@ -100,7 +106,7 @@ impl OfflineCache {
 
     /// Mark events as synced
     pub async fn mark_synced(&self, event_ids: &[String]) -> SqliteResult<()> {
-        let conn = Connection::open(&self.db_path)?;
+        let conn = self.conn.lock().unwrap();
         
         for id in event_ids {
             conn.execute(
@@ -113,9 +119,8 @@ impl OfflineCache {
     }
 
     /// Get cache statistics
-    #[allow(dead_code)]
     pub async fn get_stats(&self) -> SqliteResult<(u64, u64)> {
-        let conn = Connection::open(&self.db_path)?;
+        let conn = self.conn.lock().unwrap();
         
         let total: u64 = conn.query_row(
             "SELECT COUNT(*) FROM cache_events",
@@ -134,7 +139,7 @@ impl OfflineCache {
 
     /// Clear old synced events (cleanup)
     pub async fn cleanup_synced(&self, days_old: i64) -> SqliteResult<u64> {
-        let conn = Connection::open(&self.db_path)?;
+        let conn = self.conn.lock().unwrap();
         
         let cutoff = chrono::Utc::now() - chrono::Duration::days(days_old);
         
@@ -145,6 +150,71 @@ impl OfflineCache {
 
         Ok(deleted as u64)
     }
+}
+
+/// Obtener un identificador único persistente del hardware del sistema operativo
+fn get_os_machine_id() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        if let Ok(crypt) = hklm.open_subkey(r"SOFTWARE\Microsoft\Cryptography") {
+            if let Ok(guid) = crypt.get_value::<String, _>("MachineGuid") {
+                return guid.trim().to_string();
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(content) = std::fs::read_to_string("/etc/machine-id") {
+            return content.trim().to_string();
+        }
+        if let Ok(content) = std::fs::read_to_string("/var/lib/dbus/machine-id") {
+            return content.trim().to_string();
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        if let Ok(output) = Command::new("ioreg").args(&["-rd1", "-c", "IOPlatformExpertDevice"]).output() {
+            let out_str = String::from_utf8_lossy(&output.stdout);
+            for line in out_str.lines() {
+                if line.contains("IOPlatformUUID") {
+                    if let Some(uuid) = line.split('"').nth(3) {
+                        return uuid.trim().to_string();
+                    }
+                }
+            }
+        }
+    }
+    "default-hardware-encryption-id-value".to_string()
+}
+
+/// Generar y resolver una clave de cifrado local robusta y única, vinculada criptográficamente al hardware
+pub fn resolve_secure_key(env_key: Option<&str>, device_id: &Uuid) -> [u8; 32] {
+    let mut hasher = sha2::Sha256::new();
+    
+    // 1. Agregar la clave base configurada en el entorno (si existe)
+    if let Some(k) = env_key {
+        hasher.update(k.as_bytes());
+    } else {
+        hasher.update(b"dev-cache-key-change-in-production-");
+    }
+    
+    // 2. Vincular el UUID estable del dispositivo
+    hasher.update(device_id.as_bytes());
+    
+    // 3. Vincular el Machine ID único a nivel de sistema operativo
+    let machine_id = get_os_machine_id();
+    hasher.update(machine_id.as_bytes());
+    
+    // 4. Agregar sal criptográfica estática del agente
+    hasher.update(b"ActivityMonitor-Secure-Local-Salt-2026");
+    
+    let hash = hasher.finalize();
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&hash[..32]);
+    key
 }
 
 #[cfg(test)]
@@ -179,6 +249,11 @@ mod tests {
         assert_eq!(total, 1);
         assert_eq!(unsynced, 1);
 
+        // Liberar explícitamente la conexión SQLite para poder borrar el archivo en Windows
+        drop(cache);
+
         let _ = std::fs::remove_file(db_path);
+        let _ = std::fs::remove_file(format!("{}-wal", db_path));
+        let _ = std::fs::remove_file(format!("{}-shm", db_path));
     }
 }
