@@ -344,14 +344,14 @@ if "%MODE%"=="SERVICE" (
     echo     ^> Saltando registro de tarea de usuario - Modo Solo Servicio [SKIP]
 ) else (
     echo     ^> Creando tarea interactiva con politicas de auto-recuperacion...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "$action = New-ScheduledTaskAction -Execute '%AGENT_BIN%'; $trigger = New-ScheduledTaskTrigger -AtLogon; $principal = New-ScheduledTaskPrincipal -GroupId 'BUILTIN\Users' -RunLevel Limited; $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 99 -RestartInterval ^(New-TimeSpan -Minutes 1^) -ExecutionTimeLimit ^([TimeSpan]::Zero^) -Priority 4; Register-ScheduledTask -TaskName 'ActivityMonitorUserAgent' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force" >nul 2>&1
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$action = New-ScheduledTaskAction -Execute '%AGENT_BIN%'; $trigger = New-ScheduledTaskTrigger -AtLogon; $principal = New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Limited; $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 99 -RestartInterval '00:01:00' -ExecutionTimeLimit '00:00:00' -Priority 4; Register-ScheduledTask -TaskName 'ActivityMonitorUserAgent' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force" >nul 2>&1
     if !errorLevel! equ 0 (
         echo     ^> Tarea de inicio de sesion con persistencia extrema creada [OK]
         schtasks /Run /TN "ActivityMonitorUserAgent" >nul 2>&1
         echo     ^> Captura de actividad iniciada [OK]
     ) else (
         echo     ^> [!] PowerShell fallo al registrar la tarea. Usando fallback tradicional con schtasks...
-        schtasks /Create /SC ONLOGON /TN "ActivityMonitorUserAgent" /TR "\"%AGENT_BIN%\"" /F /IT /RI 60 /DU 24:00 >nul 2>&1
+        schtasks /Create /SC ONLOGON /TN "ActivityMonitorUserAgent" /TR "\"%AGENT_BIN%\"" /F /IT >nul 2>&1
         if !errorLevel! equ 0 (
             echo     ^> Tarea de inicio de sesion creada con exito - fallback [OK]
             schtasks /Run /TN "ActivityMonitorUserAgent" >nul 2>&1
