@@ -120,7 +120,12 @@ impl UsbFileCopyMonitor {
         if raw_drives.is_empty() || raw_drives == "null" { return Ok(Vec::new()); }
 
         #[derive(Deserialize)]
-        struct DriveInfo { DeviceID: String, FreeSpace: u64 }
+        struct DriveInfo {
+            #[serde(rename = "DeviceID")]
+            device_id: String,
+            #[serde(rename = "FreeSpace")]
+            free_space: u64,
+        }
         let drives_info: Vec<DriveInfo> = if raw_drives.starts_with('[') {
             serde_json::from_str(&raw_drives).unwrap_or_default()
         } else {
@@ -129,10 +134,10 @@ impl UsbFileCopyMonitor {
 
         let mut scan_targets = Vec::new();
         for d in drives_info {
-            let last = self.last_free_space.get(&d.DeviceID).cloned();
-            if last != Some(d.FreeSpace) {
-                scan_targets.push(d.DeviceID.clone());
-                self.last_free_space.insert(d.DeviceID, d.FreeSpace);
+            let last = self.last_free_space.get(&d.device_id).cloned();
+            if last != Some(d.free_space) {
+                scan_targets.push(d.device_id.clone());
+                self.last_free_space.insert(d.device_id, d.free_space);
             }
         }
 

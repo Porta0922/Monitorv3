@@ -5,7 +5,7 @@ use axum::{
     Json,
     extract::{Path, Query, State},
     middleware::Next,
-    http::{Method, header, HeaderMap, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
@@ -14,7 +14,7 @@ use uuid::Uuid;
 use std::sync::Arc;
 use std::collections::HashMap;
 use chrono::{Duration, Utc};
-use tower_http::cors::{CorsLayer, AllowOrigin, AllowHeaders};
+use tower_http::cors::CorsLayer;
 use futures::stream::{self, StreamExt};
 use std::convert::Infallible;
 use tokio::time::timeout;
@@ -218,7 +218,7 @@ async fn get_agent_osquery_policy(
 
 async fn register_user(
     State(_state): State<Arc<AppState>>,
-    Json(payload): Json<serde_json::Value>,
+    Json(_payload): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     // TODO: Extract username, password from payload
     // TODO: Hash password using AuthManager
@@ -487,7 +487,7 @@ async fn update_device(
 }
 
 async fn ingest_activity_logs(
-    State(state): State<Arc<AppState>>,
+    State(_state): State<Arc<AppState>>,
     Json(_payload): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     // TODO: Extract activity logs batch
@@ -1813,7 +1813,7 @@ async fn get_metrics_summary(
 
 async fn upload_heatmap(
     State(_state): State<Arc<AppState>>,
-    Json(payload): Json<serde_json::Value>,
+    Json(_payload): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     // TODO: Extract heatmap data from payload
     // TODO: Validate heatmap format

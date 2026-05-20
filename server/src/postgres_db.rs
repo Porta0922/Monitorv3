@@ -108,6 +108,7 @@ pub struct TopApp {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct StreamEvent {
     pub device_id: String,
     pub app: String,
@@ -684,6 +685,7 @@ impl Database {
         })
     }
 
+    #[allow(dead_code)]
     pub async fn get_activity_logs(&self, device_id: Option<Uuid>) -> Result<Vec<ActivityLog>, sqlx::Error> {
         let logs = if let Some(did) = device_id {
             sqlx::query_as::<_, (Uuid, Uuid, String, String, i64, DateTime<Utc>)>(
@@ -746,7 +748,6 @@ impl Database {
                 query_builder.push(" AND timestamp <= ");
             } else {
                 query_builder.push(" WHERE timestamp <= ");
-                has_where = true;
             }
             query_builder.push_bind(to_ts);
         }
@@ -1977,6 +1978,7 @@ impl Database {
             .collect())
     }
 
+    #[allow(dead_code)]
     pub async fn update_device_seen(&self, device_id: &str) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE devices SET last_seen = NOW() WHERE device_id = $1")
             .bind(device_id)

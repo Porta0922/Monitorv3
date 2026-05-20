@@ -117,40 +117,35 @@ Write-Host @"
   (Publishing)        (Message Queue)       (Consumer)        (Storage)        (Display)
        |-------────────→|                      |                |                |
                              |-----------→ Consumes --------→ INSERT ----→ API Query
-                                          (event handler)      (TODO!)        Display
+                                          (event handlers)  (PERSISTED)       Display
 
-🔴 MOST LIKELY ISSUE:
+✅ PIPELINE STATUS:
+All event handlers are FULLY implemented! The telemetry events received from the agent via
+RabbitMQ are consumed, normalized, deduplicated (idempotency checks), and persisted to the
+PostgreSQL database.
 
-The event handlers are TODO stubs - they receive events but don't save to database!
+ File: server/src/rabbitmq_consumer.rs (FULLY IMPLEMENTED)
+ - handle_activity_event()      -> Saved to PostgreSQL
+ - handle_inventory_event()     -> Saved to PostgreSQL
+ - handle_heartbeat_event()     -> Saved to PostgreSQL
+ - handle_usb_event()           -> Saved to PostgreSQL
+ - handle_wifi_event()          -> Saved to PostgreSQL
+ - handle_running_apps_event()  -> Saved to PostgreSQL
+ - handle_security_event()      -> Saved to PostgreSQL
 
-File: server/src/rabbitmq_consumer.rs
-Lines: 172-187
+📋 NEXT DIAGNOSTIC STEPS:
 
-The handlers log "Activity event received" but don't execute INSERT statements.
+1. VERIFY AGENT STATUS:
+   → Ensure the agent binary is running (as Service or User session task).
+   → Check logs folder in the agent's install path.
 
-SOLUTION: Implement database storage in the handlers.
+2. VERIFY RABBITMQ STATUS:
+   → Open http://localhost:15672 (guest/guest) to monitor queue traffic.
+   
+3. REFRESH DASHBOARD:
+   → Open http://localhost:5173 to view real-time synchronized telemetry.
 
-📋 NEXT STEPS (Choose One):
-
-1. QUICK FIX (5 min)
-   → Implement handle_activity_event() to save to PostgreSQL
-   → Implement handle_inventory_event() to save to PostgreSQL
-   → Restart server
-   → Refresh dashboard
-
-2. VERIFY FIRST (2 min)
-   → Open http://localhost:15672
-   → Check if queues have messages > 0
-   → Check server logs for "Activity event received"
-   → If yes → problem is database storage (as expected)
-
-3. FULL SETUP (30 min)
-   → Create PostgreSQL schema
-   → Implement all handlers
-   → Update API endpoints
-   → Test end-to-end
-
-" -ForegroundColor Green
+"@ -ForegroundColor Green
 
 Write-Host "`n💾 PostgreSQL Connection Test..." -ForegroundColor Yellow
 try {

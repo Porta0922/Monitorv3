@@ -132,7 +132,7 @@ AGENT_OFFLINE_CACHE_KEY=$AGENT_OFFLINE_CACHE_KEY
 AGENT_SERVER_URL=$AGENT_SERVER_URL
 RABBITMQ_URL=$RABBITMQ_URL
 ENVEOF
-    chmod 600 "$ENV_FILE"
+    chmod 644 "$ENV_FILE"
     systemctl restart $SERVICE_NAME.service 2>/dev/null || true
     read -p "Presione Enter para volver..."
     show_menu
@@ -168,7 +168,7 @@ AGENT_OFFLINE_CACHE_KEY=$AGENT_OFFLINE_CACHE_KEY
 AGENT_SERVER_URL=$AGENT_SERVER_URL
 RABBITMQ_URL=$RABBITMQ_URL
 ENVEOF
-    chmod 600 "$ENV_FILE"
+    chmod 644 "$ENV_FILE"
 
     echo "[3/6] Compilando agente (Obligatorio en Linux)..."
     if [ ! -f "$TARGET_BIN" ]; then
@@ -223,10 +223,38 @@ ENVEOF
     if ! id -u activity-monitor &>/dev/null; then
         useradd --system --home $DATA_DIR --shell /usr/sbin/nologin activity-monitor
     fi
-    CURRENT_USER=$(logname 2>/dev/null || echo $USER)
-    usermod -aG input,netdev "$CURRENT_USER"
+    # Determine local desktop user
+    CURRENT_USER=$(logname 2>/dev/null || echo $SUDO_USER || echo $USER)
+    if [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != "root" ]; then
+        echo "[*] Agregando usuario '$CURRENT_USER' a los grupos input y netdev..."
+        usermod -aG input,netdev "$CURRENT_USER" || true
+    fi
+
+    # Validate Wayland environment
+    if [ "$XDG_SESSION_TYPE" = "wayland" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+        echo ""
+        echo "⚠️  ADVERTENCIA: Se detecto una sesion grafica WAYLAND activa."
+        echo "   La captura de teclas global (keystroke tracker) y foco de ventanas"
+        echo "   puede verse limitada bajo Wayland debido a restricciones de seguridad."
+        echo "   Se recomienda utilizar una sesion X11 (Xorg) si experimenta problemas"
+        echo "   de telemetria interactiva de usuario."
+        echo ""
+    fi
+
+    # Check input group device permissions
+    if [ -d "/dev/input" ]; then
+        echo "[*] Verificando permisos de dispositivos de entrada en /dev/input..."
+        # Add udev rules if they don't exist to ensure input group has access
+        if [ ! -f "/etc/udev/rules.d/99-input.rules" ]; then
+            echo 'KERNEL=="event*", NAME="input/%k", MODE="0660", GROUP="input"' > /etc/udev/rules.d/99-input.rules
+            udevadm control --reload-rules && udevadm trigger || true
+            echo "    [OK] Regla udev para /dev/input configurada."
+        fi
+    fi
+
     chown -R root:root "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR"
-    chmod 750 "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR"
+    chmod 755 "$CONFIG_DIR"
+    chmod 1777 "$LOG_DIR" "$DATA_DIR"
 
     echo "[6/6] Iniciando servicio..."
     configure_firewall
@@ -240,6 +268,7 @@ Type=simple
 User=root
 WorkingDirectory=$DATA_DIR
 EnvironmentFile=-$ENV_FILE
+Environment=AGENT_MODE=SERVICE
 ExecStart=$AGENT_PATH
 Restart=on-failure
 [Install]
@@ -252,15 +281,23 @@ EOF
 
     if [ "$MODE" != "SERVICE" ]; then
         USER_HOME=$(eval echo ~$SUDO_USER)
-        AUTOSTART_DIR="$USER_HOME/.config/autostart"
-        mkdir -p "$AUTOSTART_DIR"
-        cat > "$AUTOSTART_DIR/activity-monitor.desktop" << EOF
+        if [ -d "$USER_HOME" ]; then
+            AUTOSTART_DIR="$USER_HOME/.config/autostart"
+            mkdir -p "$AUTOSTART_DIR"
+            cat > "$AUTOSTART_DIR/activity-monitor.desktop" << EOF
 [Desktop Entry]
 Type=Application
 Name=ActivityMonitor Agent
-Exec=$AGENT_PATH
+Comment=ActivityMonitor Telemetry User Agent
+Exec=env AGENT_MODE=USER $AGENT_PATH
+Terminal=false
+Categories=Utility;
+X-GNOME-Autostart-enabled=true
 EOF
-        chown -R $SUDO_USER:$SUDO_USER "$USER_HOME/.config"
+            chown -R $SUDO_USER:$SUDO_USER "$USER_HOME/.config"
+        else
+            echo "⚠️  No se pudo encontrar la carpeta personal de $SUDO_USER para configurar Autostart."
+        fi
     fi
 
     echo "========================================"

@@ -218,7 +218,7 @@ impl RabbitMQConsumer {
                 error!("❌ Failed to setup security_queue: {}", e);
                 println!("ERROR CRÍTICO: security_queue falló");
                 e
-            })?;;
+            })?;
 
         println!("");
         println!("✅ RabbitMQ Queues initialized");

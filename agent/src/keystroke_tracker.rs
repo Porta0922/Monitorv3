@@ -1,8 +1,7 @@
 // agent/src/keystroke_tracker.rs
 // Enhanced keystroke and idle time tracking
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicI64, AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicI64, Ordering};
 use chrono::{DateTime, Utc, TimeZone};
 
 /// Idle detection threshold - User is idle if no activity for N seconds
@@ -14,6 +13,7 @@ pub struct KeystrokeStats {
     pub keystroke_count: u64,
     pub mouse_moves_count: u64,
     pub mouse_clicks_count: u64,
+    #[allow(dead_code)]
     pub last_keystroke_time: Option<DateTime<Utc>>,
     pub is_idle: bool,
     pub idle_duration_seconds: u64,
@@ -87,8 +87,11 @@ impl KeystrokeTracker {
     }
 
     // Keep async wrappers for existing callers if needed, but they are not used in hooks anymore
+    #[allow(dead_code)]
     pub async fn record_keystroke(&self) { self.record_keystroke_sync(); }
+    #[allow(dead_code)]
     pub async fn record_mouse_movement(&self) { self.record_mouse_movement_sync(); }
+    #[allow(dead_code)]
     pub async fn record_mouse_click(&self) { self.record_mouse_click_sync(); }
 
     /// Check idle status based on last activity time
@@ -97,7 +100,7 @@ impl KeystrokeTracker {
         let now = Utc::now();
 
         // Daily Reset Logic
-        use chrono::{Local, Datelike};
+        use chrono::Local;
         let now_local = Local::now();
         
         let last_local: DateTime<Local> = DateTime::from(status.last_idle_accumulation_time);

@@ -46,6 +46,7 @@ impl AuthManager {
     }
 
     /// Verify JWT token and extract claims
+    #[allow(dead_code)]
     pub fn verify_token(&self, token: &str) -> Result<Claims, Box<dyn std::error::Error>> {
         let token_data = decode::<Claims>(
             token,
@@ -57,6 +58,7 @@ impl AuthManager {
     }
 
     /// Hash password using Argon2id
+    #[allow(dead_code)]
     pub fn hash_password(&self, password: &str) -> Result<String, Box<dyn std::error::Error>> {
         let argon2 = Argon2::default();
         let salt = SaltString::generate(thread_rng());
@@ -67,6 +69,7 @@ impl AuthManager {
     }
 
     /// Verify password against hash
+    #[allow(dead_code)]
     pub fn verify_password(&self, password: &str, hash: &str) -> Result<bool, Box<dyn std::error::Error>> {
         let parsed_hash = PasswordHash::new(hash)
             .map_err(|e| e.to_string())?;
@@ -77,6 +80,7 @@ impl AuthManager {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct TokenResponse {
     pub token: String,
     pub expires_in: i64,

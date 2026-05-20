@@ -1,9 +1,7 @@
 mod api;
 mod auth;
 mod config;
-mod db;
 mod rabbitmq_consumer;
-mod whitelist;
 mod postgres_db;
 
 use std::sync::Arc;

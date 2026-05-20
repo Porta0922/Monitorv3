@@ -3,7 +3,7 @@ use rusqlite::{Connection, Result as SqliteResult};
 use aes_gcm::{KeyInit, Aes256Gcm, aead::Aead};
 use aes_gcm::{Key, Nonce};
 use rand::Rng;
-use serde_json::{json, Value};
+use serde_json::Value;
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -113,6 +113,7 @@ impl OfflineCache {
     }
 
     /// Get cache statistics
+    #[allow(dead_code)]
     pub async fn get_stats(&self) -> SqliteResult<(u64, u64)> {
         let conn = Connection::open(&self.db_path)?;
         
@@ -149,6 +150,7 @@ impl OfflineCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[tokio::test]
     async fn test_cache_encryption() {

@@ -95,11 +95,28 @@ echo Creating configuration file...
 ) > "%ENV_FILE%"
 echo [+] Credenciales actualizadas en: %ENV_FILE%
 
+echo [*] Reiniciando procesos del agente...
 taskkill /F /IM activity-monitor-agent.exe >nul 2>&1
-    
-    echo [*] Iniciando agente...
-    start "" "%AGENT_PATH%"
-    echo [+] Credenciales actualizadas y agente reiniciado.
+
+sc query ActivityMonitor >nul 2>&1
+if !errorLevel! equ 0 (
+    echo [*] Reiniciando servicio de Windows ActivityMonitor...
+    net stop ActivityMonitor >nul 2>&1
+    net start ActivityMonitor >nul 2>&1
+)
+
+schtasks /query /TN "ActivityMonitorUserAgent" >nul 2>&1
+if !errorLevel! equ 0 (
+    echo [*] Reiniciando tarea programada de usuario...
+    schtasks /Run /TN "ActivityMonitorUserAgent" >nul 2>&1
+) else (
+    if exist "%AGENT_BIN%" (
+        start "" "%AGENT_BIN%"
+    ) else if exist "%AGENT_PATH%" (
+        start "" "%AGENT_PATH%"
+    )
+)
+echo [+] Credenciales actualizadas y agente reiniciado.
 pause
 goto MAIN_MENU
 
@@ -339,6 +356,10 @@ if not "%MODE%"=="USER" (
     sc start ActivityMonitor >nul 2>&1
 )
 echo     ^> Proceso finalizado [OK]
+
+REM Clean up temporary installation downloads
+if exist "%TEMP%\rustup-init.exe" del /F /Q "%TEMP%\rustup-init.exe" >nul 2>&1
+if exist "%OSQUERY_MSI_PATH%" del /F /Q "%OSQUERY_MSI_PATH%" >nul 2>&1
 
 echo.
 echo ========================================

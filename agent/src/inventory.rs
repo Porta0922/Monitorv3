@@ -1,6 +1,5 @@
 // Software inventory scanner
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 use std::collections::HashSet;
 use chrono::{DateTime, Utc};
 use crate::monitoring;
@@ -318,10 +317,7 @@ fn is_executable(path: &Path) -> bool {
     }
 }
 
-#[cfg(not(unix))]
-fn is_executable(_path: &Path) -> bool {
-    true  // On Windows, assume files can be checked by extension
-}
+
 
 #[cfg(test)]
 mod tests {
