@@ -129,6 +129,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
     
+    // Register custom panic hook to log all fatal errors to disk
+    register_panic_hook();
+
+    #[cfg(windows)]
+    {
+        // Register application restart with Windows Error Reporting (WER)
+        register_windows_restart();
+    }
+    
     // Prune logs older than 7 days to prevent unbounded disk growth
     prune_old_logs(log_dir, if is_session_0 { "agent_service.log" } else { "agent_user.log" }, 7);
     
@@ -436,4 +445,42 @@ fn prune_old_logs(log_dir: &str, prefix: &str, max_days: i64) {
         }
     }
 }
+
+fn register_panic_hook() {
+    std::panic::set_hook(Box::new(|panic_info| {
+        let location = panic_info.location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "unknown location".to_string());
+        
+        let payload = panic_info.payload();
+        let message = if let Some(s) = payload.downcast_ref::<&str>() {
+            *s
+        } else if let Some(s) = payload.downcast_ref::<String>() {
+            s.as_str()
+        } else {
+            "no message"
+        };
+        
+        tracing::error!("🚨 FATAL CRASH: Agent panicked at {}: {}", location, message);
+        
+        // Wait briefly for the non-blocking logging thread to flush the panic message to disk.
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }));
+}
+
+#[cfg(windows)]
+fn register_windows_restart() {
+    unsafe {
+        // winapi::um::winbase::RegisterApplicationRestart registers the application for restart by Windows Error Reporting (WER).
+        // Passing std::ptr::null() restarts the app with its original command line arguments.
+        // 0 flags represents default restart settings.
+        let hr = winapi::um::winbase::RegisterApplicationRestart(std::ptr::null(), 0);
+        if hr == 0 {
+            tracing::info!("✅ Application restart registered with Windows Error Reporting (WER)");
+        } else {
+            tracing::warn!("⚠️ Failed to register application restart with WER (HRESULT: {})", hr);
+        }
+    }
+}
+
 

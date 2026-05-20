@@ -1,5 +1,11 @@
 # Changelog - ActivityMonitor Enterprise v3
 
+## [3.3.2] - 2026-05-20
+### Añadido
+- **Persistencia Extrema en Windows (PowerShell Scheduled Tasks)**: Refactorizado el instalador de Windows para crear la tarea programada interactiva del usuario mediante PowerShell con directivas avanzadas de alta disponibilidad. Se eliminó por completo el límite de ejecución implícito de 3 días (`ExecutionTimeLimit = Unlimited`), se habilitó la ejecución continua en modo batería/suspensión (`AllowStartIfOnBatteries` y `DontStopIfGoingOnBatteries`), y se configuró una política de reinicio y autocuración ante fallos (reintentar cada 1 minuto, hasta 99 veces de forma consecutiva).
+- **Auto-Recuperación Nativa ante Caídas (WER Integration)**: Integración con la API de Windows `RegisterApplicationRestart` a través de `winapi`. Si el agente sufre un crash, pánico o cuelgue inesperado, el subsistema de Windows Error Reporting (WER) reiniciará automáticamente la aplicación de forma transparente con sus argumentos originales.
+- **Trazabilidad Absoluta de Fallos (Custom Panic Hook)**: Diseñado un capturador de pánicos de Rust personalizado (`std::panic::set_hook`). En caso de un pánico fatal, formatea los detalles del error (archivo, línea, columna y mensaje) y los escribe directamente en el archivo de log físico (`agent_user.log` / `agent_service.log`) mediante `tracing::error!`, aplicando un retardo síncrono para garantizar que el buffer del logger se guarde antes de la terminación del proceso.
+
 ## [3.3.1] - 2026-05-20
 ### Añadido
 - **Autocuración de Caché SQLite (Self-Healing Cache)**: Implementado mecanismo automático de diagnóstico y recuperación en la inicialización de `OfflineCache`. Si la base de datos se corrompe por fallos del sistema o cortes de energía, se respalda el archivo dañado y se regenera una base de datos operativa transparente para garantizar la continuidad del monitoreo.

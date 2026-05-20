@@ -1,6 +1,6 @@
 # ActivityMonitor Enterprise v3
 
-[![Version](https://img.shields.io/badge/version-3.3.1-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-3.3.2-blue.svg)](CHANGELOG.md)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-Enterprise-red.svg)]()
 

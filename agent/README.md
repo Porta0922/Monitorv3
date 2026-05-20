@@ -1,6 +1,6 @@
 # ActivityMonitor Agent (Rust)
 
-[![Version](https://img.shields.io/badge/version-3.3.1-blue.svg)](../CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-3.3.2-blue.svg)](../CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)]()
 
 *Actualizado: 20 de Mayo, 2026*
@@ -23,7 +23,7 @@ El agente está organizado bajo una estructura modular de tareas independientes 
 
 ---
 
-## 🏛️ Arquitectura y Optimización (v3.3.1)
+## 🏛️ Arquitectura y Optimización (v3.3.2)
 
 - **Runtime Asíncrono**: Basado en `tokio` para concurrencia ligera de E/S.
 - **Comunicación en Tiempo Real**: Publicación directa sobre colas AMQP mediante RabbitMQ.
@@ -32,12 +32,12 @@ El agente está organizado bajo una estructura modular de tareas independientes 
   - Utiliza una conexión persistente thread-safe compartida mediante `Arc<Mutex<Connection>>` en `offline_cache.rs` para eliminar el alto costo de E/S de abrir/cerrar archivos constantemente.
   - Modo **WAL (Write-Ahead Logging)** habilitado con `synchronous = NORMAL` y `temp_store = MEMORY` garantizando persistencia ultrarrápida.
 - **Cifrado Vinculado a Hardware (Hardware-Bound)**:
-  - La clave de cifrado local se deriva dinámicamente (`resolve_secure_key`) utilizando SHA-256 combinando la clave de entorno, el UUID único del dispositivo y la huella de hardware del sistema operativo:
-    - **Windows**: `MachineGuid` de registro.
-    - **Linux**: `/var/lib/dbus/machine-id` o `/etc/machine-id`.
-    - **macOS**: `IOPlatformUUID` vía IOKit.
-  - Previene el descifrado y lectura de la caché offline en cualquier otro host no autorizado.
-- **Poda Automática de Logs**: Limpieza automática de logs de depuración (`agent_service.log` y `agent_user.log`) antiguos con antigüedad superior a 7 días en cada arranque.
+  - La clave de cifrado local se deriva dinámicamente (`resolve_secure_key`) utilizando SHA-256 combinando la clave de entorno, el UUID único del dispositivo y la huella de hardware del sistema operativo.
+- **Persistencia Extrema y Auto-Recuperación (Windows)**:
+  - **Custom Panic Hook**: Captura pánicos fatales de Rust y escribe detalles de depuración con trazas directamente a los archivos físicos de logs (`agent_user.log` y `agent_service.log`).
+  - **Integración WER (Windows Error Reporting)**: Registro nativo mediante `RegisterApplicationRestart` para auto-reiniciar el proceso en caso de crashes, cuelgues o pánicos del sistema.
+  - **Watchdog Avanzado en Batería y Suspensión**: Configuración del programador de tareas en Windows mediante PowerShell que elimina el límite de 3 días de ejecución (`ExecutionTimeLimit = Unlimited`), permite correr en modo batería y reintenta levantar el servicio cada 1 minuto de forma indefinida en caso de fallos.
+- **Poda Automática de Logs**: Limpieza automática de logs de depuración antiguos con antigüedad superior a 7 días en cada arranque.
 
 ---
 
