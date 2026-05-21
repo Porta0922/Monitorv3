@@ -103,6 +103,17 @@ if [ -d "/dev/input" ]; then
     fi
 fi
 
+# Desactivar Wayland para forzar X11 globalmente si se detecta gdm3
+if [ -f "/etc/gdm3/custom.conf" ]; then
+    if grep -q "#WaylandEnable=false" /etc/gdm3/custom.conf; then
+        sed -i 's/#WaylandEnable=false/WaylandEnable=false/' /etc/gdm3/custom.conf
+    elif grep -q "WaylandEnable=true" /etc/gdm3/custom.conf; then
+        sed -i 's/WaylandEnable=true/WaylandEnable=false/' /etc/gdm3/custom.conf
+    elif ! grep -q "WaylandEnable=" /etc/gdm3/custom.conf; then
+        sed -i '/\[daemon\]/a WaylandEnable=false' /etc/gdm3/custom.conf
+    fi
+fi
+
 chown -R root:root "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR"
 chmod 755 "$CONFIG_DIR"
 chmod 1777 "$LOG_DIR" "$DATA_DIR"

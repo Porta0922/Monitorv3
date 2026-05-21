@@ -492,13 +492,80 @@ fn capture_active_window_windows() -> Option<WindowCapture> {
     }
 }
 
-// Linux implementation (basic - requires x11-clipboard or similar)
+// Linux implementation (uses xprop to query X11/XWayland active window properties)
 #[cfg(target_os = "linux")]
 fn capture_active_window_linux() -> Option<WindowCapture> {
-    // Linux window title capture requires X11 or Wayland libraries
-    // For now, return None as this requires additional dependencies
-    // Consider adding: x11-clipboard or wmctrl integration
-    None
+    use std::process::Command;
+
+    // 1. Get the active window ID
+    let output = Command::new("xprop")
+        .args(["-root", "_NET_ACTIVE_WINDOW"])
+        .output()
+        .ok()?;
+
+    let output_str = String::from_utf8_lossy(&output.stdout);
+    let window_id = output_str
+        .split("window id #")
+        .nth(1)?
+        .trim()
+        .split_whitespace()
+        .next()?;
+
+    if window_id == "0x0" {
+        return None;
+    }
+
+    // 2. Get the window name and class details
+    let details_output = Command::new("xprop")
+        .args(["-id", window_id, "WM_CLASS", "WM_NAME", "_NET_WM_NAME"])
+        .output()
+        .ok()?;
+
+    let details_str = String::from_utf8_lossy(&details_output.stdout);
+    
+    let mut app_name = String::new();
+    let mut window_title = String::new();
+
+    for line in details_str.lines() {
+        if line.starts_with("WM_CLASS") {
+            // e.g. WM_CLASS(STRING) = "google-chrome", "Google-chrome"
+            if let Some(val) = line.split('=').nth(1) {
+                if let Some(first_quote) = val.find('"') {
+                    if let Some(second_quote) = val[first_quote + 1..].find('"') {
+                        app_name = val[first_quote + 1..first_quote + 1 + second_quote].to_string();
+                    }
+                }
+            }
+        } else if line.starts_with("_NET_WM_NAME") || line.starts_with("WM_NAME") {
+            // e.g. _NET_WM_NAME(UTF8_STRING) = "Google Chrome"
+            if window_title.is_empty() {
+                if let Some(val) = line.split('=').nth(1) {
+                    if let Some(first_quote) = val.find('"') {
+                        if let Some(second_quote) = val[first_quote + 1..].find('"') {
+                            window_title = val[first_quote + 1..first_quote + 1 + second_quote].to_string();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if app_name.is_empty() && window_title.is_empty() {
+        return None;
+    }
+
+    if app_name.is_empty() {
+        app_name = "Unknown".to_string();
+    }
+    if window_title.is_empty() {
+        window_title = "Sin titulo".to_string();
+    }
+
+    Some(WindowCapture {
+        app_name,
+        window_title,
+        timestamp: Utc::now(),
+    })
 }
 
 // macOS implementation (requires Cocoa framework or osascript)

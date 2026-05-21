@@ -228,12 +228,26 @@ ENVEOF
         usermod -aG input,netdev "$CURRENT_USER" || true
     fi
 
-    # Validate Wayland environment
+    # Validate Wayland environment and force X11 if GDM is used
+    if [ -f "/etc/gdm3/custom.conf" ]; then
+        echo "[*] Optimizando gestor gdm3 para forzar el uso de X11 (Xorg)..."
+        if grep -q "#WaylandEnable=false" /etc/gdm3/custom.conf; then
+            sed -i 's/#WaylandEnable=false/WaylandEnable=false/' /etc/gdm3/custom.conf
+            echo "    [OK] Desactivado Wayland en /etc/gdm3/custom.conf."
+        elif grep -q "WaylandEnable=true" /etc/gdm3/custom.conf; then
+            sed -i 's/WaylandEnable=true/WaylandEnable=false/' /etc/gdm3/custom.conf
+            echo "    [OK] Forzado WaylandEnable=false en /etc/gdm3/custom.conf."
+        elif ! grep -q "WaylandEnable=" /etc/gdm3/custom.conf; then
+            sed -i '/\[daemon\]/a WaylandEnable=false' /etc/gdm3/custom.conf
+            echo "    [OK] Agregado WaylandEnable=false en /etc/gdm3/custom.conf."
+        fi
+    fi
+
     if [ "$XDG_SESSION_TYPE" = "wayland" ] || [ -n "$WAYLAND_DISPLAY" ]; then
         echo ""
-        echo "⚠️  ADVERTENCIA: Se detecto una sesion grafica WAYLAND activa."
-        echo "   La captura de teclas global y foco de ventanas requiere X11 (Xorg)."
-        echo "   Por favor, configure su pantalla de inicio en X11 si nota falta de telemetria."
+        echo "⚠️  ADVERTENCIA: Se detecto una sesion grafica WAYLAND activa en este momento."
+        echo "   Hemos configurado el gestor grafico para desactivar Wayland de forma permanente."
+        echo "   Para que el cambio surta efecto y empiece a reportar actividad, reinicie el equipo."
         echo ""
     fi
 
