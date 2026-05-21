@@ -1,5 +1,9 @@
 # Changelog - ActivityMonitor Enterprise v3
 
+## [3.3.4] - 2026-05-21
+### Añadido
+- **Soporte de Ejecución en Modo Usuario sin Root (Linux)**: Se corrigió un fallo crítico en el agente de Linux que provocaba un pánico instantáneo (`PermissionDenied`) al intentar ejecutarse en modo usuario local (sin privilegios de root). El logger (`tracing-appender` con `agent_user.log`), la base de datos de caché local (`agent_user_cache.db`), y los metadatos de identidad (`device_id.json` y `device_nickname.txt`) ahora se direccionan automáticamente al directorio personal del usuario (`~/.local/share/activity-monitor/`) si no se ejecuta como `root` (UID != 0). Se garantiza la creación recursiva de estos directorios al arrancar para evitar fallos de inicialización.
+
 ## [3.3.3] - 2026-05-20
 ### Añadido
 - **Mitigación de Falso Positivo de Antivirus (Bypass Heurístico HokLiib.A)**: Rediseñada la estrategia de persistencia interactiva en el instalador de Windows (`deploy/install-windows.bat`). Se reemplazó la llamada en una sola línea de PowerShell interactivo (que disparaba firmas de comportamiento malicioso en EDR/AMSI) por la escritura dinámica y silenciosa de un archivo de definición XML temporal (`ActivityMonitorTask.xml`) importado mediante el comando del sistema nativo `schtasks /Create /XML`, eliminando el archivo temporal inmediatamente después. Esta estrategia preserva al 100% las políticas de alta disponibilidad (inmunidad a batería, autocuración en 1 minuto, sin límite de ejecución de 72 horas) sin activar alertas de falsos positivos en Windows Defender y motores antivirus corporativos.
