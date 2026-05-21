@@ -17,16 +17,36 @@ REM Configuration
 set AGENT_NAME=ActivityMonitorAgent
 set AGENT_VERSION=3.3.3
 
-REM Resilient USB Paths
-if exist "%~dp0..\agent\Cargo.toml" (
-    set AGENT_PATH=%~dp0..\activity-monitor-agent.exe
-    set SRC_PATH=%~dp0..\agent
-) else if exist "%~dp0activity-monitor-agent.exe" (
+REM Resilient USB Paths (Searches for pre-compiled binary in multiple candidate locations first)
+set AGENT_PATH=
+if exist "%~dp0activity-monitor-agent.exe" (
     set AGENT_PATH=%~dp0activity-monitor-agent.exe
+) else if exist "%~dp0..\activity-monitor-agent.exe" (
+    set AGENT_PATH=%~dp0..\activity-monitor-agent.exe
+) else if exist "%~dp0..\..\target\release\activity-monitor-agent.exe" (
+    set AGENT_PATH=%~dp0..\..\target\release\activity-monitor-agent.exe
+)
+
+REM Detect source code folder for fallback compilation
+set SRC_PATH=
+if exist "%~dp0..\agent\Cargo.toml" (
+    set SRC_PATH=%~dp0..\agent
+) else if exist "%~dp0agent\Cargo.toml" (
     set SRC_PATH=%~dp0agent
-) else (
-    set AGENT_PATH=%~dp0\..\..\target\release\activity-monitor-agent.exe
-    set SRC_PATH=%~dp0\..\..
+) else if exist "%~dp0..\..\Cargo.toml" (
+    set SRC_PATH=%~dp0..\..
+)
+
+REM Default AGENT_PATH if not found
+if "%AGENT_PATH%"=="" (
+    if not "%SRC_PATH%"=="" (
+        if exist "%SRC_PATH%\Cargo.toml" (
+            set AGENT_PATH=%SRC_PATH%\..\activity-monitor-agent.exe
+        )
+    )
+)
+if "%AGENT_PATH%"=="" (
+    set AGENT_PATH=%~dp0activity-monitor-agent.exe
 )
 
 set CONFIG_DIR=%PROGRAMDATA%\ActivityMonitor
