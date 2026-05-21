@@ -1,5 +1,6 @@
 [workspace]
 members = ["agent", "server"]
+exclude = ["Instaladores/agent"]
 resolver = "2"
 
 [workspace.package]

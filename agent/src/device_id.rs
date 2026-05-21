@@ -8,7 +8,23 @@ fn get_data_dir() -> String {
     if cfg!(windows) {
         r"C:\ProgramData\ActivityMonitor".to_string()
     } else {
-        "/var/lib/activity-monitor".to_string()
+        #[cfg(not(windows))]
+        {
+            let is_root = unsafe { libc::getuid() == 0 };
+            if is_root {
+                "/var/lib/activity-monitor".to_string()
+            } else {
+                if let Ok(home) = std::env::var("HOME") {
+                    format!("{}/.local/share/activity-monitor", home)
+                } else {
+                    "/tmp/activity-monitor".to_string()
+                }
+            }
+        }
+        #[cfg(windows)]
+        {
+            r"C:\ProgramData\ActivityMonitor".to_string()
+        }
     }
 }
 

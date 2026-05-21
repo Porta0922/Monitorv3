@@ -109,17 +109,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     dotenvy::from_path(env_path).ok();
 
+    let is_session_0 = is_running_in_session_0();
+
     // Initialize logging with both console and file output
     let log_dir = if cfg!(windows) {
-        r"C:\ProgramData\ActivityMonitor\logs"
+        r"C:\ProgramData\ActivityMonitor\logs".to_string()
     } else {
-        "/var/log/activity-monitor"
+        if is_session_0 {
+            "/var/log/activity-monitor".to_string()
+        } else {
+            if let Ok(home) = std::env::var("HOME") {
+                format!("{}/.local/share/activity-monitor/logs", home)
+            } else {
+                "/tmp/activity-monitor/logs".to_string()
+            }
+        }
     };
     
-    let is_session_0 = is_running_in_session_0();
+    // Ensure the log directory exists
+    let _ = std::fs::create_dir_all(&log_dir);
+    
     let log_filename = if is_session_0 { "agent_service.log" } else { "agent_user.log" };
     
-    let file_appender = tracing_appender::rolling::daily(log_dir, log_filename);
+    let file_appender = tracing_appender::rolling::daily(&log_dir, log_filename);
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
     use tracing_subscriber::{fmt, prelude::*, Registry};
@@ -139,7 +151,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     
     // Prune logs older than 7 days to prevent unbounded disk growth
-    prune_old_logs(log_dir, if is_session_0 { "agent_service.log" } else { "agent_user.log" }, 7);
+    prune_old_logs(&log_dir, if is_session_0 { "agent_service.log" } else { "agent_user.log" }, 7);
     
     let version = env!("CARGO_PKG_VERSION");
     println!("ActivityMonitor Agent v{}", version);
@@ -274,8 +286,21 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let db_path = if cfg!(windows) {
         std::path::PathBuf::from(r"C:\ProgramData\ActivityMonitor").join(db_name)
     } else {
-        std::path::PathBuf::from("/var/lib/activity-monitor").join(db_name)
+        if is_session_0 {
+            std::path::PathBuf::from("/var/lib/activity-monitor").join(db_name)
+        } else {
+            let user_dir = if let Ok(home) = std::env::var("HOME") {
+                std::path::PathBuf::from(home).join(".local/share/activity-monitor")
+            } else {
+                std::path::PathBuf::from("/tmp/activity-monitor")
+            };
+            user_dir.join(db_name)
+        }
     };
+
+    if let Some(parent) = db_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
 
     let cache = Arc::new(
         offline_cache::OfflineCache::new(db_path.to_str().unwrap_or(db_name), &encryption_key)
