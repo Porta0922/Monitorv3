@@ -66,7 +66,7 @@ if [ ! -f "$TARGET_BIN" ]; then
     
     if command -v apt-get &> /dev/null; then
         apt-get update -y >/dev/null 2>&1
-        apt-get install -y libssl-dev pkg-config build-essential libxtst-dev libx11-dev libwayland-dev libclang-dev libxcb1-dev libxrandr-dev libdbus-1-dev libpipewire-0.3-dev >/dev/null 2>&1
+        apt-get install -y libssl-dev pkg-config build-essential libxtst-dev libx11-dev libwayland-dev libclang-dev libxcb1-dev libxrandr-dev libdbus-1-dev libpipewire-0.3-dev libegl-dev libxkbcommon-dev >/dev/null 2>&1
     fi
 
     if [ -f "$SRC_PATH/Cargo.toml" ]; then
