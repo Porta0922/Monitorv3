@@ -528,16 +528,14 @@ fn capture_active_window_linux() -> Option<WindowCapture> {
             // Attempt to use xcap for X11/Wayland window details if matching window ID is found
             if let Ok(windows) = xcap::Window::all() {
                 for window in windows {
-                    if window.id() == window_id {
-                        let app_name = if window.app_name().is_empty() {
-                            "Unknown".to_string()
-                        } else {
-                            window.app_name().to_string()
+                    if window.id().ok() == Some(window_id) {
+                        let app_name = match window.app_name() {
+                            Ok(name) if !name.is_empty() => name,
+                            _ => "Unknown".to_string(),
                         };
-                        let window_title = if window.title().is_empty() {
-                            "Sin titulo".to_string()
-                        } else {
-                            window.title().to_string()
+                        let window_title = match window.title() {
+                            Ok(title) if !title.is_empty() => title,
+                            _ => "Sin titulo".to_string(),
                         };
                         return Some(WindowCapture {
                             app_name,
@@ -601,18 +599,16 @@ fn capture_active_window_linux() -> Option<WindowCapture> {
     // Try to get the active/visible window using xcap
     if let Ok(windows) = xcap::Window::all() {
         let active_windows: Vec<_> = windows.into_iter()
-            .filter(|w| !w.is_minimized() && !w.title().is_empty())
+            .filter(|w| !w.is_minimized().unwrap_or(true) && w.title().map(|t| !t.is_empty()).unwrap_or(false))
             .collect();
         if let Some(first_window) = active_windows.first() {
-            let app_name = if first_window.app_name().is_empty() {
-                "Unknown".to_string()
-            } else {
-                first_window.app_name().to_string()
+            let app_name = match first_window.app_name() {
+                Ok(name) if !name.is_empty() => name,
+                _ => "Unknown".to_string(),
             };
-            let window_title = if first_window.title().is_empty() {
-                "Sin titulo".to_string()
-            } else {
-                first_window.title().to_string()
+            let window_title = match first_window.title() {
+                Ok(title) if !title.is_empty() => title,
+                _ => "Sin titulo".to_string(),
             };
             return Some(WindowCapture {
                 app_name,
