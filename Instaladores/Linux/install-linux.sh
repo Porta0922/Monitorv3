@@ -184,7 +184,7 @@ ENVEOF
 
         echo "[*] Instalando dependencias de compilacion..."
         if command -v apt-get &> /dev/null; then
-            apt-get update -y && apt-get install -y libssl-dev pkg-config build-essential libxtst-dev libx11-dev
+            apt-get update -y && apt-get install -y libssl-dev pkg-config build-essential libxtst-dev libx11-dev libwayland-dev
         fi
 
         if [ -f "$SRC_PATH/Cargo.toml" ]; then
