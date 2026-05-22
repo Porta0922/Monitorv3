@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitor v3 - Instalador Web</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 600px;
+            width: 100%;
+            padding: 40px;
+            animation: slideIn 0.4s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .logo {
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            color: #333;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        input[type="text"],
+        input[type="password"],
+        select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        input[type="text"]:focus,
+        input[type="password"]:focus,
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .platform-selector {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .platform-option {
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.3s;
+            background: #f9f9f9;
+        }
+
+        .platform-option:hover {
+            border-color: #667eea;
+            background: #f0f4ff;
+        }
+
+        .platform-option input[type="radio"] {
+            display: none;
+        }
+
+        .platform-option input[type="radio"]:checked + label {
+            color: #667eea;
+            font-weight: 700;
+        }
+
+        .platform-option.selected {
+            border-color: #667eea;
+            background: #f0f4ff;
+        }
+
+        .platform-icon {
+            font-size: 32px;
+            margin-bottom: 8px;
+        }
+
+        .platform-name {
+            font-weight: 600;
+            color: #333;
+            cursor: pointer;
+        }
+
+        .info-box {
+            background: #f0f4ff;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 13px;
+            color: #555;
+            line-height: 1.6;
+        }
+
+        .info-box code {
+            background: white;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            color: #764ba2;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 30px;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        .btn-secondary {
+            background: #e0e0e0;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #d0d0d0;
+        }
+
+        .output-section {
+            display: none;
+            margin-top: 30px;
+            padding-top: 30px;
+            border-top: 2px solid #e0e0e0;
+        }
+
+        .output-section.active {
+            display: block;
+            animation: slideIn 0.4s ease-out;
+        }
+
+        .output-label {
+            color: #333;
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        .code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            line-height: 1.5;
+            margin-bottom: 15px;
+        }
+
+        .copy-button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            margin-top: 10px;
+            transition: all 0.3s;
+        }
+
+        .copy-button:hover {
+            background: #764ba2;
+        }
+
+        .copy-button.copied {
+            background: #4caf50;
+        }
+
+        .success-message {
+            background: #e8f5e9;
+            border-left: 4px solid #4caf50;
+            padding: 15px;
+            border-radius: 6px;
+            color: #2e7d32;
+            margin-bottom: 15px;
+            font-size: 14px;
+            display: none;
+        }
+
+        .success-message.show {
+            display: block;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .loading.show {
+            display: block;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            background: #ffebee;
+            border-left: 4px solid #f44336;
+            padding: 15px;
+            border-radius: 6px;
+            color: #c62828;
+            margin-bottom: 15px;
+            font-size: 14px;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+
+        .repo-info {
+            font-size: 12px;
+            color: #999;
+            text-align: center;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 480px) {
+            .container {
+                padding: 20px;
+            }
+
+            h1 {
+                font-size: 24px;
+            }
+
+            .platform-selector {
+                grid-template-columns: 1fr;
+            }
+
+            .button-group {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">📊</div>
+            <h1>Monitor v3</h1>
+            <p class="subtitle">Instalador Web Automático</p>
+        </div>
+
+        <form id="deployForm">
+            <!-- Selección de Plataforma -->
+            <div class="form-group">
+                <label>Selecciona tu plataforma:</label>
+                <div class="platform-selector">
+                    <div class="platform-option" data-platform="linux">
+                        <input type="radio" name="platform" value="linux" id="platform-linux" checked>
+                        <label for="platform-linux" style="cursor: pointer; margin: 0;">
+                            <div class="platform-icon">🐧</div>
+                            <div class="platform-name">Linux</div>
+                            <div style="font-size: 12px; color: #999;">x86_64</div>
+                        </label>
+                    </div>
+                    <div class="platform-option" data-platform="macos-x86">
+                        <input type="radio" name="platform" value="macos-x86" id="platform-macos-x86">
+                        <label for="platform-macos-x86" style="cursor: pointer; margin: 0;">
+                            <div class="platform-icon">🍎</div>
+                            <div class="platform-name">macOS Intel</div>
+                            <div style="font-size: 12px; color: #999;">x86_64</div>
+                        </label>
+                    </div>
+                    <div class="platform-option" data-platform="macos-arm">
+                        <input type="radio" name="platform" value="macos-arm" id="platform-macos-arm">
+                        <label for="platform-macos-arm" style="cursor: pointer; margin: 0;">
+                            <div class="platform-icon">🍎</div>
+                            <div class="platform-name">macOS Silicon</div>
+                            <div style="font-size: 12px; color: #999;">ARM64</div>
+                        </label>
+                    </div>
+                    <div class="platform-option" data-platform="windows">
+                        <input type="radio" name="platform" value="windows" id="platform-windows">
+                        <label for="platform-windows" style="cursor: pointer; margin: 0;">
+                            <div class="platform-icon">🪟</div>
+                            <div class="platform-name">Windows</div>
+                            <div style="font-size: 12px; color: #999;">x86_64</div>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Token de Acceso -->
+            <div class="form-group">
+                <label for="token">Token de Acceso de GitHub (Solo Lectura):</label>
+                <input 
+                    type="password" 
+                    id="token" 
+                    name="token" 
+                    placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                    required
+                >
+                <div class="info-box">
+                    💡 <strong>¿Cómo obtener un token?</strong><br>
+                    1. Ve a <a href="https://github.com/settings/tokens" target="_blank">GitHub Settings → Tokens</a><br>
+                    2. Click en "Generate new token" (Fine-grained)<br>
+                    3. Selecciona <code>repo: Porta0922/Monitorv3</code><br>
+                    4. Permisos: <code>Contents: Read-only</code> y <code>Releases: Read-only</code>
+                </div>
+            </div>
+
+            <!-- Directorio de Instalación (opcional) -->
+            <div class="form-group" id="installDirGroup" style="display: none;">
+                <label for="installDir">Directorio de Instalación:</label>
+                <input 
+                    type="text" 
+                    id="installDir" 
+                    name="installDir" 
+                    placeholder="C:\Program Files\Monitor"
+                    value="C:\Program Files\Monitor"
+                >
+                <div class="info-box">
+                    Solo disponible para Windows. Para Linux/macOS se usa <code>/opt/monitor</code>
+                </div>
+            </div>
+
+            <!-- Botones -->
+            <div class="button-group">
+                <button type="submit" class="btn-primary">
+                    <span id="btnText">Generar Comando de Instalación</span>
+                    <div class="loading" id="btnLoading">
+                        <div class="spinner"></div>
+                    </div>
+                </button>
+                <button type="button" class="btn-secondary" onclick="resetForm()">Limpiar</button>
+            </div>
+        </form>
+
+        <!-- Sección de Salida -->
+        <div id="outputSection" class="output-section">
+            <div class="error-message" id="errorMessage"></div>
+            <div class="success-message" id="successMessage">
+                ✅ Comando generado exitosamente
+            </div>
+
+            <div id="linuxMacOutput" style="display: none;">
+                <div class="output-label">Comando para instalar:</div>
+                <div class="code-block" id="linuxMacCode"></div>
+                <button class="copy-button" onclick="copyToClipboard('linuxMacCode')">Copiar Comando</button>
+            </div>
+
+            <div id="windowsOutput" style="display: none;">
+                <div class="output-label">Comando para PowerShell (Ejecutar como Administrador):</div>
+                <div class="code-block" id="windowsCode"></div>
+                <button class="copy-button" onclick="copyToClipboard('windowsCode')">Copiar Comando</button>
+            </div>
+
+            <div style="margin-top: 20px; padding: 15px; background: #f9f9f9; border-radius: 6px;">
+                <div class="output-label">Próximos pasos:</div>
+                <ol style="margin-left: 20px; font-size: 13px; color: #555; line-height: 1.8;">
+                    <li>Copia el comando anterior</li>
+                    <li>Abre una terminal (Linux/macOS) o PowerShell (Windows)</li>
+                    <li>Pega y ejecuta el comando</li>
+                    <li>El instalador descargará y configurará automáticamente Monitor v3</li>
+                </ol>
+            </div>
+        </div>
+
+        <div class="repo-info">
+            <a href="https://github.com/Porta0922/Monitorv3" target="_blank">📦 Repositorio en GitHub</a> • 
+            <a href="https://github.com/Porta0922/Monitorv3/releases" target="_blank">📥 Releases</a>
+        </div>
+    </div>
+
+    <script>
+        const REPO = "Porta0922/Monitorv3";
+        const REPO_RAW_URL = "https://raw.githubusercontent.com/Porta0922/Monitorv3/main";
+
+        // Actualizar vista de directorio según plataforma
+        document.querySelectorAll('input[name="platform"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                const platform = e.target.value;
+                const installDirGroup = document.getElementById('installDirGroup');
+                
+                if (platform === 'windows') {
+                    installDirGroup.style.display = 'block';
+                } else {
+                    installDirGroup.style.display = 'none';
+                }
+
+                // Actualizar selector visual
+                document.querySelectorAll('.platform-option').forEach(opt => {
+                    opt.classList.remove('selected');
+                });
+                document.querySelector(`[data-platform="${platform}"]`).classList.add('selected');
+            });
+        });
+
+        // Establecer primer selector como activo
+        document.querySelector('[data-platform="linux"]').classList.add('selected');
+
+        document.getElementById('deployForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const platform = document.querySelector('input[name="platform"]:checked').value;
+            const token = document.getElementById('token').value;
+            const installDir = document.getElementById('installDir').value || "C:\\Program Files\\Monitor";
+
+            if (!token.trim()) {
+                showError("El token no puede estar vacío");
+                return;
+            }
+
+            showLoading(true);
+            clearMessages();
+
+            try {
+                let command = '';
+                
+                if (platform === 'windows') {
+                    command = `PowerShell -ExecutionPolicy Bypass -Command "` +
+                        `[System.Environment]::SetEnvironmentVariable('MONITOR_DEPLOY_TOKEN', '${token}', 'Process'); ` +
+                        `[System.Environment]::SetEnvironmentVariable('MONITOR_REPO', '${REPO}', 'Process'); ` +
+                        `iex (New-Object System.Net.WebClient).DownloadString('${REPO_RAW_URL}/instaladorweb/Deploy-Monitor.ps1')` +
+                        `"`;
+                    displayWindowsCommand(command);
+                } else {
+                    command = `export MONITOR_DEPLOY_TOKEN="${token}" && ` +
+                        `export MONITOR_REPO="${REPO}" && ` +
+                        `curl -sSL ${REPO_RAW_URL}/instaladorweb/deploy-monitor.sh | bash -s ${platform}`;
+                    displayLinuxMacCommand(command);
+                }
+
+                showSuccess("Comando generado exitosamente");
+            } catch (error) {
+                showError(`Error: ${error.message}`);
+            } finally {
+                showLoading(false);
+            }
+        });
+
+        function displayLinuxMacCommand(command) {
+            document.getElementById('linuxMacOutput').style.display = 'block';
+            document.getElementById('windowsOutput').style.display = 'none';
+            document.getElementById('linuxMacCode').textContent = command;
+            document.getElementById('outputSection').classList.add('active');
+        }
+
+        function displayWindowsCommand(command) {
+            document.getElementById('linuxMacOutput').style.display = 'none';
+            document.getElementById('windowsOutput').style.display = 'block';
+            document.getElementById('windowsCode').textContent = command;
+            document.getElementById('outputSection').classList.add('active');
+        }
+
+        function copyToClipboard(elementId) {
+            const element = document.getElementById(elementId);
+            const text = element.textContent;
+            
+            navigator.clipboard.writeText(text).then(() => {
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.textContent = '✓ Copiado';
+                btn.classList.add('copied');
+                
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.classList.remove('copied');
+                }, 2000);
+            }).catch(err => {
+                showError('No se pudo copiar al portapapeles');
+            });
+        }
+
+        function showLoading(show) {
+            const loading = document.getElementById('btnLoading');
+            const btnText = document.getElementById('btnText');
+            if (show) {
+                loading.classList.add('show');
+                btnText.style.display = 'none';
+            } else {
+                loading.classList.remove('show');
+                btnText.style.display = 'inline';
+            }
+        }
+
+        function showSuccess(message) {
+            const msg = document.getElementById('successMessage');
+            msg.textContent = '✅ ' + message;
+            msg.classList.add('show');
+            setTimeout(() => msg.classList.remove('show'), 5000);
+        }
+
+        function showError(message) {
+            const msg = document.getElementById('errorMessage');
+            msg.textContent = '❌ ' + message;
+            msg.classList.add('show');
+            setTimeout(() => msg.classList.remove('show'), 5000);
+        }
+
+        function clearMessages() {
+            document.getElementById('errorMessage').classList.remove('show');
+            document.getElementById('successMessage').classList.remove('show');
+        }
+
+        function resetForm() {
+            document.getElementById('deployForm').reset();
+            document.getElementById('outputSection').classList.remove('active');
+            clearMessages();
+            document.querySelector('[data-platform="linux"]').classList.add('selected');
+            document.getElementById('installDirGroup').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
