@@ -497,75 +497,132 @@ fn capture_active_window_windows() -> Option<WindowCapture> {
 fn capture_active_window_linux() -> Option<WindowCapture> {
     use std::process::Command;
 
-    // 1. Get the active window ID
-    let output = Command::new("xprop")
-        .args(["-root", "_NET_ACTIVE_WINDOW"])
-        .output()
-        .ok()?;
+    // Helper to get active window ID string (e.g. "0x3c00012") via xprop
+    let get_active_window_id = || -> Option<String> {
+        let output = Command::new("xprop")
+            .args(["-root", "_NET_ACTIVE_WINDOW"])
+            .output()
+            .ok()?;
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        let id_str = output_str
+            .split("window id #")
+            .nth(1)?
+            .trim()
+            .split_whitespace()
+            .next()?
+            .to_string();
+        if id_str == "0x0" { None } else { Some(id_str) }
+    };
 
-    let output_str = String::from_utf8_lossy(&output.stdout);
-    let window_id = output_str
-        .split("window id #")
-        .nth(1)?
-        .trim()
-        .split_whitespace()
-        .next()?;
+    let active_id_str = get_active_window_id();
 
-    if window_id == "0x0" {
-        return None;
-    }
+    if let Some(ref id_str) = active_id_str {
+        // Try to parse the window ID into u32 for xcap matching
+        let parsed_id = if id_str.starts_with("0x") || id_str.starts_with("0X") {
+            u32::from_str_radix(&id_str[2..], 16).ok()
+        } else {
+            id_str.parse::<u32>().ok()
+        };
 
-    // 2. Get the window name and class details
-    let details_output = Command::new("xprop")
-        .args(["-id", window_id, "WM_CLASS", "WM_NAME", "_NET_WM_NAME"])
-        .output()
-        .ok()?;
-
-    let details_str = String::from_utf8_lossy(&details_output.stdout);
-    
-    let mut app_name = String::new();
-    let mut window_title = String::new();
-
-    for line in details_str.lines() {
-        if line.starts_with("WM_CLASS") {
-            // e.g. WM_CLASS(STRING) = "google-chrome", "Google-chrome"
-            if let Some(val) = line.split('=').nth(1) {
-                if let Some(first_quote) = val.find('"') {
-                    if let Some(second_quote) = val[first_quote + 1..].find('"') {
-                        app_name = val[first_quote + 1..first_quote + 1 + second_quote].to_string();
+        if let Some(window_id) = parsed_id {
+            // Attempt to use xcap for X11/Wayland window details if matching window ID is found
+            if let Ok(windows) = xcap::Window::all() {
+                for window in windows {
+                    if window.id() == window_id {
+                        let app_name = if window.app_name().is_empty() {
+                            "Unknown".to_string()
+                        } else {
+                            window.app_name().to_string()
+                        };
+                        let window_title = if window.title().is_empty() {
+                            "Sin titulo".to_string()
+                        } else {
+                            window.title().to_string()
+                        };
+                        return Some(WindowCapture {
+                            app_name,
+                            window_title,
+                            timestamp: Utc::now(),
+                        });
                     }
                 }
             }
-        } else if line.starts_with("_NET_WM_NAME") || line.starts_with("WM_NAME") {
-            // e.g. _NET_WM_NAME(UTF8_STRING) = "Google Chrome"
-            if window_title.is_empty() {
+        }
+
+        // Fallback to traditional xprop details retrieval
+        let details_output = Command::new("xprop")
+            .args(["-id", id_str, "WM_CLASS", "WM_NAME", "_NET_WM_NAME"])
+            .output()
+            .ok()?;
+
+        let details_str = String::from_utf8_lossy(&details_output.stdout);
+        
+        let mut app_name = String::new();
+        let mut window_title = String::new();
+
+        for line in details_str.lines() {
+            if line.starts_with("WM_CLASS") {
                 if let Some(val) = line.split('=').nth(1) {
                     if let Some(first_quote) = val.find('"') {
                         if let Some(second_quote) = val[first_quote + 1..].find('"') {
-                            window_title = val[first_quote + 1..first_quote + 1 + second_quote].to_string();
+                            app_name = val[first_quote + 1..first_quote + 1 + second_quote].to_string();
+                        }
+                    }
+                }
+            } else if line.starts_with("_NET_WM_NAME") || line.starts_with("WM_NAME") {
+                if window_title.is_empty() {
+                    if let Some(val) = line.split('=').nth(1) {
+                        if let Some(first_quote) = val.find('"') {
+                            if let Some(second_quote) = val[first_quote + 1..].find('"') {
+                                window_title = val[first_quote + 1..first_quote + 1 + second_quote].to_string();
+                            }
                         }
                     }
                 }
             }
         }
+
+        if !app_name.is_empty() || !window_title.is_empty() {
+            if app_name.is_empty() {
+                app_name = "Unknown".to_string();
+            }
+            if window_title.is_empty() {
+                window_title = "Sin titulo".to_string();
+            }
+            return Some(WindowCapture {
+                app_name,
+                window_title,
+                timestamp: Utc::now(),
+            });
+        }
     }
 
-    if app_name.is_empty() && window_title.is_empty() {
-        return None;
+    // Wayland / fallback: XDG Session Type might be Wayland, where active_id_str is None
+    // Try to get the active/visible window using xcap
+    if let Ok(windows) = xcap::Window::all() {
+        let active_windows: Vec<_> = windows.into_iter()
+            .filter(|w| !w.is_minimized() && !w.title().is_empty())
+            .collect();
+        if let Some(first_window) = active_windows.first() {
+            let app_name = if first_window.app_name().is_empty() {
+                "Unknown".to_string()
+            } else {
+                first_window.app_name().to_string()
+            };
+            let window_title = if first_window.title().is_empty() {
+                "Sin titulo".to_string()
+            } else {
+                first_window.title().to_string()
+            };
+            return Some(WindowCapture {
+                app_name,
+                window_title,
+                timestamp: Utc::now(),
+            });
+        }
     }
 
-    if app_name.is_empty() {
-        app_name = "Unknown".to_string();
-    }
-    if window_title.is_empty() {
-        window_title = "Sin titulo".to_string();
-    }
-
-    Some(WindowCapture {
-        app_name,
-        window_title,
-        timestamp: Utc::now(),
-    })
+    None
 }
 
 // macOS implementation (requires Cocoa framework or osascript)

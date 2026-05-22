@@ -86,6 +86,10 @@ cp -f "$TARGET_BIN" "$AGENT_PATH"
 chmod 755 "$AGENT_PATH"
 
 # 5. Configurar permisos especiales y grupos de hardware de entrada
+if command -v apt-get &> /dev/null; then
+    apt-get update -y && apt-get install -y x11-utils >/dev/null 2>&1 || true
+fi
+
 if ! id -u activity-monitor &>/dev/null; then
     useradd --system --home $DATA_DIR --shell /usr/sbin/nologin activity-monitor
 fi
@@ -145,17 +149,38 @@ if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
     if [ -d "$USER_HOME" ]; then
         AUTOSTART_DIR="$USER_HOME/.config/autostart"
         mkdir -p "$AUTOSTART_DIR"
+
+        # Create user launcher wrapper script
+        LAUNCHER_PATH="/opt/activity-monitor/bin/activity-monitor-agent-user-launcher.sh"
+        cat > "$LAUNCHER_PATH" << 'LAUNCHEREOF'
+#!/bin/bash
+# Auto-detect display session for activity monitor user agent
+export DISPLAY="${DISPLAY:-:0}"
+export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
+# Also try to get DISPLAY from active X11 sessions
+if [ -z "$DISPLAY" ] || ! xprop -root &>/dev/null 2>&1; then
+    XSESSION=$(w -h $(whoami) 2>/dev/null | awk '{print $3}' | grep -E '^:[0-9]' | head -1)
+    export DISPLAY="${XSESSION:-:0}"
+fi
+exec /opt/activity-monitor/bin/activity-monitor-agent
+LAUNCHEREOF
+        chmod 755 "$LAUNCHER_PATH"
+
         cat > "$AUTOSTART_DIR/activity-monitor.desktop" << EOF
 [Desktop Entry]
 Type=Application
 Name=ActivityMonitor Agent
 Comment=ActivityMonitor Telemetry User Agent
-Exec=env AGENT_MODE=USER $AGENT_PATH
+Exec=env AGENT_MODE=USER /opt/activity-monitor/bin/activity-monitor-agent-user-launcher.sh
 Terminal=false
 Categories=Utility;
 X-GNOME-Autostart-enabled=true
 EOF
         chown -R $SUDO_USER:$SUDO_USER "$USER_HOME/.config"
+
+        # Launch the agent immediately as the logged-in user (without waiting for reboot/logout)
+        pkill -u "$SUDO_USER" -f "activity-monitor-agent" || true
+        su - "$SUDO_USER" -c "env AGENT_MODE=USER DISPLAY=:0 /opt/activity-monitor/bin/activity-monitor-agent-user-launcher.sh >/dev/null 2>&1 &" &
     fi
 fi
 
