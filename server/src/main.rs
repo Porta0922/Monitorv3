@@ -3,6 +3,7 @@ mod auth;
 mod config;
 mod rabbitmq_consumer;
 mod postgres_db;
+pub mod domains;
 
 use std::sync::Arc;
 use tokio::task;

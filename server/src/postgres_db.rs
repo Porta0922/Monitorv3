@@ -1,111 +1,27 @@
 // PostgreSQL database module for real data storage
 use sqlx::{PgPool, Postgres, QueryBuilder, postgres::PgPoolOptions};
+use crate::domains::security::models::SecuritySummaryRow;
 use serde::{Deserialize, Serialize};
+use crate::domains::security::models::SecuritySummaryRow;
 use uuid::Uuid;
 use chrono::{DateTime, NaiveDate, Utc};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ActivityLog {
-    pub id: Uuid,
-    pub device_id: Uuid,
-    pub app_name: String,
-    pub window_title: String,
-    pub duration_seconds: i64,
-    pub timestamp: DateTime<Utc>,
-}
+pub use crate::domains::device::models::*;
+pub use crate::domains::activity::models::*;
+pub use crate::domains::inventory::models::*;
+pub use crate::domains::usb::models::*;
+pub use crate::domains::wifi::models::*;
+pub use crate::domains::security::models::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InventoryItem {
-    pub id: String,
-    pub device_id: String,
-    pub app_name: String,
-    pub version: String,
-    pub exe_hash: String,
-    pub timestamp: DateTime<Utc>,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RunningAppItem {
-    pub id: Uuid,
-    pub device_id: Uuid,
-    pub app_name: String,
-    pub primary_title: String,
-    pub window_count: i32,
-    pub exe_path: Option<String>,
-    pub exe_hash: Option<String>,
-    pub updated_at: DateTime<Utc>,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UsbEvent {
-    pub id: Uuid,
-    pub device_id: Uuid,
-    pub action: String,
-    pub hardware_id: String,
-    pub device_name: String,
-    pub serial_number: String,
-    pub volume_label: Option<String>,
-    pub timestamp: DateTime<Utc>,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WifiEvent {
-    pub id: Uuid,
-    pub device_id: Uuid,
-    pub interface_name: String,
-    pub state: String,
-    pub ssid: Option<String>,
-    pub bssid: Option<String>,
-    pub signal_percent: Option<i32>,
-    pub timestamp: DateTime<Utc>,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DeviceTimeTotals {
-    pub device_id: Uuid,
-    pub active_seconds: i64,
-    pub idle_seconds: i64,
-    pub keys_count: i64,
-    pub mouse_moves_count: i64,
-    pub clicks_count: i64,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LiveDeviceActivity {
-    pub device_id: Uuid,
-    pub app_name: String,
-    pub window_title: String,
-    pub duration_seconds: i64,
-    pub timestamp: DateTime<Utc>,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Device {
-    pub id: Uuid,
-    pub hostname: String,
-    pub device_id: Uuid,
-    pub mac_address: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub last_seen: DateTime<Utc>,
-    pub nickname: Option<String>,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Overview {
-    pub devices_today: i64,
-    pub active_time: i64,
-    pub idle_time: i64,
-    pub idle_pct: f64,
-    pub keys_today: i64,
-    pub mouse_moves_today: i64,
-    pub mouse_clicks_today: i64,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TopApp {
-    pub app_name: String,
-    pub total_duration_seconds: i64,
-}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(dead_code)]
@@ -118,87 +34,16 @@ pub struct StreamEvent {
     pub last_seen: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuditEvent {
-    pub id: i64,
-    pub actor: String,
-    pub action: String,
-    pub target: String,
-    pub details: Option<String>,
-    pub created_at: DateTime<Utc>,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OperationalMetrics {
-    pub devices_total: i64,
-    pub devices_online: i64,
-    pub devices_stale: i64,
-    pub activities_last_hour: i64,
-    pub input_rows_today: i64,
-    pub newest_activity_age_seconds: i64,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NodeResourceMetric {
-    pub timestamp: DateTime<Utc>,
-    pub cpu_percent: f64,
-    pub memory_used_mb: f64,
-    pub memory_percent: f64,
-    pub top_process_name: Option<String>,
-    pub top_process_cpu_percent: Option<f64>,
-    pub top_process_memory_mb: Option<f64>,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DeviceResourcePeak {
-    pub device_id: Uuid,
-    pub peak_cpu_percent: f64,
-    pub peak_memory_percent: f64,
-    pub last_cpu_percent: f64,
-    pub last_memory_percent: f64,
-    pub top_process_name: Option<String>,
-    pub top_process_cpu_percent: Option<f64>,
-    pub top_process_memory_mb: Option<f64>,
-    pub last_seen: DateTime<Utc>,
-}
 
 pub struct Database {
-    pool: PgPool,
+    pub pool: PgPool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecurityEvent {
-    pub id: i64,
-    pub timestamp: DateTime<Utc>,
-    pub device_id: Uuid,
-    pub query_name: String,
-    pub query_pack: Option<String>,
-    pub mitre_technique: Option<String>,
-    pub severity: String,
-    pub raw_data: serde_json::Value,
-    pub event_fingerprint: Option<String>,
-    pub created_at: DateTime<Utc>,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecurityAlert {
-    pub id: i64,
-    pub device_id: Uuid,
-    pub alert_type: String,
-    pub app_name: String,
-    pub exe_hash: String,
-    pub description: String,
-    pub severity: String,
-    pub resolved: bool,
-    pub created_at: DateTime<Utc>,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecuritySummaryRow {
-    pub severity: String,
-    pub mitre_technique: String,
-    pub event_count: i64,
-}
 
 impl Database {
     /// Create connection pool to PostgreSQL

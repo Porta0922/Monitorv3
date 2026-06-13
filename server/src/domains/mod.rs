@@ -1,3 +1,5 @@
+
+pub mod shared;
 pub mod device;
 pub mod activity;
 pub mod inventory;
