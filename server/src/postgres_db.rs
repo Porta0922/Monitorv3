@@ -1,8 +1,6 @@
 // PostgreSQL database module for real data storage
 use sqlx::{PgPool, Postgres, QueryBuilder, postgres::PgPoolOptions};
-use crate::domains::security::models::SecuritySummaryRow;
 use serde::{Deserialize, Serialize};
-use crate::domains::security::models::SecuritySummaryRow;
 use uuid::Uuid;
 use chrono::{DateTime, NaiveDate, Utc};
 
@@ -12,6 +10,8 @@ pub use crate::domains::inventory::models::*;
 pub use crate::domains::usb::models::*;
 pub use crate::domains::wifi::models::*;
 pub use crate::domains::security::models::*;
+
+
 
 
 

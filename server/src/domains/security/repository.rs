@@ -1,7 +1,8 @@
 use super::models::*;
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, QueryBuilder};
 use uuid::Uuid;
 use chrono::*;
+
 
 pub async fn insert_security_event(
         pool: &PgPool,

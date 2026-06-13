@@ -28,6 +28,13 @@ pub struct TzQuery {
     pub tz_offset_minutes: Option<i32>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+pub struct DateLimitQuery {
+    pub limit: Option<i64>,
+    pub date: Option<String>,
+    pub tz_offset_minutes: Option<i32>,
+}
+
 pub fn format_duration(seconds: i64) -> String {
     let safe_seconds = seconds.max(0);
     let hours = safe_seconds / 3600;
@@ -46,30 +53,23 @@ pub fn parse_time_bounds(filters: &ActivityLogFilters) -> (Option<DateTime<Utc>>
     let from = filters
         .from
         .as_deref()
-        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
-        .map(|value| value.with_timezone(&Utc));
-
+        .and_then(|v| DateTime::parse_from_rfc3339(v).ok())
+        .map(|v| v.with_timezone(&Utc));
     let to = filters
         .to
         .as_deref()
-        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
-        .map(|value| value.with_timezone(&Utc));
-
+        .and_then(|v| DateTime::parse_from_rfc3339(v).ok())
+        .map(|v| v.with_timezone(&Utc));
     if from.is_none() {
-        if let Some(hours) = filters.hours {
-            if hours > 0 {
-                return (Some(Utc::now() - Duration::hours(hours)), to);
-            }
+        if let Some(h) = filters.hours {
+            if h > 0 { return (Some(Utc::now() - Duration::hours(h)), to); }
         }
     }
-    
     (from, to)
 }
 
 pub fn serialize_device(device: Device, config: &RuntimeConfig) -> serde_json::Value {
     let online = device.last_seen > Utc::now() - Duration::seconds(config.online_threshold_seconds.max(1) as i64);
-    let stale = !online;
-
     json!({
         "id": device.id,
         "device_id": device.device_id,
@@ -79,7 +79,11 @@ pub fn serialize_device(device: Device, config: &RuntimeConfig) -> serde_json::V
         "created_at": device.created_at.to_rfc3339(),
         "last_seen": device.last_seen.to_rfc3339(),
         "online": online,
-        "stale": stale,
+        "stale": !online,
         "status": if online { "online" } else { "offline" }
     })
+}
+
+pub fn parse_iso_date(value: Option<&str>) -> Option<chrono::NaiveDate> {
+    value.and_then(|v| chrono::NaiveDate::parse_from_str(v, "%Y-%m-%d").ok())
 }
