@@ -28,16 +28,16 @@ AGENT_PLIST="/Library/LaunchAgents/com.activitymonitor.agent.plist"
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
-# Resilient USB Paths (Standalone - Does NOT require server folder)
+# Resilient USB Paths
 if [ -f "$SCRIPT_DIR/activity-monitor-agent" ]; then
     AGENT_PATH_SRC="$SCRIPT_DIR/activity-monitor-agent"
-    SRC_PATH="$SCRIPT_DIR/../agent"
+    SRC_PATH="$SCRIPT_DIR/../../agent"
+elif [ -f "$SCRIPT_DIR/../../agent/Cargo.toml" ]; then
+    AGENT_PATH_SRC="$SCRIPT_DIR/activity-monitor-agent"
+    SRC_PATH="$SCRIPT_DIR/../../agent"
 elif [ -f "$SCRIPT_DIR/../agent/Cargo.toml" ]; then
     AGENT_PATH_SRC="$SCRIPT_DIR/activity-monitor-agent"
     SRC_PATH="$SCRIPT_DIR/../agent"
-elif [ -f "$SCRIPT_DIR/agent/Cargo.toml" ]; then
-    AGENT_PATH_SRC="$SCRIPT_DIR/activity-monitor-agent"
-    SRC_PATH="$SCRIPT_DIR/agent"
 else
     AGENT_PATH_SRC="$SCRIPT_DIR/../../target/release/activity-monitor-agent"
     SRC_PATH="$SCRIPT_DIR/../.."

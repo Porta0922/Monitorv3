@@ -17,13 +17,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Resilient USB Paths
 if [ -f "$SCRIPT_DIR/$AGENT_NAME" ]; then
     TARGET_BIN="$SCRIPT_DIR/$AGENT_NAME"
-    SRC_PATH="$SCRIPT_DIR/../agent"
+    SRC_PATH="$SCRIPT_DIR/../../agent"
+elif [ -f "$SCRIPT_DIR/../../agent/Cargo.toml" ]; then
+    TARGET_BIN="$SCRIPT_DIR/$AGENT_NAME"
+    SRC_PATH="$SCRIPT_DIR/../../agent"
 elif [ -f "$SCRIPT_DIR/../agent/Cargo.toml" ]; then
     TARGET_BIN="$SCRIPT_DIR/$AGENT_NAME"
     SRC_PATH="$SCRIPT_DIR/../agent"
-elif [ -f "$SCRIPT_DIR/agent/Cargo.toml" ]; then
-    TARGET_BIN="$SCRIPT_DIR/$AGENT_NAME"
-    SRC_PATH="$SCRIPT_DIR/agent"
 else
     TARGET_BIN="$SCRIPT_DIR/../../target/release/$AGENT_NAME"
     SRC_PATH="$SCRIPT_DIR/../.."

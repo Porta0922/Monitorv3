@@ -29,10 +29,10 @@ if exist "%~dp0activity-monitor-agent.exe" (
 
 REM Detect source code folder for fallback compilation
 set SRC_PATH=
-if exist "%~dp0..\agent\Cargo.toml" (
+if exist "%~dp0..\..\agent\Cargo.toml" (
+    set SRC_PATH=%~dp0..\..\agent
+) else if exist "%~dp0..\agent\Cargo.toml" (
     set SRC_PATH=%~dp0..\agent
-) else if exist "%~dp0agent\Cargo.toml" (
-    set SRC_PATH=%~dp0agent
 ) else if exist "%~dp0..\..\Cargo.toml" (
     set SRC_PATH=%~dp0..\..
 )
