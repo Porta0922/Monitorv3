@@ -33,6 +33,7 @@ pub struct AppState {
 
 
 
+
 pub fn create_router(state: Arc<AppState>) -> Router {
     let cors = CorsLayer::permissive();
 
