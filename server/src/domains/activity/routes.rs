@@ -1,10 +1,6 @@
-use axum::{extract::{Query, State, Path}, response::IntoResponse, routing::{get, post, patch}, Json, Router};
-use crate::domains::shared::*;
-use serde_json::json;
+use axum::Router;
 use std::sync::Arc;
 use crate::api::AppState;
-use uuid::Uuid;
-use super::models::*;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()

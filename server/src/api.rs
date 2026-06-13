@@ -1,24 +1,7 @@
 // REST API routes using Axum
-use axum::{
-    Router,
-    routing::{get, post, patch},
-    Json,
-    extract::{Path, Query, State},
-    middleware::Next,
-    http::{header, HeaderMap, StatusCode},
-    response::{IntoResponse, Response},
-};
-use serde::Deserialize;
-use serde_json::json;
-use uuid::Uuid;
+use axum::Router;
 use std::sync::Arc;
-use std::collections::HashMap;
-use chrono::{Duration, Utc};
 use tower_http::cors::CorsLayer;
-use futures::stream::{self, StreamExt};
-use std::convert::Infallible;
-use tokio::time::timeout;
-use lapin::{Connection, ConnectionProperties};
 
 use crate::auth::AuthManager;
 use crate::config::RuntimeConfig;
