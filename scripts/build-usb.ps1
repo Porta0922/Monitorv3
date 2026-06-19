@@ -1,6 +1,6 @@
 param(
-    [string]$ServerUrl = "http://localhost:3000",
-    [string]$RabbitMqUrl = "amqp://guest:guest@localhost:5672/%2f",
+    [string]$ServerUrl = "http://10.30.0.123:3000",
+    [string]$RabbitMqUrl = "amqp://eclub:eCLUB123@10.30.0.123:5672/%2f",
     [string]$AuthToken = "change-me-in-production",
     [string]$OfflineCacheKey = "replace-with-32-byte-cache-key!!",
     [string]$OutputDir = "",

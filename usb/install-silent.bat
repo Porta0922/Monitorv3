@@ -58,8 +58,8 @@ if not "!CONFIG_SOURCE!"=="" (
 REM ---- Config defaults (if not set by discovery) ----
 if "%AGENT_AUTH_TOKEN%"=="" set AGENT_AUTH_TOKEN=change-me-in-production
 if "%AGENT_OFFLINE_CACHE_KEY%"=="" set AGENT_OFFLINE_CACHE_KEY=replace-with-32-byte-cache-key!!
-if "%AGENT_SERVER_URL%"=="" set AGENT_SERVER_URL=http://localhost:3000
-if "%RABBITMQ_URL%"=="" set RABBITMQ_URL=amqp://guest:guest@localhost:5672/%2f
+if "%AGENT_SERVER_URL%"=="" set AGENT_SERVER_URL=http://10.30.0.123:3000
+if "%RABBITMQ_URL%"=="" set RABBITMQ_URL=amqp://eclub:eCLUB123@10.30.0.123:5672/%2f
 
 REM ---- Locate pre-compiled binary ----
 set AGENT_SRC=

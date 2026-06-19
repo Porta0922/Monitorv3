@@ -50,8 +50,8 @@ if not exist "%~dp0agent-config.json" (
 REM ---- Load configuration ----
 set AGENT_AUTH_TOKEN=change-me-in-production
 set AGENT_OFFLINE_CACHE_KEY=replace-with-32-byte-cache-key!!
-set AGENT_SERVER_URL=http://localhost:3000
-set RABBITMQ_URL=amqp://guest:guest@localhost:5672/%2f
+set AGENT_SERVER_URL=http://10.30.0.123:3000
+set RABBITMQ_URL=amqp://eclub:eCLUB123@10.30.0.123:5672/%2f
 
 if exist "%~dp0agent-config.json" (
     for /f "usebackq delims=" %%a in (`powershell -NoProfile -Command "Get-Content '%~dp0agent-config.json' | ConvertFrom-Json | ForEach-Object { $_.agent.authToken + '|' + $_.agent.offlineCacheKey + '|' + $_.server.url + '|' + $_.rabbitmq.url }"`) do set "CONFIG_LINE=%%a"
