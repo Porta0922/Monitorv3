@@ -34,7 +34,7 @@ fn sanitize_activity_fields(app_name: &str, window_title: &str) -> (String, Stri
     (clean_app, clean_window)
 }
 
-pub fn spawn(context: Arc<TaskContext>) {
+pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let monitoring = MonitoringLoop::new();
         let mut interval = skip_interval(Duration::from_secs(2));
@@ -216,5 +216,5 @@ pub fn spawn(context: Arc<TaskContext>) {
                 last_report_instant = Some(now_instant);
             }
         }
-    });
+    })
 }

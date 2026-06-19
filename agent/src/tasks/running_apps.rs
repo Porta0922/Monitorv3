@@ -5,12 +5,11 @@ use crate::monitoring::MonitoringLoop;
 use crate::is_running_in_session_0;
 use super::{TaskContext, skip_interval};
 
-pub fn spawn(context: Arc<TaskContext>) {
+pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
     let is_session_0 = is_running_in_session_0();
-    // Open app snapshots require a user session
     if is_session_0 {
         tracing::info!("Skipping open app snapshots task (requires user session)");
-        return;
+        return tokio::spawn(std::future::pending::<()>());
     }
 
     tokio::spawn(async move {
@@ -50,5 +49,5 @@ pub fn spawn(context: Arc<TaskContext>) {
 
             context.publish_or_cache("running_apps", running_apps_payload).await;
         }
-    });
+    })
 }

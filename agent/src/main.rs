@@ -13,6 +13,12 @@ pub mod keystroke_tracker;
 pub mod process_protection;
 pub mod osquery_runner;
 pub mod tasks;
+pub mod config_manager;
+pub mod task_supervisor;
+pub mod health_reporter;
+pub mod command_channel;
+pub mod remote_policy;
+pub mod discovery;
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -152,6 +158,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Prune logs older than 7 days to prevent unbounded disk growth
     prune_old_logs(&log_dir, if is_session_0 { "agent_service.log" } else { "agent_user.log" }, 7);
+    
+    // Auto-discovery: find agent-config.json and registry overrides
+    // This fills env vars that weren't set by .env (env vars take precedence).
+    let discovered = discovery::discover();
+    discovery::apply_to_env(&discovered);
     
     let version = env!("CARGO_PKG_VERSION");
     println!("ActivityMonitor Agent v{}", version);
@@ -387,6 +398,10 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let mac_address = device_identity.mac_address.clone();
     let envelope_metadata = Arc::new(tasks::EventMetadata::new());
 
+    // Initialize Configuration Manager
+    let config_manager = config_manager::ConfigManager::new();
+    tracing::info!("✅ Configuration manager initialized (v{})", config_manager.version());
+
     // Construct TaskContext
     let context = Arc::new(tasks::TaskContext {
         device_id: device_id_str,
@@ -399,27 +414,89 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         input_tracker,
         envelope_metadata,
         wifi_resend_flag,
+        config_manager: config_manager.clone(),
     });
 
-    // Spawn all modular background telemetry tasks
-    tasks::window_activity::spawn(context.clone());
-    tasks::heartbeat::spawn(context.clone());
-    tasks::usb_detector::spawn(context.clone());
-    tasks::usb_copy::spawn(context.clone());
-    tasks::wifi_history::spawn(context.clone());
-    tasks::running_apps::spawn(context.clone());
-    tasks::inventory::spawn(context.clone());
-    tasks::heatmap::spawn(context.clone());
-    tasks::resource_logger::spawn(context.clone());
-    tasks::security_osquery::spawn(context.clone());
+    // Create Task Supervisor for lifecycle management
+    let supervisor = task_supervisor::TaskSupervisor::new();
 
-    // Spawn modular support/infrastructure routines
-    tasks::support::spawn_reconnector(context.clone(), rabbitmq_url);
+    // Track all background telemetry tasks via supervisor
+    supervisor.track("window_activity", {
+        let ctx = context.clone();
+        move || tasks::window_activity::spawn(ctx.clone())
+    }).await;
+
+    supervisor.track("heartbeat", {
+        let ctx = context.clone();
+        move || tasks::heartbeat::spawn(ctx.clone())
+    }).await;
+
+    supervisor.track("usb_detector", {
+        let ctx = context.clone();
+        move || tasks::usb_detector::spawn(ctx.clone())
+    }).await;
+
+    supervisor.track("usb_copy", {
+        let ctx = context.clone();
+        move || tasks::usb_copy::spawn(ctx.clone())
+    }).await;
+
+    supervisor.track("wifi_history", {
+        let ctx = context.clone();
+        move || tasks::wifi_history::spawn(ctx.clone())
+    }).await;
+
+    supervisor.track("running_apps", {
+        let ctx = context.clone();
+        move || tasks::running_apps::spawn(ctx.clone())
+    }).await;
+
+    supervisor.track("inventory", {
+        let ctx = context.clone();
+        move || tasks::inventory::spawn(ctx.clone())
+    }).await;
+
+    supervisor.track("heatmap", {
+        let ctx = context.clone();
+        move || tasks::heatmap::spawn(ctx.clone())
+    }).await;
+
+    supervisor.track("resource_logger", {
+        let ctx = context.clone();
+        move || tasks::resource_logger::spawn(ctx.clone())
+    }).await;
+
+    supervisor.track("security_osquery", {
+        let ctx = context.clone();
+        move || tasks::security_osquery::spawn(ctx.clone())
+    }).await;
+
+    // Track support/infrastructure tasks
+    supervisor.track("reconnector", {
+        let ctx = context.clone();
+        let url = rabbitmq_url.clone();
+        move || tasks::support::spawn_reconnector(ctx.clone(), url.clone())
+    }).await;
+
+    supervisor.track("retry_synchronizer", {
+        let ctx = context.clone();
+        move || tasks::support::spawn_retry_synchronizer(ctx.clone())
+    }).await;
+
+    // Shutdown listener is NOT supervised (it listens until shutdown)
     tasks::support::spawn_shutdown_listener(context.clone());
-    tasks::support::spawn_retry_synchronizer(context.clone());
+
+    // Start supervisor background monitor (auto-restart crashed tasks)
+    supervisor.start_monitor();
+
+    // Spawn health reporter, command channel, and remote policy consumer
+    health_reporter::spawn_health_reporter(context.clone(), supervisor.clone(), config_manager.clone());
+    command_channel::spawn_command_channel(context.clone(), supervisor.clone(), config_manager.clone());
+    remote_policy::spawn_remote_policy_consumer(context.clone(), config_manager.clone());
 
     tracing::info!("✅ Agent started successfully");
-    tracing::info!("📊 Monitoring: focus-activity (2s) | heartbeat (60s) | open apps (60s) | USB (60s) | USB-copy-detect (60s) | WiFi (120s) | inventory (30d) | input summary (60s)");
+    tracing::info!("📊 Monitoring: focus-activity | heartbeat | open apps | USB | USB-copy-detect | WiFi | inventory | input summary | security");
+    tracing::info!("🔧 Supervisor active | Health reporter active | Command channel active | Remote policy active");
     
     // Keep agent running until shutdown signal is received
     shutdown_rx.recv().await;

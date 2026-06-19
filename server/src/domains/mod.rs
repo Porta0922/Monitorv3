@@ -6,3 +6,4 @@ pub mod usb;
 pub mod wifi;
 pub mod security;
 pub mod keystroke;
+pub mod agent;

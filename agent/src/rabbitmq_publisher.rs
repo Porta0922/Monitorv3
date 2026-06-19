@@ -21,7 +21,7 @@ struct PublisherState {
 
 impl RabbitMQPublisher {
     /// Connect to RabbitMQ and initialize exchanges
-    pub async fn connect(rabbitmq_url: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn connect(rabbitmq_url: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let publisher = Self {
             rabbitmq_url: rabbitmq_url.to_string(),
             state: Mutex::new(PublisherState {
@@ -41,7 +41,7 @@ impl RabbitMQPublisher {
     async fn connect_locked(
         rabbitmq_url: &str,
         state: &mut PublisherState,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         tracing::info!("🔌 Agent connecting to RabbitMQ at: {}", rabbitmq_url);
 
         let connection_result = tokio::time::timeout(
@@ -53,7 +53,7 @@ impl RabbitMQPublisher {
             Ok(Ok(conn)) => conn,
             Ok(Err(e)) => {
                 tracing::error!("❌ Agent failed to connect to RabbitMQ: {}", e);
-                return Err(Box::new(e) as Box<dyn std::error::Error>);
+                return Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>);
             }
             Err(_) => {
                 let err_msg = "RabbitMQ connection timed out after 10s";
@@ -64,7 +64,7 @@ impl RabbitMQPublisher {
 
         let channel = connection.create_channel().await.map_err(|e| {
             tracing::error!("❌ Agent failed to create channel: {}", e);
-            Box::new(e) as Box<dyn std::error::Error>
+            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
         tracing::info!("📢 Agent declaring 'monitoring' exchange (Topic, Durable)");
@@ -81,7 +81,7 @@ impl RabbitMQPublisher {
             .await
             .map_err(|e| {
                 tracing::error!("❌ Agent failed to declare exchange: {}", e);
-                Box::new(e) as Box<dyn std::error::Error>
+                Box::new(e) as Box<dyn std::error::Error + Send + Sync>
             })?;
 
         state.connection = Some(connection);
@@ -91,7 +91,7 @@ impl RabbitMQPublisher {
         Ok(())
     }
 
-    fn boxed_error(message: String) -> Box<dyn std::error::Error> {
+    fn boxed_error(message: String) -> Box<dyn std::error::Error + Send + Sync> {
         Box::new(io::Error::new(io::ErrorKind::Other, message))
     }
 
@@ -102,7 +102,7 @@ impl RabbitMQPublisher {
         app_name: &str,
         window_title: &str,
         duration_seconds: i64,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let payload = json!({
             "device_id": device_id.to_string(),
             "app_name": app_name,
@@ -119,7 +119,7 @@ impl RabbitMQPublisher {
         &self,
         device_id: Uuid,
         inventory_data: serde_json::Value,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let payload = json!({
             "device_id": device_id.to_string(),
             "inventory": inventory_data,
@@ -130,7 +130,7 @@ impl RabbitMQPublisher {
     }
 
     /// Publish USB event
-    pub async fn publish_usb_event(&self, event: &UsbEvent) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn publish_usb_event(&self, event: &UsbEvent) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let payload = json!({
             "device_id": event.device_id.to_string(),
             "usb_device": {
@@ -161,7 +161,7 @@ impl RabbitMQPublisher {
         exe_hash: &str,
         description: &str,
         severity: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let payload = json!({
             "device_id": device_id.to_string(),
             "alert_type": alert_type,
@@ -180,7 +180,7 @@ impl RabbitMQPublisher {
         &self,
         event_type: &str,
         payload: serde_json::Value,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let routing_key = format!("monitoring.{}", event_type);
         let body = serde_json::to_vec(&payload)?;
 
@@ -265,7 +265,7 @@ impl RabbitMQPublisher {
     }
 
     /// Health check connection
-    pub async fn health_check(&self) -> Result<bool, Box<dyn std::error::Error>> {
+    pub async fn health_check(&self) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         let mut state = self.state.lock().await;
         if state.channel.is_none() {
             if Self::connect_locked(&self.rabbitmq_url, &mut state).await.is_err() {

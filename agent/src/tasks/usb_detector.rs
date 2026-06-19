@@ -4,15 +4,14 @@ use crate::usb_detection::UsbMonitor;
 use crate::is_running_in_session_0;
 use super::{TaskContext, skip_interval};
 
-pub fn spawn(context: Arc<TaskContext>) {
-    tokio::spawn(async move {
-        let is_session_0 = is_running_in_session_0();
-        // Only run USB detection in Session 0 (Service) or if not on Windows
-        if cfg!(windows) && !is_session_0 {
-            tracing::info!("Skipping USB detection task (handled by service)");
-            return;
-        }
+pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
+    let is_session_0 = is_running_in_session_0();
+    if cfg!(windows) && !is_session_0 {
+        tracing::info!("Skipping USB detection task (handled by service)");
+        return tokio::spawn(std::future::pending::<()>());
+    }
 
+    tokio::spawn(async move {
         let mut usb_monitor = UsbMonitor::new();
         let mut interval = skip_interval(Duration::from_secs(60)); // Check every 60 seconds
         loop {
@@ -45,5 +44,5 @@ pub fn spawn(context: Arc<TaskContext>) {
                 }
             }
         }
-    });
+    })
 }

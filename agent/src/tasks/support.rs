@@ -3,7 +3,7 @@ use tokio::time::Duration;
 use chrono::Utc;
 use super::TaskContext;
 
-pub fn spawn_reconnector(context: Arc<TaskContext>, rabbitmq_url: String) {
+pub fn spawn_reconnector(context: Arc<TaskContext>, rabbitmq_url: String) -> tokio::task::JoinHandle<()> {
     let publisher_reconnect = context.publisher.clone();
     let wifi_resend_flag_reconnect = context.wifi_resend_flag.clone();
     tokio::spawn(async move {
@@ -68,8 +68,9 @@ pub fn spawn_reconnector(context: Arc<TaskContext>, rabbitmq_url: String) {
                 }
             }
         }
-    });
+    })
 }
+
 
 pub fn spawn_shutdown_listener(context: Arc<TaskContext>) {
     let context_clone = context.clone();
@@ -97,7 +98,7 @@ pub fn spawn_shutdown_listener(context: Arc<TaskContext>) {
     });
 }
 
-pub fn spawn_retry_synchronizer(context: Arc<TaskContext>) {
+pub fn spawn_retry_synchronizer(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
     let publisher_clone = context.publisher.clone();
     let cache_clone = context.cache.clone();
     tokio::spawn(async move {
@@ -134,5 +135,5 @@ pub fn spawn_retry_synchronizer(context: Arc<TaskContext>) {
                 Err(e) => tracing::warn!("Failed reading offline cache: {}", e),
             }
         }
-    });
+    })
 }

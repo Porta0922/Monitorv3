@@ -49,6 +49,7 @@ pub struct TaskContext {
     pub input_tracker: Arc<crate::input_tracking::InputTracker>,
     pub envelope_metadata: Arc<EventMetadata>,
     pub wifi_resend_flag: Arc<AtomicBool>,
+    pub config_manager: Arc<crate::config_manager::ConfigManager>,
 }
 
 impl TaskContext {

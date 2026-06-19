@@ -4,7 +4,7 @@ use chrono::Utc;
 use crate::is_running_in_session_0;
 use super::{TaskContext, skip_interval};
 
-pub fn spawn(context: Arc<TaskContext>) {
+pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut hb = skip_interval(Duration::from_secs(60));
         let mut last_idle_state: Option<bool> = None;
@@ -53,5 +53,5 @@ pub fn spawn(context: Arc<TaskContext>) {
                 last_idle_state = Some(is_idle);
             }
         }
-    });
+    })
 }

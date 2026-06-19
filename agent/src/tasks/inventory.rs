@@ -6,12 +6,11 @@ use crate::inventory::InventoryScanner;
 use crate::is_running_in_session_0;
 use super::{TaskContext, skip_interval};
 
-pub fn spawn(context: Arc<TaskContext>) {
+pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
     let is_session_0 = is_running_in_session_0();
-    // Only run inventory scan in Session 0 (Service) or if not on Windows
     if cfg!(windows) && !is_session_0 {
         tracing::info!("Skipping software inventory task (handled by service)");
-        return;
+        return tokio::spawn(std::future::pending::<()>());
     }
 
     tokio::spawn(async move {
@@ -109,5 +108,5 @@ pub fn spawn(context: Arc<TaskContext>) {
             );
             context.publish_or_cache("inventory", inventory_payload).await;
         }
-    });
+    })
 }

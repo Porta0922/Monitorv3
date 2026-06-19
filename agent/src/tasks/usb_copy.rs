@@ -3,7 +3,7 @@ use tokio::time::Duration;
 use crate::usb_file_copy_detection::UsbFileCopyMonitor;
 use super::{TaskContext, skip_interval};
 
-pub fn spawn(context: Arc<TaskContext>) {
+pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut detector = UsbFileCopyMonitor::new(900);
         let mut interval = skip_interval(Duration::from_secs(60));
@@ -68,5 +68,5 @@ pub fn spawn(context: Arc<TaskContext>) {
                 context.publish_or_cache("security", security_payload).await;
             }
         }
-    });
+    })
 }

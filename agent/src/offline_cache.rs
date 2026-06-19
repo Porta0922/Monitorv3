@@ -193,6 +193,26 @@ impl OfflineCache {
         Ok((total, unsynced))
     }
 
+    /// Get count of unsynced events
+    pub async fn get_unsynced_event_count(&self) -> SqliteResult<u64> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM cache_events WHERE synced = 0",
+            [],
+            |row| row.get(0),
+        )
+    }
+
+    /// Clear all unsynced events
+    pub async fn clear_unsynced_events(&self) -> SqliteResult<u64> {
+        let conn = self.conn.lock().unwrap();
+        let deleted = conn.execute(
+            "DELETE FROM cache_events WHERE synced = 0",
+            [],
+        )?;
+        Ok(deleted as u64)
+    }
+
     /// Clear old synced events (cleanup)
     pub async fn cleanup_synced(&self, days_old: i64) -> SqliteResult<u64> {
         let conn = self.conn.lock().unwrap();

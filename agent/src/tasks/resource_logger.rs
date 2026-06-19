@@ -4,7 +4,7 @@ use crate::monitoring::ResourceMonitor;
 use crate::is_running_in_session_0;
 use super::{TaskContext, skip_interval};
 
-pub fn spawn(context: Arc<TaskContext>) {
+pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
     // ── Immediate Startup Heartbeat ──
     {
         let context = context.clone();
@@ -94,5 +94,5 @@ pub fn spawn(context: Arc<TaskContext>) {
                 context.keystroke_tracker.reset_minute_counters().await;
             }
         }
-    });
+    })
 }

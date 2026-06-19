@@ -101,41 +101,41 @@ async fn resolve_osquery_scheduler_seconds(device_id: &str, auth_token: &str) ->
     effective
 }
 
-pub fn spawn(context: Arc<TaskContext>) {
+pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
     let context_clone = context.clone();
     tokio::spawn(async move {
         let osquery_scheduler_seconds = resolve_osquery_scheduler_seconds(&context_clone.device_id, &context_clone.auth_token).await;
 
-        if osquery_scheduler_seconds > 0 {
-            let mut runner = OsqueryRunner::new();
-            let mut scan_interval = skip_interval(Duration::from_secs(osquery_scheduler_seconds.max(60)));
-            loop {
-                scan_interval.tick().await;
-
-                // Only run osquery scans if the user is idle to avoid CPU spikes during work
-                if context_clone.keystroke_tracker.is_idle().await {
-                    let findings = runner.scan_due().await;
-                    for finding in findings {
-                        let security_payload = context_clone.build_event_envelope(
-                            "security",
-                            1,
-                            serde_json::json!({
-                                "query_name":        finding.query_name,
-                                "query_pack":        finding.query_pack,
-                                "mitre_technique":   finding.mitre_technique,
-                                "severity":          finding.severity,
-                                "raw_data":          finding.raw_data,
-                                "event_fingerprint": finding.event_fingerprint,
-                            }),
-                        );
-                        context_clone.publish_or_cache("security", security_payload).await;
-                    }
-                } else {
-                    tracing::debug!("User is active, skipping osquery security scan for this cycle.");
-                }
-            }
-        } else {
+        if osquery_scheduler_seconds == 0 {
             tracing::info!("ℹ️ osquery security scan disabled (set server policy or AGENT_OSQUERY_SCHEDULER_SECONDS>0 to enable)");
+            std::future::pending::<()>().await;
         }
-    });
+
+        let mut runner = OsqueryRunner::new();
+        let mut scan_interval = skip_interval(Duration::from_secs(osquery_scheduler_seconds.max(60)));
+        loop {
+            scan_interval.tick().await;
+
+            if context_clone.keystroke_tracker.is_idle().await {
+                let findings = runner.scan_due().await;
+                for finding in findings {
+                    let security_payload = context_clone.build_event_envelope(
+                        "security",
+                        1,
+                        serde_json::json!({
+                            "query_name":        finding.query_name,
+                            "query_pack":        finding.query_pack,
+                            "mitre_technique":   finding.mitre_technique,
+                            "severity":          finding.severity,
+                            "raw_data":          finding.raw_data,
+                            "event_fingerprint": finding.event_fingerprint,
+                        }),
+                    );
+                    context_clone.publish_or_cache("security", security_payload).await;
+                }
+            } else {
+                tracing::debug!("User is active, skipping osquery security scan for this cycle.");
+            }
+        }
+    })
 }

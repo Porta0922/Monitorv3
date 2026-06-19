@@ -1,0 +1,271 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?include $(var.WixDir)\Config.wxi ?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+
+  <Product Id="*"
+           Name="ActivityMonitor Enterprise Agent"
+           Language="1033"
+           Version="$(var.ProductVersion)"
+           Manufacturer="ActivityMonitor Team"
+           UpgradeCode="A1B2C3D4-E5F6-7890-ABCD-EF1234567890">
+
+    <Package InstallerVersion="200"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Platform="x64"
+             Manufacturer="ActivityMonitor Team"
+             Description="ActivityMonitor Enterprise Monitoring Agent"
+             Comments="Remote monitoring and telemetry agent" />
+
+    <Media Id="1" Cabinet="agent.cab" EmbedCab="yes" />
+
+    <MajorUpgrade DowngradeErrorMessage="[ProductName] version [ProductVersion] is already installed."
+                  AllowDowngrades="yes"
+                  Schedule="afterInstallExecute" />
+
+    <!-- MSI Properties: pass via msiexec AGENT_AUTH_TOKEN="xxx" -->
+    <Property Id="AGENT_AUTH_TOKEN" Value="change-me-in-production" Secure="yes" />
+    <Property Id="AGENT_OFFLINE_CACHE_KEY" Value="replace-with-32-byte-cache-key!!" Secure="yes" />
+    <Property Id="AGENT_SERVER_URL" Value="http://localhost:3000" Secure="yes" />
+    <Property Id="RABBITMQ_URL" Value="amqp://guest:guest@localhost:5672/" Secure="yes" />
+
+    <Condition Message="ActivityMonitor requiere Windows 64-bit.">
+      VersionNT64
+    </Condition>
+
+    <!-- Directory structure -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLDIR" Name="ActivityMonitor">
+          <Directory Id="BINDIR" Name="Bin" />
+          <Directory Id="DATADIR" Name="Data" />
+        </Directory>
+      </Directory>
+
+      <Directory Id="CommonAppDataFolder">
+        <Directory Id="APPDATADIR" Name="ActivityMonitor">
+          <Directory Id="CONFIGDIR" Name="Config" />
+          <Directory Id="LOGSDIR" Name="Logs" />
+        </Directory>
+      </Directory>
+
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ProgramMenuDir" Name="ActivityMonitor" />
+      </Directory>
+    </Directory>
+
+    <!-- Agent binary + service + firewall -->
+    <DirectoryRef Id="BINDIR">
+      <Component Id="AgentBinary" Guid="*" Win64="yes">
+        <File Id="activity-monitor-agent.exe"
+              Name="activity-monitor-agent.exe"
+              Source="$(var.WixDir)\Files\activity-monitor-agent.exe"
+              KeyPath="yes"
+              Checksum="yes" />
+
+        <ServiceInstall Id="ServiceInstaller"
+                        Type="ownProcess"
+                        Vital="yes"
+                        Name="ActivityMonitor"
+                        DisplayName="ActivityMonitor Enterprise Agent"
+                        Description="System-level monitoring agent."
+                        Start="auto"
+                        ErrorControl="normal"
+                        Interactive="no">
+          <ServiceDependency Id="RpcSs" />
+          <ServiceDependency Id="Dhcp" />
+          <ServiceConfig DelayedAutoStart="yes" OnInstall="yes" OnReinstall="yes" />
+          <ServiceConfig FirstFailure="restart" SecondFailure="restart" RestartRestoreTime="60000" />
+        </ServiceInstall>
+
+        <ServiceControl Id="StartService"
+                        Name="ActivityMonitor"
+                        Start="install"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Data directory -->
+    <DirectoryRef Id="DATADIR">
+      <Component Id="DataDir" Guid="*" Win64="yes">
+        <CreateFolder />
+        <RemoveFile Id="PurgeData" Name="*.*" On="uninstall" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Logs directory -->
+    <DirectoryRef Id="LOGSDIR">
+      <Component Id="LogsDir" Guid="*" Win64="yes">
+        <CreateFolder />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Config directory (in ProgramData for user-session agent access) -->
+    <DirectoryRef Id="CONFIGDIR">
+      <Component Id="ConfigDir" Guid="*" Win64="yes">
+        <CreateFolder>
+          <Permission User="Users" GenericAll="yes" />
+        </CreateFolder>
+      </Component>
+    </DirectoryRef>
+
+    <!-- Start Menu shortcuts -->
+    <DirectoryRef Id="ProgramMenuDir">
+      <Component Id="Shortcuts" Guid="*">
+        <Shortcut Id="UninstallShortcut"
+                  Name="Uninstall ActivityMonitor Agent"
+                  Target="[System64Folder]msiexec.exe"
+                  Arguments="/x [ProductCode]" />
+        <RemoveFolder Id="ProgramMenuDir" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\ActivityMonitor" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Registry config (for agent discovery fallback) -->
+    <DirectoryRef Id="CONFIGDIR">
+      <Component Id="AgentRegistryConfig" Guid="*" Win64="yes">
+        <RegistryKey Root="HKLM" Key="SOFTWARE\ActivityMonitor">
+          <RegistryValue Type="string" Name="ConfigDir" Value="[CONFIGDIR]" />
+          <RegistryValue Type="string" Name="InstallDir" Value="[INSTALLDIR]" />
+          <RegistryValue Type="string" Name="Version" Value="$(var.ProductVersion)" />
+        </RegistryKey>
+        <RegistryKey Root="HKLM" Key="SOFTWARE\ActivityMonitor\Agent">
+          <RegistryValue Type="string" Name="AuthToken" Value="[AGENT_AUTH_TOKEN]" />
+          <RegistryValue Type="string" Name="OfflineCacheKey" Value="[AGENT_OFFLINE_CACHE_KEY]" />
+          <RegistryValue Type="string" Name="ServerUrl" Value="[AGENT_SERVER_URL]" />
+          <RegistryValue Type="string" Name="RabbitMqUrl" Value="[RABBITMQ_URL]" />
+        </RegistryKey>
+      </Component>
+    </DirectoryRef>
+
+    <!-- ============================================================ -->
+    <!-- CUSTOM ACTIONS: write .env + create scheduled task (VBScript) -->
+    <!-- ============================================================ -->
+
+    <!-- Step 1: pack properties into CustomActionData string -->
+    <CustomAction Id="SetPostInstallData"
+                  Property="WriteEnvAndScheduleTask"
+                  Value="ConfigDir=[APPDATADIR];BinDir=[BINDIR];AuthToken=[AGENT_AUTH_TOKEN];OfflineCacheKey=[AGENT_OFFLINE_CACHE_KEY];ServerUrl=[AGENT_SERVER_URL];RabbitMqUrl=[RABBITMQ_URL]"
+                  Execute="immediate" />
+
+    <!-- Step 2: deferred VBScript that reads CustomActionData -->
+    <CustomAction Id="WriteEnvAndScheduleTask"
+                  Script="vbscript"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check">
+      <![CDATA[
+        Dim data, parts, pair, key, value, fso, file, envPath, configDir, binDir, authToken, offlineCacheKey, serverUrl, rabbitMqUrl
+        Dim taskXml, taskXmlPath, shell
+
+        ' Parse CustomActionData
+        data = Session.Property("CustomActionData")
+        parts = Split(data, ";")
+        For Each pair In parts
+            If InStr(pair, "=") > 0 Then
+                key = Left(pair, InStr(pair, "=") - 1)
+                value = Mid(pair, InStr(pair, "=") + 1)
+                Select Case key
+                    Case "ConfigDir": configDir = value
+                    Case "BinDir":    binDir = value
+                    Case "AuthToken": authToken = value
+                    Case "OfflineCacheKey": offlineCacheKey = value
+                    Case "ServerUrl": serverUrl = value
+                    Case "RabbitMqUrl": rabbitMqUrl = value
+                End Select
+            End If
+        Next
+
+        Set fso = CreateObject("Scripting.FileSystemObject")
+
+        ' Ensure config directory exists
+        If Not fso.FolderExists(configDir) Then
+            fso.CreateFolder(configDir)
+        End If
+
+        ' Write .env file
+        envPath = fso.BuildPath(configDir, ".env")
+        Set file = fso.CreateTextFile(envPath, True)
+        file.WriteLine "# ActivityMonitor Agent Configuration"
+        file.WriteLine "AGENT_AUTH_TOKEN=" & authToken
+        file.WriteLine "AGENT_OFFLINE_CACHE_KEY=" & offlineCacheKey
+        file.WriteLine "AGENT_SERVER_URL=" & serverUrl
+        file.WriteLine "RABBITMQ_URL=" & rabbitMqUrl
+        file.Close
+
+        ' Create scheduled task for user-session agent
+        taskXml = "<?xml version=""1.0"" encoding=""UTF-16""?>" & vbCrLf _
+                & "<Task version=""1.2"" xmlns=""http://schemas.microsoft.com/windows/2004/02/mit/task"">" & vbCrLf _
+                & "  <RegistrationInfo>" & vbCrLf _
+                & "    <Date>2026-06-19T12:00:00</Date>" & vbCrLf _
+                & "    <Author>ActivityMonitor</Author>" & vbCrLf _
+                & "    <Description>ActivityMonitor User Agent</Description>" & vbCrLf _
+                & "  </RegistrationInfo>" & vbCrLf _
+                & "  <Triggers>" & vbCrLf _
+                & "    <LogonTrigger><Enabled>true</Enabled></LogonTrigger>" & vbCrLf _
+                & "  </Triggers>" & vbCrLf _
+                & "  <Principals>" & vbCrLf _
+                & "    <Principal id=""Author""><GroupId>S-1-5-32-545</GroupId><RunLevel>LeastPrivilege</RunLevel></Principal>" & vbCrLf _
+                & "  </Principals>" & vbCrLf _
+                & "  <Settings>" & vbCrLf _
+                & "    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>" & vbCrLf _
+                & "    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>" & vbCrLf _
+                & "    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>" & vbCrLf _
+                & "    <AllowHardTerminate>true</AllowHardTerminate>" & vbCrLf _
+                & "    <StartWhenAvailable>true</StartWhenAvailable>" & vbCrLf _
+                & "    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>" & vbCrLf _
+                & "    <AllowStartOnDemand>true</AllowStartOnDemand>" & vbCrLf _
+                & "    <Enabled>true</Enabled>" & vbCrLf _
+                & "    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>" & vbCrLf _
+                & "    <Priority>4</Priority>" & vbCrLf _
+                & "    <RestartOnFailure><Interval>PT1M</Interval><Count>99</Count></RestartOnFailure>" & vbCrLf _
+                & "  </Settings>" & vbCrLf _
+                & "  <Actions Context=""Author"">" & vbCrLf _
+                & "    <Exec><Command>" & chr(34) & fso.BuildPath(binDir, "activity-monitor-agent.exe") & chr(34) & "</Command></Exec>" & vbCrLf _
+                & "  </Actions>" & vbCrLf _
+                & "</Task>"
+
+        taskXmlPath = fso.BuildPath(Session.Property("TempFolder"), "ActivityMonitorTask.xml")
+        Set file = fso.CreateTextFile(taskXmlPath, True)
+        file.Write taskXml
+        file.Close
+
+        Set shell = CreateObject("WScript.Shell")
+        shell.Run "schtasks /Delete /TN ActivityMonitorUserAgent /F", 0, True
+        shell.Run "schtasks /Create /XML """ & taskXmlPath & """ /TN ActivityMonitorUserAgent /F", 0, True
+
+        If fso.FileExists(taskXmlPath) Then
+            fso.DeleteFile(taskXmlPath)
+        End If
+      ]]>
+    </CustomAction>
+
+    <!-- Installation sequence -->
+    <InstallExecuteSequence>
+      <Custom Action="SetPostInstallData" Before="WriteEnvAndScheduleTask">NOT Installed OR REINSTALL</Custom>
+      <Custom Action="WriteEnvAndScheduleTask" After="InstallFiles">NOT Installed OR REINSTALL</Custom>
+      <RemoveExistingProducts Before="InstallInitialize" />
+    </InstallExecuteSequence>
+
+    <!-- Minimal UI -->
+    <UI>
+      <UIRef Id="WixUI_Minimal" />
+    </UI>
+
+    <Feature Id="ProductFeature"
+             Title="ActivityMonitor Agent"
+             Level="1"
+             ConfigurableDirectory="INSTALLDIR"
+             Display="expand">
+      <ComponentRef Id="AgentBinary" />
+      <ComponentRef Id="DataDir" />
+      <ComponentRef Id="LogsDir" />
+      <ComponentRef Id="ConfigDir" />
+      <ComponentRef Id="Shortcuts" />
+      <ComponentRef Id="AgentRegistryConfig" />
+    </Feature>
+
+  </Product>
+</Wix>

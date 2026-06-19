@@ -27,6 +27,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .nest("/usb", crate::domains::usb::routes::router())
         .nest("/security", crate::domains::security::routes::router())
         .nest("/heatmaps", crate::domains::keystroke::routes::router())
+        .nest("/agent", crate::domains::agent::routes::router())
         .with_state(state)
         .layer(cors)
 }

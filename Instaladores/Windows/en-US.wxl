@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WixLocalization Culture="en-US" xmlns="http://schemas.microsoft.com/wix/2006/localization">
+  <String Id="ProductName">ActivityMonitor Enterprise Agent</String>
+  <String Id="ManufacturerName">ActivityMonitor Team</String>
+  <String Id="WelcomeDlgTitle">ActivityMonitor Enterprise Agent Setup</String>
+  <String Id="WelcomeDlgDescription">Installs the ActivityMonitor monitoring agent on your system.</String>
+  <String Id="FeatureDescription">ActivityMonitor Agent with service, user-session task, and configuration.</String>
+  <String Id="ServiceName">ActivityMonitor</String>
+  <String Id="ServiceDescription">Collects and forwards system telemetry to the ActivityMonitor server.</String>
+
+  <!-- Progress text -->
+  <String Id="ProgressText_WriteEnvAndScheduleTask">Configuring agent and user session task...</String>
+</WixLocalization>
