@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use chrono::{DateTime, Utc};
 use crate::monitoring;
+#[cfg(unix)]
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
