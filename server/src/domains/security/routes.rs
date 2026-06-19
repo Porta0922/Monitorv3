@@ -42,7 +42,22 @@ async fn list_security_events(
     let limit = q.limit.unwrap_or(100);
 
     match state.db.get_security_events(device_id, from, to, severity, mitre, limit).await {
-        Ok(events) => Json(json!({ "events": events })),
+        Ok(events) => {
+            let rows: Vec<serde_json::Value> = events.into_iter().map(|ev| {
+                json!({
+                    "id": ev.id,
+                    "timestamp": ev.timestamp.to_rfc3339(),
+                    "device_id": ev.device_id.to_string(),
+                    "query_name": ev.query_name,
+                    "query_pack": ev.query_pack,
+                    "mitre_technique": ev.mitre_technique,
+                    "severity": ev.severity,
+                    "raw_data": ev.raw_data,
+                    "created_at": ev.created_at.to_rfc3339()
+                })
+            }).collect();
+            Json(json!({ "events": rows }))
+        }
         Err(e) => {
             tracing::error!("Failed to fetch security events: {}", e);
             Json(json!({ "events": [] }))
@@ -62,7 +77,22 @@ async fn list_security_events_for_device(
     let limit = q.limit.unwrap_or(100);
 
     match state.db.get_security_events(Some(device_id), from, to, severity, mitre, limit).await {
-        Ok(events) => Json(json!({ "events": events })),
+        Ok(events) => {
+            let rows: Vec<serde_json::Value> = events.into_iter().map(|ev| {
+                json!({
+                    "id": ev.id,
+                    "timestamp": ev.timestamp.to_rfc3339(),
+                    "device_id": ev.device_id.to_string(),
+                    "query_name": ev.query_name,
+                    "query_pack": ev.query_pack,
+                    "mitre_technique": ev.mitre_technique,
+                    "severity": ev.severity,
+                    "raw_data": ev.raw_data,
+                    "created_at": ev.created_at.to_rfc3339()
+                })
+            }).collect();
+            Json(json!({ "events": rows }))
+        }
         Err(e) => {
             tracing::error!("Failed to fetch security events for device: {}", e);
             Json(json!({ "events": [] }))
@@ -105,7 +135,22 @@ async fn list_security_alerts(
     let limit = q.limit.unwrap_or(100);
 
     match state.db.get_security_alerts(device_id, severity, resolved, limit).await {
-        Ok(alerts) => Json(json!({ "alerts": alerts })),
+        Ok(alerts) => {
+            let rows: Vec<serde_json::Value> = alerts.into_iter().map(|a| {
+                json!({
+                    "id": a.id,
+                    "device_id": a.device_id.to_string(),
+                    "alert_type": a.alert_type,
+                    "app_name": a.app_name,
+                    "exe_hash": a.exe_hash,
+                    "description": a.description,
+                    "severity": a.severity,
+                    "resolved": a.resolved,
+                    "created_at": a.created_at.to_rfc3339()
+                })
+            }).collect();
+            Json(json!({ "alerts": rows }))
+        }
         Err(e) => {
             tracing::error!("Failed to fetch security alerts: {}", e);
             Json(json!({ "alerts": [] }))
@@ -124,7 +169,20 @@ async fn resolve_alert(
     Json(payload): Json<ResolvePayload>,
 ) -> impl IntoResponse {
     match state.db.resolve_security_alert(alert_id, payload.resolution_notes.as_deref()).await {
-        Ok(Some(alert)) => (StatusCode::OK, Json(serde_json::to_value(json!({ "success": true, "alert": alert })).unwrap())),
+        Ok(Some(alert)) => {
+            let json_alert = json!({
+                "id": alert.id,
+                "device_id": alert.device_id.to_string(),
+                "alert_type": alert.alert_type,
+                "app_name": alert.app_name,
+                "exe_hash": alert.exe_hash,
+                "description": alert.description,
+                "severity": alert.severity,
+                "resolved": alert.resolved,
+                "created_at": alert.created_at.to_rfc3339()
+            });
+            (StatusCode::OK, Json(json!({ "success": true, "alert": json_alert })))
+        }
         Ok(None) => (StatusCode::NOT_FOUND, Json(json!({ "success": false }))),
         Err(e) => {
             tracing::error!("Failed to resolve alert: {}", e);
@@ -153,7 +211,20 @@ async fn create_security_alert(
     };
 
     match state.db.insert_security_alert(device_uuid, &body.alert_type, body.app_name.as_deref(), body.exe_hash.as_deref(), &body.description, &body.severity).await {
-        Ok(alert) => (StatusCode::OK, Json(serde_json::to_value(json!({ "success": true, "alert": alert })).unwrap())),
+        Ok(alert) => {
+            let json_alert = json!({
+                "id": alert.id,
+                "device_id": alert.device_id.to_string(),
+                "alert_type": alert.alert_type,
+                "app_name": alert.app_name,
+                "exe_hash": alert.exe_hash,
+                "description": alert.description,
+                "severity": alert.severity,
+                "resolved": alert.resolved,
+                "created_at": alert.created_at.to_rfc3339()
+            });
+            (StatusCode::OK, Json(json!({ "success": true, "alert": json_alert })))
+        }
         Err(e) => {
             tracing::error!("Failed to create security alert: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "success": false })))

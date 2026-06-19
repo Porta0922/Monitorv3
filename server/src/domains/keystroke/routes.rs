@@ -20,7 +20,9 @@ async fn list_heatmaps(
     Query(_q): Query<HeatmapQuery>,
 ) -> impl IntoResponse {
     // Placeholder: return empty list to avoid 404s until heatmap storage/query is implemented
-    Json(json!({ "heatmaps": [] }))
+    // Provide full schema expected by the dashboard
+    let example: Vec<serde_json::Value> = Vec::new();
+    Json(json!({ "heatmaps": example }))
 }
 
 async fn list_device_heatmaps(
@@ -28,6 +30,8 @@ async fn list_device_heatmaps(
     Path(_device_id): Path<String>,
     Query(_q): Query<HeatmapQuery>,
 ) -> impl IntoResponse {
-    Json(json!({ "heatmaps": [] }))
+    // Return empty but with correct top-level key
+    let example: Vec<serde_json::Value> = Vec::new();
+    Json(json!({ "heatmaps": example }))
 }
 
