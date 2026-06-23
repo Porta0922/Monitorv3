@@ -85,6 +85,7 @@ fn current_wifi_snapshot() -> Result<Option<WifiSnapshot>, Box<dyn std::error::E
     let output = cmd.output()?;
 
     if !output.status.success() {
+        tracing::warn!("netsh wlan show interfaces failed (exit code: {}). Is a WiFi adapter available?", output.status.code().unwrap_or(-1));
         return Ok(None);
     }
 
