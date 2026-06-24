@@ -27,7 +27,7 @@ set BIN_DIR=%PROGRAMDATA%\ActivityMonitor\Bin
 set DATA_DIR=%PROGRAMDATA%\ActivityMonitor\Data
 set AGENT_BIN=%BIN_DIR%\activity-monitor-agent.exe
 set LOG_DIR=%PROGRAMDATA%\ActivityMonitor\logs
-set ENV_FILE=%CONFIG_DIR%\.env
+set ENV_FILE=%INSTALL_DIR%\.env
 
 REM ---- Discovery: locate config JSON (network path or local) ----
 set CONFIG_SOURCE=
@@ -45,21 +45,20 @@ if exist "%SCRIPT_DIR%agent-config.json" (
 
 REM ---- Load config from JSON (if found) ----
 if not "!CONFIG_SOURCE!"=="" (
-    for /f "usebackq delims=" %%a in (`powershell -NoProfile -Command "Get-Content '!CONFIG_SOURCE!' | ConvertFrom-Json | ForEach-Object { $_.agent.authToken + '|' + $_.agent.offlineCacheKey + '|' + $_.server.url + '|' + $_.rabbitmq.url }"`) do set "CONFIG_LINE=%%a"
-    for /f "tokens=1-4 delims=|" %%a in ("!CONFIG_LINE!") do (
-        set AGENT_AUTH_TOKEN=%%a
-        set AGENT_OFFLINE_CACHE_KEY=%%b
-        set AGENT_SERVER_URL=%%c
-        set RABBITMQ_URL=%%d
-    )
+    powershell -NoProfile -Command "$c = Get-Content '!CONFIG_SOURCE!' | ConvertFrom-Json; if ($c.agent.authToken) { Set-Content -Path (Join-Path $env:TEMP 'am_auth.txt') -Value $c.agent.authToken } if ($c.agent.offlineCacheKey) { Set-Content -Path (Join-Path $env:TEMP 'am_cachekey.txt') -Value $c.agent.offlineCacheKey } if ($c.server.url) { Set-Content -Path (Join-Path $env:TEMP 'am_server.txt') -Value $c.server.url } if ($c.rabbitmq.url) { Set-Content -Path (Join-Path $env:TEMP 'am_rabbit.txt') -Value $c.rabbitmq.url }" >nul 2>&1
+    if exist "%TEMP%\am_auth.txt" set /p AGENT_AUTH_TOKEN=<"%TEMP%\am_auth.txt"
+    if exist "%TEMP%\am_cachekey.txt" set /p AGENT_OFFLINE_CACHE_KEY=<"%TEMP%\am_cachekey.txt"
+    if exist "%TEMP%\am_server.txt" set /p AGENT_SERVER_URL=<"%TEMP%\am_server.txt"
+    if exist "%TEMP%\am_rabbit.txt" set /p RABBITMQ_URL=<"%TEMP%\am_rabbit.txt"
+    del "%TEMP%\am_auth.txt" "%TEMP%\am_cachekey.txt" "%TEMP%\am_server.txt" "%TEMP%\am_rabbit.txt" 2>nul
     echo [*] Config loaded from: !CONFIG_SOURCE! >> "%LOG_FILE%"
 )
 
 REM ---- Config defaults (if not set by discovery) ----
 if "%AGENT_AUTH_TOKEN%"=="" set AGENT_AUTH_TOKEN=change-me-in-production
-if "%AGENT_OFFLINE_CACHE_KEY%"=="" set AGENT_OFFLINE_CACHE_KEY=replace-with-32-byte-cache-key!!
+if "%AGENT_OFFLINE_CACHE_KEY%"=="" set AGENT_OFFLINE_CACHE_KEY=replace-with-32-byte-cache-key
 if "%AGENT_SERVER_URL%"=="" set AGENT_SERVER_URL=http://10.30.0.123:3000
-if "%RABBITMQ_URL%"=="" set RABBITMQ_URL=amqp://eclub:eCLUB123@10.30.0.123:5672/%2f
+if "%RABBITMQ_URL%"=="" set RABBITMQ_URL=amqp://eclub:eCLUB123@10.30.0.123:5672/%%2f
 
 REM ---- Locate pre-compiled binary ----
 set AGENT_SRC=

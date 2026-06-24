@@ -184,7 +184,7 @@ fn discover_registry() -> Option<DiscoveryResult> {
                 }
             }
             if let Ok(val) = key.get_value::<String, _>("OfflineCacheKey") {
-                if !val.is_empty() && val != "replace-with-32-byte-cache-key!!" {
+                if !val.is_empty() && val != "replace-with-32-byte-cache-key" {
                     result.offline_cache_key = Some(val);
                 }
             }

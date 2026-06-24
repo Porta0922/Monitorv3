@@ -49,18 +49,17 @@ if not exist "%~dp0agent-config.json" (
 
 REM ---- Load configuration ----
 set AGENT_AUTH_TOKEN=change-me-in-production
-set AGENT_OFFLINE_CACHE_KEY=replace-with-32-byte-cache-key!!
+set AGENT_OFFLINE_CACHE_KEY=replace-with-32-byte-cache-key
 set AGENT_SERVER_URL=http://10.30.0.123:3000
-set RABBITMQ_URL=amqp://eclub:eCLUB123@10.30.0.123:5672/%2f
+set RABBITMQ_URL=amqp://eclub:eCLUB123@10.30.0.123:5672/%%2f
 
 if exist "%~dp0agent-config.json" (
-    for /f "usebackq delims=" %%a in (`powershell -NoProfile -Command "Get-Content '%~dp0agent-config.json' | ConvertFrom-Json | ForEach-Object { $_.agent.authToken + '|' + $_.agent.offlineCacheKey + '|' + $_.server.url + '|' + $_.rabbitmq.url }"`) do set "CONFIG_LINE=%%a"
-    for /f "tokens=1-4 delims=|" %%a in ("!CONFIG_LINE!") do (
-        if not "%%a"=="" set AGENT_AUTH_TOKEN=%%a
-        if not "%%b"=="" set AGENT_OFFLINE_CACHE_KEY=%%b
-        if not "%%c"=="" set AGENT_SERVER_URL=%%c
-        if not "%%d"=="" set RABBITMQ_URL=%%d
-    )
+    powershell -NoProfile -Command "$c = Get-Content '%~dp0agent-config.json' | ConvertFrom-Json; if ($c.agent.authToken) { Set-Content -Path (Join-Path $env:TEMP 'am_auth.txt') -Value $c.agent.authToken } if ($c.agent.offlineCacheKey) { Set-Content -Path (Join-Path $env:TEMP 'am_cachekey.txt') -Value $c.agent.offlineCacheKey } if ($c.server.url) { Set-Content -Path (Join-Path $env:TEMP 'am_server.txt') -Value $c.server.url } if ($c.rabbitmq.url) { Set-Content -Path (Join-Path $env:TEMP 'am_rabbit.txt') -Value $c.rabbitmq.url }" >nul 2>&1
+    if exist "%TEMP%\am_auth.txt" set /p AGENT_AUTH_TOKEN=<"%TEMP%\am_auth.txt"
+    if exist "%TEMP%\am_cachekey.txt" set /p AGENT_OFFLINE_CACHE_KEY=<"%TEMP%\am_cachekey.txt"
+    if exist "%TEMP%\am_server.txt" set /p AGENT_SERVER_URL=<"%TEMP%\am_server.txt"
+    if exist "%TEMP%\am_rabbit.txt" set /p RABBITMQ_URL=<"%TEMP%\am_rabbit.txt"
+    del "%TEMP%\am_auth.txt" "%TEMP%\am_cachekey.txt" "%TEMP%\am_server.txt" "%TEMP%\am_rabbit.txt" 2>nul
 )
 
 REM ---- Show configuration summary ----

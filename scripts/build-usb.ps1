@@ -2,7 +2,7 @@ param(
     [string]$ServerUrl = "http://10.30.0.123:3000",
     [string]$RabbitMqUrl = "amqp://eclub:eCLUB123@10.30.0.123:5672/%2f",
     [string]$AuthToken = "change-me-in-production",
-    [string]$OfflineCacheKey = "replace-with-32-byte-cache-key!!",
+    [string]$OfflineCacheKey = "replace-with-32-byte-cache-key",
     [string]$OutputDir = "",
     [string]$OsqueryPolicyProfile = "default",
     [switch]$SkipBuild
@@ -111,6 +111,12 @@ $silentBat = Join-Path $installerDir "install-windows-silent.bat"
 if (Test-Path $silentBat) {
     Copy-Item -Path $silentBat -Destination (Join-Path $OutputDir "install-silent.bat") -Force
     Write-Ok "install-silent.bat copiado"
+}
+
+$installPs1 = Join-Path $installerDir "install-windows.ps1"
+if (Test-Path $installPs1) {
+    Copy-Item -Path $installPs1 -Destination (Join-Path $OutputDir "install.ps1") -Force
+    Write-Ok "install.ps1 copiado"
 }
 
 # ---- Step 4: Generate README ----
