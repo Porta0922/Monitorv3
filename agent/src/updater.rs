@@ -1,3 +1,4 @@
+use reqwest::StatusCode;
 use serde::Deserialize;
 
 const GITHUB_API: &str = "https://api.github.com/repos/Porta0922/Monitorv3/releases/latest";
@@ -36,6 +37,9 @@ pub fn check_for_update() -> UpdateStatus {
         Err(e) => return UpdateStatus::Error(format!("Error contacting GitHub API: {}", e)),
     };
 
+    if resp.status() == StatusCode::NOT_FOUND {
+        return UpdateStatus::UpToDate;
+    }
     if !resp.status().is_success() {
         return UpdateStatus::Error(format!(
             "GitHub API returned HTTP {}",
