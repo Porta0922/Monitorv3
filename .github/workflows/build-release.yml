@@ -12,40 +12,22 @@ env:
 
 jobs:
   build:
-    name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact_name: activity-monitor-agent-x86_64-windows.exe
-            binary_name: activity-monitor-agent.exe
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact_name: activity-monitor-agent-x86_64-linux
-            binary_name: activity-monitor-agent
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            artifact_name: activity-monitor-agent-x86_64-darwin
-            binary_name: activity-monitor-agent
-
+    name: Build Windows
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          target: ${{ matrix.target }}
 
       - name: Build release
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: target/${{ matrix.target }}/release/${{ matrix.binary_name }}
+          name: activity-monitor-agent.exe
+          path: target/release/activity-monitor-agent.exe
           if-no-files-found: error
 
   release:
@@ -66,19 +48,11 @@ jobs:
             ## ActivityMonitor Agent v${{ github.ref_name }}
 
             ### Descarga
-            Seleccioná el binario correspondiente a tu plataforma:
-
-            | Plataforma | Archivo |
-            |------------|---------|
-            | Windows | `activity-monitor-agent-x86_64-windows.exe` |
-            | Linux | `activity-monitor-agent-x86_64-linux` |
-            | macOS | `activity-monitor-agent-x86_64-darwin` |
+            - [`activity-monitor-agent.exe`](Windows)
 
             ### Instalación
             Ver [`README.md`](https://github.com/Porta0922/Monitorv3#instalaci%C3%B3n) para instrucciones.
           files: |
-            activity-monitor-agent-x86_64-windows.exe/*
-            activity-monitor-agent-x86_64-linux/*
-            activity-monitor-agent-x86_64-darwin/*
+            activity-monitor-agent.exe/*
           draft: false
           prerelease: false

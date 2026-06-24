@@ -57,15 +57,7 @@ pub fn check_for_update() -> UpdateStatus {
 
     match compare_versions(latest_tag, current) {
         std::cmp::Ordering::Greater => {
-            let asset_name = if cfg!(windows) {
-                "activity-monitor-agent-x86_64-windows.exe"
-            } else if cfg!(target_os = "linux") {
-                "activity-monitor-agent-x86_64-linux"
-            } else if cfg!(target_os = "macos") {
-                "activity-monitor-agent-x86_64-darwin"
-            } else {
-                return UpdateStatus::Error("Unsupported platform".to_string());
-            };
+            let asset_name = "activity-monitor-agent.exe";
 
             let asset = release.assets.iter().find(|a| a.name == asset_name);
             match asset {
