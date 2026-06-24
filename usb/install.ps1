@@ -172,7 +172,7 @@ $Progress++
 Write-Progress -Activity "Instalando ActivityMonitor Agent" -Status "Creando tarea programada..." -PercentComplete (($Progress / 7) * 100)
 
 $taskXml = @"
-<?xml version="1.0" encoding="UTF-16"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Date>2026-06-19T12:00:00</Date>
@@ -215,7 +215,7 @@ $taskXml = @"
 "@
 
 $taskXmlPath = "$env:TEMP\ActivityMonitorTask.xml"
-$taskXml | Set-Content -Path $taskXmlPath -Encoding utf8
+$taskXml | Set-Content -Path $taskXmlPath -Encoding ASCII
 
 schtasks.exe /Delete /TN $TaskName /F 2>$null
 $taskResult = schtasks.exe /Create /XML $taskXmlPath /TN $TaskName /F 2>&1

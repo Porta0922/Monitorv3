@@ -26,6 +26,7 @@ pub mod updater;
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use chrono::Timelike;
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::{sleep, Duration};
 use device_id::{load_or_create_device_identity, get_device_nickname};
@@ -544,6 +545,64 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                 let connected = ctx.publisher.read().await.is_some();
                 ws.connected.store(connected, std::sync::atomic::Ordering::Relaxed);
                 ws.events_today.store(ec.load(std::sync::atomic::Ordering::Relaxed), std::sync::atomic::Ordering::Relaxed);
+            }
+        });
+    }
+
+    // Spawn daily auto-update checker (runs at 9:00 AM every day)
+    {
+        tokio::spawn(async move {
+            use std::time::Duration;
+
+            let now = chrono::Local::now();
+            let now_secs = now.time().num_seconds_from_midnight();
+            let target = 9 * 3600u32;
+            let initial_delay = if now_secs < target {
+                target - now_secs
+            } else {
+                24 * 3600 - now_secs + target
+            };
+
+            tracing::info!("[AutoUpdate] First check in {:.1}h", initial_delay as f64 / 3600.0);
+            tokio::time::sleep(Duration::from_secs(initial_delay as u64)).await;
+
+            loop {
+                tracing::info!("[AutoUpdate] Checking for updates...");
+
+                match crate::updater::check_for_update() {
+                    crate::updater::UpdateStatus::UpdateAvailable { version, download_url } => {
+                        tracing::info!("[AutoUpdate] Update v{} available, downloading...", version);
+                        let temp_dir = std::env::temp_dir();
+                        let dest_path = temp_dir.join("am_update.exe");
+
+                        if let Err(e) = crate::updater::download_and_install(&download_url, &dest_path) {
+                            tracing::error!("[AutoUpdate] Download failed: {}", e);
+                        } else {
+                            let service_name = if cfg!(windows) { "ActivityMonitor" } else { "activity-monitor" };
+                            match crate::updater::create_update_script(&dest_path, service_name, &version) {
+                                Ok(script_path) => {
+                                    tracing::info!("[AutoUpdate] Update script created, applying...");
+                                    let _ = std::process::Command::new("cmd.exe")
+                                        .args(&["/c", "start", "/min", &script_path.to_string_lossy()])
+                                        .spawn();
+                                    break;
+                                }
+                                Err(e) => {
+                                    tracing::error!("[AutoUpdate] Failed to create update script: {}", e);
+                                }
+                            }
+                        }
+                    }
+                    crate::updater::UpdateStatus::UpToDate => {
+                        tracing::info!("[AutoUpdate] Already up to date (v{})", env!("CARGO_PKG_VERSION"));
+                    }
+                    crate::updater::UpdateStatus::Error(e) => {
+                        tracing::warn!("[AutoUpdate] Check failed: {}", e);
+                    }
+                }
+
+                tracing::info!("[AutoUpdate] Next check in 24 hours");
+                tokio::time::sleep(Duration::from_secs(24 * 3600)).await;
             }
         });
     }

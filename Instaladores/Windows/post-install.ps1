@@ -32,7 +32,7 @@ $agentBin = Join-Path $BinDir "activity-monitor-agent.exe"
 
 # Build task XML
 $taskXml = @"
-<?xml version="1.0" encoding="UTF-16"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Date>2026-06-19T12:00:00</Date>
@@ -82,7 +82,7 @@ $taskXml = @"
 "@
 
 $taskXmlPath = Join-Path $env:TEMP "ActivityMonitorTask.xml"
-Set-Content -Path $taskXmlPath -Value $taskXml -Encoding utf8
+Set-Content -Path $taskXmlPath -Value $taskXml -Encoding ASCII
 
 # Delete existing task if present
 & schtasks /Delete /TN $taskName /F 2>$null
