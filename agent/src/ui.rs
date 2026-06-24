@@ -15,7 +15,8 @@ use winapi::um::wingdi::{
 use winapi::um::winuser::{
     self, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyIcon,
     DispatchMessageW, GetCursorPos, GetDC, GetMessageW, GetWindowLongPtrW,
-    ICONINFO, IDI_APPLICATION, KillTimer, LoadIconW, MB_ICONINFORMATION, MB_OK, MessageBoxW,
+    ICONINFO, IDI_APPLICATION, IDYES, KillTimer, LoadIconW, MB_ICONERROR, MB_ICONINFORMATION,
+    MB_ICONQUESTION, MB_OK, MB_YESNO, MessageBoxW,
     PostQuitMessage, RegisterClassW, ReleaseDC, SetForegroundWindow, SetTimer,
     SetWindowLongPtrW, TrackPopupMenu, TranslateMessage, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
     WNDCLASSW, GWLP_USERDATA, CreateIconIndirect,
@@ -252,7 +253,83 @@ unsafe extern "system" fn tray_wndproc(
                 CMD_OPEN_STATUS => {
                     let _ = open::that("http://localhost:9876");
                 }
-                CMD_CHECK_UPDATE => {}
+                CMD_CHECK_UPDATE => {
+                    let hwnd_raw = hwnd as usize;
+                    std::thread::spawn(move || {
+                        let hwnd = hwnd_raw as HWND;
+                        unsafe {
+                            let checking = to_wide("Buscando actualización en GitHub...");
+                            let title = to_wide("ActivityMonitor Agent");
+                            MessageBoxW(hwnd, checking.as_ptr(), title.as_ptr(), MB_OK | MB_ICONINFORMATION);
+                        }
+
+                        let status = crate::updater::check_for_update();
+
+                        unsafe {
+                            match status {
+                                crate::updater::UpdateStatus::UpToDate => {
+                                    let title = to_wide("ActivityMonitor Agent");
+                                    let msg = format!("Ya tenés la última versión (v{}).", env!("CARGO_PKG_VERSION"));
+                                    let msg_wide = to_wide(&msg);
+                                    MessageBoxW(hwnd, msg_wide.as_ptr(), title.as_ptr(), MB_OK | MB_ICONINFORMATION);
+                                }
+                                crate::updater::UpdateStatus::UpdateAvailable { version, download_url } => {
+                                    let title = to_wide("Actualización Disponible");
+                                    let msg = format!("Nueva versión {} disponible.\n\n¿Descargar e instalar ahora?", version);
+                                    let msg_wide = to_wide(&msg);
+                                    let result = MessageBoxW(hwnd, msg_wide.as_ptr(), title.as_ptr(), MB_YESNO | MB_ICONQUESTION);
+
+                                    if result == IDYES {
+                                        let temp_dir = std::env::temp_dir();
+                                        let dest_path = temp_dir.join("am_update.exe");
+
+                                        let downloading = to_wide("Descargando actualización...");
+                                        let title_dl = to_wide("ActivityMonitor Agent");
+                                        MessageBoxW(hwnd, downloading.as_ptr(), title_dl.as_ptr(), MB_OK | MB_ICONINFORMATION);
+
+                                        match crate::updater::download_and_install(&download_url, &dest_path) {
+                                            Ok(_) => {
+                                                let service_name = if cfg!(windows) { "ActivityMonitor" } else { "activity-monitor" };
+                                                match crate::updater::create_update_script(&dest_path, service_name, &version) {
+                                                    Ok(script_path) => {
+                                                        let script_str = script_path.to_string_lossy().to_string();
+                                                        let _ = std::process::Command::new("cmd.exe")
+                                                            .args(&["/c", "start", "/min", &script_str])
+                                                            .spawn();
+
+                                                        let title_done = to_wide("Actualización");
+                                                        let done_msg = to_wide("La actualización se aplicará automáticamente.\nEl agente se reiniciará en breve.");
+                                                        MessageBoxW(hwnd, done_msg.as_ptr(), title_done.as_ptr(), MB_OK | MB_ICONINFORMATION);
+
+                                                        PostQuitMessage(0);
+                                                    }
+                                                    Err(e) => {
+                                                        let err_msg = format!("Error creando script de actualización: {}", e);
+                                                        let err_wide = to_wide(&err_msg);
+                                                        let title_err = to_wide("Error");
+                                                        MessageBoxW(hwnd, err_wide.as_ptr(), title_err.as_ptr(), MB_OK | MB_ICONERROR);
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                let err_msg = format!("Error descargando actualización: {}", e);
+                                                let err_wide = to_wide(&err_msg);
+                                                let title_err = to_wide("Error");
+                                                MessageBoxW(hwnd, err_wide.as_ptr(), title_err.as_ptr(), MB_OK | MB_ICONERROR);
+                                            }
+                                        }
+                                    }
+                                }
+                                crate::updater::UpdateStatus::Error(e) => {
+                                    let title = to_wide("Error");
+                                    let msg = format!("Error al buscar actualización:\n{}", e);
+                                    let msg_wide = to_wide(&msg);
+                                    MessageBoxW(hwnd, msg_wide.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR);
+                                }
+                            }
+                        }
+                    });
+                }
                 CMD_ABOUT => {
                     let title = to_wide("ActivityMonitor Agent");
                     let version = env!("CARGO_PKG_VERSION");

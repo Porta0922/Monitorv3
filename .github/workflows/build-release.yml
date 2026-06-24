@@ -1,0 +1,84 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: activity-monitor-agent-x86_64-windows.exe
+            binary_name: activity-monitor-agent.exe
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: activity-monitor-agent-x86_64-linux
+            binary_name: activity-monitor-agent
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: activity-monitor-agent-x86_64-darwin
+            binary_name: activity-monitor-agent
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: target/${{ matrix.target }}/release/${{ matrix.binary_name }}
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ActivityMonitor v${{ github.ref_name }}
+          body: |
+            ## ActivityMonitor Agent v${{ github.ref_name }}
+
+            ### Descarga
+            Seleccioná el binario correspondiente a tu plataforma:
+
+            | Plataforma | Archivo |
+            |------------|---------|
+            | Windows | `activity-monitor-agent-x86_64-windows.exe` |
+            | Linux | `activity-monitor-agent-x86_64-linux` |
+            | macOS | `activity-monitor-agent-x86_64-darwin` |
+
+            ### Instalación
+            Ver [`README.md`](https://github.com/Porta0922/Monitorv3#instalaci%C3%B3n) para instrucciones.
+          files: |
+            activity-monitor-agent-x86_64-windows.exe/*
+            activity-monitor-agent-x86_64-linux/*
+            activity-monitor-agent-x86_64-darwin/*
+          draft: false
+          prerelease: false

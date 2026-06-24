@@ -22,6 +22,7 @@ pub mod discovery;
 pub mod web;
 #[cfg(windows)]
 pub mod ui;
+pub mod updater;
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
