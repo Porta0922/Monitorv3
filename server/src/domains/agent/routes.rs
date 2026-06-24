@@ -5,6 +5,7 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
+use serde_json::to_value;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use crate::api::AppState;
@@ -73,7 +74,7 @@ async fn osquery_policy(
         }),
     };
 
-    (StatusCode::OK, Json(response))
+    (StatusCode::OK, Json(to_value(&response).unwrap()))
 }
 
 #[derive(Serialize)]
@@ -125,8 +126,7 @@ async fn agent_policy(
         success: true,
         policy: Some(policy),
     };
-
-    (StatusCode::OK, Json(response))
+    (StatusCode::OK, Json(to_value(&response).unwrap()))
 }
 
 #[derive(Serialize)]
@@ -148,7 +148,7 @@ async fn pending_commands(
         commands: Vec::new(),
     };
 
-    (StatusCode::OK, Json(response))
+    (StatusCode::OK, Json(to_value(&response).unwrap()))
 }
 
 async fn ack_command(

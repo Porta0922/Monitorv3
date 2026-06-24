@@ -1,14 +1,14 @@
 ﻿{
     "version":  "3.3.5",
     "agent":  {
-                  "offlineCacheKey":  "replace-with-32-byte-cache-key!!",
+                  "offlineCacheKey":  "replace-with-32-byte-cache-key",
                   "authToken":  "change-me-in-production"
               },
     "server":  {
-                   "url":  "http://localhost:3000"
+                   "url":  "http://10.30.0.123:3000"
                },
     "rabbitmq":  {
-                     "url":  "amqp://guest:guest@localhost:5672/%2f"
+                     "url":  "amqp://eclub:eCLUB123@10.30.0.123:5672/%2f"
                  },
     "apiVersion":  "v1",
     "osquery":  {

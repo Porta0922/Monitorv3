@@ -19,6 +19,9 @@ pub mod health_reporter;
 pub mod command_channel;
 pub mod remote_policy;
 pub mod discovery;
+pub mod web;
+#[cfg(windows)]
+pub mod ui;
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -140,8 +143,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let file_appender = tracing_appender::rolling::daily(&log_dir, log_filename);
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
-    use tracing_subscriber::{fmt, prelude::*, Registry};
+    use tracing_subscriber::{fmt, prelude::*, Registry, filter::EnvFilter};
+
+    let filter = EnvFilter::new("info")
+        .add_directive("activity_monitor_agent=trace".parse().unwrap())
+        .add_directive("hyper=warn".parse().unwrap())
+        .add_directive("h2=warn".parse().unwrap())
+        .add_directive("lapin=warn".parse().unwrap())
+        .add_directive("amq_protocol_tcp=warn".parse().unwrap())
+        .add_directive("pinky_swear=warn".parse().unwrap())
+        .add_directive("tower=warn".parse().unwrap())
+        .add_directive("rustls=warn".parse().unwrap())
+        .add_directive("tokio=warn".parse().unwrap())
+        .add_directive("want=warn".parse().unwrap())
+        .add_directive("mio=warn".parse().unwrap());
+
     let subscriber = Registry::default()
+        .with(filter)
         .with(fmt::layer().with_ansi(true))
         .with(fmt::layer().with_writer(non_blocking).with_ansi(false));
 
@@ -398,6 +416,14 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let mac_address = device_identity.mac_address.clone();
     let envelope_metadata = Arc::new(tasks::EventMetadata::new());
 
+    // Initialize Web UI state
+    let web_state = Arc::new(web::WebState::new(
+        hostname.clone(),
+        env!("CARGO_PKG_VERSION").to_string(),
+        device_id_str.clone(),
+    ));
+    let events_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
+
     // Initialize Configuration Manager
     let config_manager = config_manager::ConfigManager::new();
     tracing::info!("✅ Configuration manager initialized (v{})", config_manager.version());
@@ -415,6 +441,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         envelope_metadata,
         wifi_resend_flag,
         config_manager: config_manager.clone(),
+        events_counter: Some(events_counter.clone()),
     });
 
     // Create Task Supervisor for lifecycle management
@@ -493,6 +520,32 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     health_reporter::spawn_health_reporter(context.clone(), supervisor.clone(), config_manager.clone());
     command_channel::spawn_command_channel(context.clone(), supervisor.clone(), config_manager.clone());
     remote_policy::spawn_remote_policy_consumer(context.clone(), config_manager.clone());
+
+    // Spawn Web UI (always, works in both service and user mode)
+    web::spawn_web_server(web_state.clone());
+
+    // Spawn System Tray (Windows user mode only - no exit option)
+    #[cfg(windows)]
+    if !is_session_0 {
+        ui::spawn_tray(web_state.clone());
+    }
+
+    // Spawn status updater for Web UI
+    {
+        let ws = web_state.clone();
+        let ec = events_counter.clone();
+        let ctx = context.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(5));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                let connected = ctx.publisher.read().await.is_some();
+                ws.connected.store(connected, std::sync::atomic::Ordering::Relaxed);
+                ws.events_today.store(ec.load(std::sync::atomic::Ordering::Relaxed), std::sync::atomic::Ordering::Relaxed);
+            }
+        });
+    }
 
     tracing::info!("✅ Agent started successfully");
     tracing::info!("📊 Monitoring: focus-activity | heartbeat | open apps | USB | USB-copy-detect | WiFi | inventory | input summary | security");

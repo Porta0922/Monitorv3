@@ -139,60 +139,23 @@ if %errorLevel% equ 0 (
 )
 
 REM ---- 6. Create user task ----
-echo  [6/7] Creando tarea de usuario...
-set "TASK_XML=%TEMP%\ActivityMonitorTask.xml"
-(
-    echo ^<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"^>
-    echo   ^<RegistrationInfo^>
-    echo     ^<Date^>2026-06-19T12:00:00^</Date^>
-    echo     ^<Author^>ActivityMonitor^</Author^>
-    echo     ^<Description^>ActivityMonitor User Agent^</Description^>
-    echo   ^</RegistrationInfo^>
-    echo   ^<Triggers^>
-    echo     ^<LogonTrigger^>^<Enabled^>true^</Enabled^>^</LogonTrigger^>
-    echo   ^</Triggers^>
-    echo   ^<Principals^>
-    echo     ^<Principal id="Author"^>
-    echo       ^<GroupId^>S-1-5-32-545^</GroupId^>
-    echo       ^<RunLevel^>LeastPrivilege^</RunLevel^>
-    echo     ^</Principal^>
-    echo   ^</Principals^>
-    echo   ^<Settings^>
-    echo     ^<MultipleInstancesPolicy^>IgnoreNew^</MultipleInstancesPolicy^>
-    echo     ^<DisallowStartIfOnBatteries^>false^</DisallowStartIfOnBatteries^>
-    echo     ^<StopIfGoingOnBatteries^>false^</StopIfGoingOnBatteries^>
-    echo     ^<AllowHardTerminate^>true^</AllowHardTerminate^>
-    echo     ^<StartWhenAvailable^>true^</StartWhenAvailable^>
-    echo     ^<RunOnlyIfNetworkAvailable^>false^</RunOnlyIfNetworkAvailable^>
-    echo     ^<AllowStartOnDemand^>true^</AllowStartOnDemand^>
-    echo     ^<Enabled^>true^</Enabled^>
-    echo     ^<ExecutionTimeLimit^>PT0S^</ExecutionTimeLimit^>
-    echo     ^<Priority^>4^</Priority^>
-    echo     ^<RestartOnFailure^>
-    echo       ^<Interval^>PT1M^</Interval^>
-    echo       ^<Count^>99^</Count^>
-    echo     ^</RestartOnFailure^>
-    echo   ^</Settings^>
-    echo   ^<Actions Context="Author"^>
-    echo     ^<Exec^>
-    echo       ^<Command^>!AGENT_BIN!^</Command^>
-    echo     ^</Exec^>
-    echo   ^</Actions^>
-    echo ^</Task^>
-) > "!TASK_XML!"
+echo  [6/7] Configurando inicio automatico de usuario...
 
-schtasks /Create /XML "!TASK_XML!" /TN "ActivityMonitorUserAgent" /F >nul 2>&1
+REM Use direct schtasks command (no XML - more reliable)
+schtasks /Create /SC ONLOGON /TN "ActivityMonitorUserAgent" /TR "\"%AGENT_BIN%\"" /F /RL HIGHEST >nul 2>&1
 set SCHTASK_ERR=!errorLevel!
-if exist "!TASK_XML!" del /F /Q "!TASK_XML!" >nul 2>&1
 
 if !SCHTASK_ERR! equ 0 (
-    echo    [+] Tarea de usuario creada
+    echo    [+] Tarea de usuario creada exitosamente
 ) else (
-    schtasks /Create /SC ONLOGON /TN "ActivityMonitorUserAgent" /TR "\"%AGENT_BIN%\"" /F /IT >nul 2>&1
+    echo  [!] Intento 2: Registrando en entrada de Registro...
+    REM Fallback: Use Registry Run key (works on all Windows versions)
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "New-ItemProperty -Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'ActivityMonitorUserAgent' -Value '\"%AGENT_BIN%\"' -PropertyType String -Force | Out-Null" 2>nul
     if !errorLevel! equ 0 (
-        echo    [+] Tarea de usuario creada (fallback)
+        echo    [+] Entrada de Registro creada como fallback
     ) else (
-        echo  [!] No se pudo crear la tarea programada
+        echo  [!] Advertencia: No se configuro inicio automatico de usuario
+        echo  [*] Se debe iniciar manualmente: "%AGENT_BIN%"
     )
 )
 

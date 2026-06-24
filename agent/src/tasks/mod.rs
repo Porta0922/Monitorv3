@@ -50,6 +50,7 @@ pub struct TaskContext {
     pub envelope_metadata: Arc<EventMetadata>,
     pub wifi_resend_flag: Arc<AtomicBool>,
     pub config_manager: Arc<crate::config_manager::ConfigManager>,
+    pub events_counter: Option<Arc<std::sync::atomic::AtomicU64>>,
 }
 
 impl TaskContext {
@@ -91,6 +92,10 @@ impl TaskContext {
             }
         } else {
             let _ = self.cache.save_event(routing_event_type, &payload).await;
+        }
+
+        if let Some(counter) = &self.events_counter {
+            counter.fetch_add(1, Ordering::Relaxed);
         }
     }
 }
