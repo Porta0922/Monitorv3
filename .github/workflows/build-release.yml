@@ -46,9 +46,9 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: ActivityMonitor v${{ github.ref_name }}
+          name: ActivityMonitor ${{ github.ref_name }}
           body: |
-            ## ActivityMonitor Agent v${{ github.ref_name }}
+            ## ActivityMonitor Agent ${{ github.ref_name }}
 
             ### Descarga
             - [`activity-monitor-agent.exe`](Windows)

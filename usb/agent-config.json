@@ -1,9 +1,10 @@
 ﻿{
     "version":  "3.3.5",
     "agent":  {
-                  "offlineCacheKey":  "replace-with-32-byte-cache-key",
-                  "authToken":  "change-me-in-production"
-              },
+                   "offlineCacheKey":  "replace-with-32-byte-cache-key",
+                   "authToken":  "change-me-in-production",
+                   "githubToken":  "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"
+               },
     "server":  {
                    "url":  "http://10.30.0.123:3000"
                },

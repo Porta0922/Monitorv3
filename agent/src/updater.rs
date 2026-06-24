@@ -32,7 +32,14 @@ pub fn check_for_update() -> UpdateStatus {
         Err(e) => return UpdateStatus::Error(format!("Error creating HTTP client: {}", e)),
     };
 
-    let resp = match client.get(GITHUB_API).send() {
+    let token = std::env::var("GITHUB_TOKEN").ok();
+
+    let mut req = client.get(GITHUB_API);
+    if let Some(ref t) = token {
+        req = req.header("Authorization", format!("Bearer {}", t));
+    }
+
+    let resp = match req.send() {
         Ok(r) => r,
         Err(e) => return UpdateStatus::Error(format!("Error contacting GitHub API: {}", e)),
     };
@@ -81,7 +88,14 @@ pub fn download_and_install(url: &str, dest: &std::path::Path) -> Result<(), Box
         .timeout(std::time::Duration::from_secs(300))
         .build()?;
 
-    let resp = client.get(url).send()?;
+    let token = std::env::var("GITHUB_TOKEN").ok();
+
+    let mut req = client.get(url);
+    if let Some(ref t) = token {
+        req = req.header("Authorization", format!("Bearer {}", t));
+    }
+
+    let resp = req.send()?;
     if !resp.status().is_success() {
         return Err(format!("Download failed with HTTP {}", resp.status()).into());
     }

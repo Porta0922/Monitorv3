@@ -4,7 +4,8 @@ param(
     [string]$AuthToken,
     [string]$OfflineCacheKey,
     [string]$ServerUrl,
-    [string]$RabbitMqUrl
+    [string]$RabbitMqUrl,
+    [string]$GitHubToken
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,6 +17,7 @@ AGENT_AUTH_TOKEN=$AuthToken
 AGENT_OFFLINE_CACHE_KEY=$OfflineCacheKey
 AGENT_SERVER_URL=$ServerUrl
 RABBITMQ_URL=$RabbitMqUrl
+GITHUB_TOKEN=$GitHubToken
 "@
 
 if (-not (Test-Path $ConfigDir)) {

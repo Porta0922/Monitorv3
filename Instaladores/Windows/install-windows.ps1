@@ -56,6 +56,7 @@ $AuthToken = "change-me-in-production"
 $OfflineCacheKey = "replace-with-32-byte-cache-key"
 $ServerUrl = "http://10.30.0.123:3000"
 $RabbitMqUrl = "amqp://eclub:eCLUB123@10.30.0.123:5672/%2f"
+$GitHubToken = ""
 
 if (Test-Path $ConfigSource) {
     Write-Info "Cargando configuracion desde agent-config.json..."
@@ -63,6 +64,7 @@ if (Test-Path $ConfigSource) {
         $config = Get-Content $ConfigSource -Raw | ConvertFrom-Json
         if ($config.agent.authToken) { $AuthToken = $config.agent.authToken }
         if ($config.agent.offlineCacheKey) { $OfflineCacheKey = $config.agent.offlineCacheKey }
+        if ($config.agent.githubToken) { $GitHubToken = $config.agent.githubToken }
         if ($config.server.url) { $ServerUrl = $config.server.url }
         if ($config.rabbitmq.url) { $RabbitMqUrl = $config.rabbitmq.url }
         $ConfigLoaded = $true
@@ -112,6 +114,7 @@ AGENT_AUTH_TOKEN=$AuthToken
 AGENT_OFFLINE_CACHE_KEY=$OfflineCacheKey
 AGENT_SERVER_URL=$ServerUrl
 RABBITMQ_URL=$RabbitMqUrl
+GITHUB_TOKEN=$GitHubToken
 "@ | Set-Content -Path $EnvFile -Encoding ascii
 Write-Ok "Configuracion guardada en $EnvFile"
 

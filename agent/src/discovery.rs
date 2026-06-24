@@ -14,6 +14,7 @@ pub struct AgentConfigFile {
 pub struct AgentConfigSection {
     pub auth_token: Option<String>,
     pub offline_cache_key: Option<String>,
+    pub github_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -34,6 +35,7 @@ pub struct DiscoveryResult {
     pub rabbitmq_url: Option<String>,
     pub auth_token: Option<String>,
     pub offline_cache_key: Option<String>,
+    pub github_token: Option<String>,
 }
 
 /// Discovers agent configuration from local sources.
@@ -79,6 +81,9 @@ fn merge_config(result: &mut DiscoveryResult, source: DiscoveryResult) {
     if result.offline_cache_key.is_none() && source.offline_cache_key.is_some() {
         result.offline_cache_key = source.offline_cache_key;
     }
+    if result.github_token.is_none() && source.github_token.is_some() {
+        result.github_token = source.github_token;
+    }
 }
 
 /// Find and parse agent-config.json from standard locations.
@@ -96,6 +101,7 @@ fn discover_config_file() -> Option<DiscoveryResult> {
                             if let Some(agent) = &config.agent {
                                 result.auth_token = agent.auth_token.clone();
                                 result.offline_cache_key = agent.offline_cache_key.clone();
+                                result.github_token = agent.github_token.clone();
                             }
                             if let Some(server) = &config.server {
                                 result.server_url = server.url.clone();
@@ -107,6 +113,7 @@ fn discover_config_file() -> Option<DiscoveryResult> {
                                 || result.server_url.is_some()
                                 || result.rabbitmq_url.is_some()
                                 || result.offline_cache_key.is_some()
+                                || result.github_token.is_some()
                             {
                                 tracing::info!("[Discovery] Loaded config from: {}", path.display());
                                 return Some(result);
@@ -228,6 +235,12 @@ pub fn apply_to_env(discovery: &DiscoveryResult) {
         if std::env::var("AGENT_OFFLINE_CACHE_KEY").is_err() {
             std::env::set_var("AGENT_OFFLINE_CACHE_KEY", key);
             tracing::info!("[Discovery] Set AGENT_OFFLINE_CACHE_KEY from discovery");
+        }
+    }
+    if let Some(token) = &discovery.github_token {
+        if std::env::var("GITHUB_TOKEN").is_err() {
+            std::env::set_var("GITHUB_TOKEN", token);
+            tracing::info!("[Discovery] Set GITHUB_TOKEN from discovery");
         }
     }
 }
