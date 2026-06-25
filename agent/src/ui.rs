@@ -257,12 +257,6 @@ unsafe extern "system" fn tray_wndproc(
                     let hwnd_raw = hwnd as usize;
                     std::thread::spawn(move || {
                         let hwnd = hwnd_raw as HWND;
-                        unsafe {
-                            let checking = to_wide("Buscando actualización en GitHub...");
-                            let title = to_wide("ActivityMonitor Agent");
-                            MessageBoxW(hwnd, checking.as_ptr(), title.as_ptr(), MB_OK | MB_ICONINFORMATION);
-                        }
-
                         let status = crate::updater::check_for_update();
 
                         unsafe {
@@ -282,10 +276,6 @@ unsafe extern "system" fn tray_wndproc(
                                     if result == IDYES {
                                         let temp_dir = std::env::temp_dir();
                                         let dest_path = temp_dir.join("am_update.exe");
-
-                                        let downloading = to_wide("Descargando actualización...");
-                                        let title_dl = to_wide("ActivityMonitor Agent");
-                                        MessageBoxW(hwnd, downloading.as_ptr(), title_dl.as_ptr(), MB_OK | MB_ICONINFORMATION);
 
                                         match crate::updater::download_and_install(&download_url, &dest_path) {
                                             Ok(_) => {

@@ -235,6 +235,20 @@ if ($LASTEXITCODE -eq 0) {
 }
 Remove-Item -Path $taskXmlPath -Force -ErrorAction SilentlyContinue
 
+# Force battery settings on the task (notebooks: run on battery too)
+try {
+    $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+    $t.Settings.DisallowStartIfOnBatteries = $false
+    $t.Settings.StopIfGoingOnBatteries = $false
+    $t.Settings.ExecutionTimeLimit = "PT0S"
+    $t.Settings.RestartCount = 99
+    $t.Settings.RestartInterval = "PT1M"
+    Register-ScheduledTask -TaskName $TaskName -InputObject $t -Force | Out-Null
+    Write-Ok "Configuracion de energia aplicada (corre en bateria)"
+} catch {
+    Write-Warn "No se pudo ajustar configuracion de energia: $_"
+}
+
 # 7. Start agent
 Write-Step "7/7" "Iniciando agente..."
 $Progress++
