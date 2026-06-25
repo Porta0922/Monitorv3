@@ -142,10 +142,13 @@ pub fn create_update_script(
          tasklist /FI \"IMAGENAME eq activity-monitor-agent.exe\" 2>nul | find /I \"activity-monitor-agent.exe\" >nul\r\n\
          if not errorlevel 1 goto wait_proc\r\n\
          \r\n\
-         REM Copy with retries (the file may still be held briefly)\r\n\
+         REM Rename the in-use file first (Windows allows this), then copy new one\r\n\
          echo [*] Copying new binary...\r\n\
          set retries=0\r\n\
          :copy_retry\r\n\
+         if exist \"{exe}\" (\r\n\
+             rename \"{exe}\" \"activity-monitor-agent.exe.old\" >nul 2>&1\r\n\
+         )\r\n\
          copy /Y \"{new}\" \"{exe}\" >nul 2>&1\r\n\
          if errorlevel 1 (\r\n\
              set /a retries+=1\r\n\
@@ -157,6 +160,7 @@ pub fn create_update_script(
              pause\r\n\
              exit /b 1\r\n\
          )\r\n\
+         if exist \"{exe}.old\" del /F /Q \"{exe}.old\" >nul 2>&1\r\n\
          echo [+] Binary updated to {version}\r\n\
          \r\n\
          REM Restore service recovery\r\n\
