@@ -120,21 +120,48 @@ pub fn create_update_script(
         "@echo off\r\n\
          setlocal enabledelayedexpansion\r\n\
          REM ActivityMonitor self-updater\r\n\
+         \r\n\
+         REM Disable service recovery to prevent auto-restart during update\r\n\
+         sc failure \"{service}\" reset=86400 actions= \"\" >nul 2>&1\r\n\
+         \r\n\
          echo [*] Stopping service and user agent...\r\n\
          sc stop \"{service}\" >nul 2>&1\r\n\
+         \r\n\
+         REM Wait for service to actually stop\r\n\
+         :wait_stop\r\n\
+         timeout /t 3 /nobreak >nul\r\n\
+         sc query \"{service}\" 2>nul | find \"STOPPED\" >nul 2>&1\r\n\
+         if errorlevel 1 goto wait_stop\r\n\
+         \r\n\
+         REM Kill any remaining user-session processes\r\n\
          taskkill /F /IM activity-monitor-agent.exe >nul 2>&1\r\n\
-         :wait\r\n\
-         timeout /t 2 /nobreak >nul\r\n\
+         \r\n\
+         REM Wait for processes to fully exit\r\n\
+         :wait_proc\r\n\
+         timeout /t 3 /nobreak >nul\r\n\
          tasklist /FI \"IMAGENAME eq activity-monitor-agent.exe\" 2>nul | find /I \"activity-monitor-agent.exe\" >nul\r\n\
-         if not errorlevel 1 goto wait\r\n\
+         if not errorlevel 1 goto wait_proc\r\n\
+         \r\n\
+         REM Copy with retries (the file may still be held briefly)\r\n\
          echo [*] Copying new binary...\r\n\
-         copy /Y \"{new}\" \"{exe}\" >nul\r\n\
+         set retries=0\r\n\
+         :copy_retry\r\n\
+         copy /Y \"{new}\" \"{exe}\" >nul 2>&1\r\n\
          if errorlevel 1 (\r\n\
-             echo [-] ERROR: Failed to copy binary\r\n\
+             set /a retries+=1\r\n\
+             if !retries! lss 5 (\r\n\
+                 timeout /t 2 /nobreak >nul\r\n\
+                 goto copy_retry\r\n\
+             )\r\n\
+             echo [-] ERROR: Failed to copy binary after !retries! attempts\r\n\
              pause\r\n\
              exit /b 1\r\n\
          )\r\n\
          echo [+] Binary updated to {version}\r\n\
+         \r\n\
+         REM Restore service recovery\r\n\
+         sc failure \"{service}\" reset=86400 actions= restart/5000/restart/10000/restart/30000 >nul 2>&1\r\n\
+         \r\n\
          echo [*] Starting service...\r\n\
          sc start \"{service}\" >nul 2>&1\r\n\
          schtasks /Run /TN \"{task}\" >nul 2>&1\r\n\

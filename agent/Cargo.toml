@@ -1,6 +1,6 @@
 [package]
 name = "activity-monitor-agent"
-version = "3.3.10"
+version = "3.3.11"
 edition = "2021"
 authors = ["ActivityMonitor Team"]
 
