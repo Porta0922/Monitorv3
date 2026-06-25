@@ -12,7 +12,7 @@ struct GitHubRelease {
 #[derive(Deserialize)]
 struct GitHubAsset {
     name: String,
-    browser_download_url: String,
+    url: String,
 }
 
 #[derive(Debug, PartialEq)]
@@ -70,7 +70,7 @@ pub fn check_for_update() -> UpdateStatus {
             match asset {
                 Some(a) => UpdateStatus::UpdateAvailable {
                     version: release.tag_name.clone(),
-                    download_url: a.browser_download_url.clone(),
+                    download_url: a.url.clone(),
                 },
                 None => UpdateStatus::Error(format!(
                     "Asset '{}' not found in release {}",
@@ -90,7 +90,10 @@ pub fn download_and_install(url: &str, dest: &std::path::Path) -> Result<(), Box
 
     let token = std::env::var("GITHUB_TOKEN").ok();
 
-    let mut req = client.get(url);
+    // Use the API asset URL with Accept: application/octet-stream to get the binary
+    // directly (avoids losing auth headers on CDN redirects)
+    let mut req = client.get(url)
+        .header("Accept", "application/octet-stream");
     if let Some(ref t) = token {
         req = req.header("Authorization", format!("Bearer {}", t));
     }
