@@ -121,26 +121,29 @@ pub fn create_update_script(
          setlocal enabledelayedexpansion\r\n\
          REM ActivityMonitor self-updater\r\n\
          \r\n\
+         echo [*] Stopping service and user agent...\r\n\
+         \r\n\
          REM Disable service recovery to prevent auto-restart during update\r\n\
          sc failure \"{service}\" reset=86400 actions= \"\" >nul 2>&1\r\n\
          \r\n\
-         echo [*] Stopping service and user agent...\r\n\
+         REM Try to stop service gracefully, then force-kill regardless\r\n\
          sc stop \"{service}\" >nul 2>&1\r\n\
          \r\n\
-         REM Wait for service to actually stop\r\n\
+         REM Wait for service with 30-second timeout\r\n\
+         set wait_secs=0\r\n\
          :wait_stop\r\n\
          timeout /t 3 /nobreak >nul\r\n\
+         set /a wait_secs+=3\r\n\
          sc query \"{service}\" 2>nul | find \"STOPPED\" >nul 2>&1\r\n\
-         if errorlevel 1 goto wait_stop\r\n\
+         if not errorlevel 1 goto stopped\r\n\
+         if !wait_secs! lss 30 goto wait_stop\r\n\
+         echo [*] Service did not stop gracefully, force-killing...\r\n\
          \r\n\
-         REM Kill any remaining user-session processes\r\n\
+         :stopped\r\n\
+         echo [*] Killing remaining processes...\r\n\
          taskkill /F /IM activity-monitor-agent.exe >nul 2>&1\r\n\
-         \r\n\
-         REM Wait for processes to fully exit\r\n\
-         :wait_proc\r\n\
          timeout /t 3 /nobreak >nul\r\n\
-         tasklist /FI \"IMAGENAME eq activity-monitor-agent.exe\" 2>nul | find /I \"activity-monitor-agent.exe\" >nul\r\n\
-         if not errorlevel 1 goto wait_proc\r\n\
+         taskkill /F /IM activity-monitor-agent.exe >nul 2>&1\r\n\
          \r\n\
          REM Rename the in-use file first (Windows allows this), then copy new one\r\n\
          echo [*] Copying new binary...\r\n\
