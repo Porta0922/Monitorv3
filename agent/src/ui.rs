@@ -283,6 +283,7 @@ unsafe extern "system" fn tray_wndproc(
                                                 match crate::updater::create_update_script(&dest_path, service_name, &version) {
                                                     Ok(script_path) => {
                                                         let script_str = script_path.to_string_lossy().to_string();
+                                                        tracing::info!("[UI] Spawning cmd.exe for update script: {}", script_str);
                                                         let _ = std::process::Command::new("cmd.exe")
                                                             .args(&["/c", "start", "/min", &script_str])
                                                             .spawn();

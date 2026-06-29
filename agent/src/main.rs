@@ -1,4 +1,4 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![windows_subsystem = "windows"]
 
 pub mod monitoring;
 pub mod offline_cache;
@@ -582,6 +582,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                             match crate::updater::create_update_script(&dest_path, service_name, &version) {
                                 Ok(script_path) => {
                                     tracing::info!("[AutoUpdate] Update script created, applying...");
+                                    tracing::info!("[AutoUpdate] Spawning cmd.exe for update script: {}", script_path.display());
                                     let _ = std::process::Command::new("cmd.exe")
                                         .args(&["/c", "start", "/min", &script_path.to_string_lossy()])
                                         .spawn();
