@@ -174,8 +174,9 @@ pub fn create_update_script(
          schtasks /Run /TN \"{task}\" >nul 2>&1\r\n\
          echo [+] Service started\r\n\
          echo [+] Update complete\r\n\
-         del /F /Q \"{new}\" >nul 2>&1\r\n\
-         del /F /Q \"%~f0\" >nul 2>&1\r\n",
+          del /F /Q \"{new}\" >nul 2>&1\r\n\
+          cmd /c del /f /q \"%~f0\" >nul 2>&1\r\n\
+          exit\r\n",
         new = new_binary.display(),
         exe = current_exe.display(),
         service = service_name,
