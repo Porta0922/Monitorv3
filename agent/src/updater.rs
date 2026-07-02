@@ -126,6 +126,14 @@ pub fn create_update_script(
          REM Disable service recovery to prevent auto-restart during update\r\n\
          sc failure \"{service}\" reset=86400 actions= \"\" >nul 2>&1\r\n\
          \r\n\
+         REM Check if service exists; create it if missing\r\n\
+         sc query \"{service}\" >nul 2>&1\r\n\
+         if errorlevel 1 (\r\n\
+             echo [*] Service not found, creating...\r\n\
+             sc create \"{service}\" binPath= \"{exe}\" start= delayed-auto displayName= \"ActivityMonitor Enterprise Agent\" >nul 2>&1\r\n\
+             sc failure \"{service}\" reset=86400 actions= restart/5000/restart/10000/restart/30000 >nul 2>&1\r\n\
+         )\r\n\
+         \r\n\
          REM Try to stop service gracefully, then force-kill regardless\r\n\
          sc stop \"{service}\" >nul 2>&1\r\n\
          \r\n\
