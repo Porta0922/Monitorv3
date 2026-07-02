@@ -110,7 +110,7 @@ fn current_wifi_snapshot() -> Result<Option<WifiSnapshot>, Box<dyn std::error::E
             continue;
         }
 
-        if (key == "name" || key == "nombre") && interface_name.is_none() {
+        if (key == "name" || key.starts_with("nombre")) && interface_name.is_none() {
             interface_name = Some(value.to_string());
             continue;
         }

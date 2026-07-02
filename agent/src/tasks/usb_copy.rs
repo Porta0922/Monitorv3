@@ -1,9 +1,16 @@
 use std::sync::Arc;
 use tokio::time::Duration;
 use crate::usb_file_copy_detection::UsbFileCopyMonitor;
+use crate::is_running_in_session_0;
 use super::{TaskContext, skip_interval};
 
 pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
+    let is_session_0 = is_running_in_session_0();
+    if cfg!(windows) && is_session_0 {
+        tracing::info!("Skipping USB copy detection task (handled by user agent)");
+        return tokio::spawn(std::future::pending::<()>());
+    }
+
     tokio::spawn(async move {
         let mut detector = UsbFileCopyMonitor::new(900);
         let mut interval = skip_interval(Duration::from_secs(60));

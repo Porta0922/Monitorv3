@@ -8,8 +8,8 @@ use super::{TaskContext, skip_interval};
 
 pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
     let is_session_0 = is_running_in_session_0();
-    if cfg!(windows) && !is_session_0 {
-        tracing::info!("Skipping WiFi monitoring task (handled by service)");
+    if cfg!(windows) && is_session_0 {
+        tracing::info!("Skipping WiFi monitoring task (handled by user agent)");
         return tokio::spawn(std::future::pending::<()>());
     }
 
