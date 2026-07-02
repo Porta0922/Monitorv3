@@ -285,7 +285,7 @@ unsafe extern "system" fn tray_wndproc(
                                                         let script_str = script_path.to_string_lossy().to_string();
                                                         tracing::info!("[UI] Spawning cmd.exe for update script: {}", script_str);
                                                         let _ = std::process::Command::new("cmd.exe")
-                                                            .args(&["/c", "start", "/min", &script_str])
+                                                            .args(&["/c", &script_str])
                                                             .spawn();
 
                                                         let title_done = to_wide("Actualización");

@@ -584,7 +584,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                                     tracing::info!("[AutoUpdate] Update script created, applying...");
                                     tracing::info!("[AutoUpdate] Spawning cmd.exe for update script: {}", script_path.display());
                                     let _ = std::process::Command::new("cmd.exe")
-                                        .args(&["/c", "start", "/min", &script_path.to_string_lossy()])
+                                        .args(&["/c", &script_path.to_string_lossy()])
                                         .spawn();
                                     break;
                                 }
