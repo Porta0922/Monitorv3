@@ -257,7 +257,8 @@ unsafe extern "system" fn tray_wndproc(
                     let hwnd_raw = hwnd as usize;
                     std::thread::spawn(move || {
                         let hwnd = hwnd_raw as HWND;
-                        let status = crate::updater::check_for_update();
+                        let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime for update check");
+                        let status = rt.block_on(crate::updater::check_for_update());
 
                         unsafe {
                             match status {
@@ -277,16 +278,23 @@ unsafe extern "system" fn tray_wndproc(
                                         let temp_dir = std::env::temp_dir();
                                         let dest_path = temp_dir.join("am_update.exe");
 
-                                        match crate::updater::download_and_install(&download_url, &dest_path) {
+                                        match rt.block_on(crate::updater::download_and_install(&download_url, &dest_path)) {
                                             Ok(_) => {
                                                 let service_name = if cfg!(windows) { "ActivityMonitor" } else { "activity-monitor" };
                                                 match crate::updater::create_update_script(&dest_path, service_name, &version) {
                                                     Ok(script_path) => {
                                                         let script_str = script_path.to_string_lossy().to_string();
                                                         tracing::info!("[UI] Spawning cmd.exe for update script: {}", script_str);
-                                                        let _ = std::process::Command::new("cmd.exe")
-                                                            .args(&["/c", &script_str])
-                                                            .spawn();
+                                                        #[allow(unused_mut)]
+                                                        let mut cmd = std::process::Command::new("cmd.exe");
+                                                        cmd.args(&["/c", &script_str]);
+                                                        #[cfg(windows)]
+                                                        {
+                                                            use std::os::windows::process::CommandExt;
+                                                            const CREATE_NO_WINDOW: u32 = 0x08000000;
+                                                            cmd.creation_flags(CREATE_NO_WINDOW);
+                                                        }
+                                                        let _ = cmd.spawn();
 
                                                         let title_done = to_wide("Actualización");
                                                         let done_msg = to_wide("La actualización se aplicará automáticamente.\nEl agente se reiniciará en breve.");

@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ActivityPage } from './pages/ActivityPage';
@@ -9,6 +10,7 @@ import { AlertsPage } from './pages/AlertsPage';
 import { SecurityPage } from './pages/SecurityPage';
 import { DeviceDetailPage } from './pages/DeviceDetailPage';
 import { MetricsPage } from './pages/MetricsPage';
+import { WifiPage } from './pages/WifiPage';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -26,6 +28,7 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 
 function App() {
   return (
+    <ErrorBoundary>
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
@@ -93,9 +96,18 @@ function App() {
             </PrivateRoute>
           }
         />
+        <Route
+          path="/wifi"
+          element={
+            <PrivateRoute>
+              <WifiPage />
+            </PrivateRoute>
+          }
+        />
         <Route path="/" element={<Navigate to="/dashboard" />} />
       </Routes>
     </BrowserRouter>
+    </ErrorBoundary>
   );
 }
 

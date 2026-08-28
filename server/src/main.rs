@@ -25,6 +25,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let server_host = std::env::var("SERVER_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
     let server_port = std::env::var("SERVER_PORT").unwrap_or_else(|_| "3000".to_string());
     let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev-secret-change-in-production".to_string());
+
+    if jwt_secret == "dev-secret-change-in-production" {
+        tracing::warn!("⚠️  JWT_SECRET is using the default value. Set JWT_SECRET env var in production!");
+    }
     let rabbitmq_url = std::env::var("RABBITMQ_URL").unwrap_or_else(|_| "amqp://guest:guest@localhost:5672/".to_string());
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://postgres:postgres@localhost:5432/activitymonitor".to_string());
     let runtime_config = RuntimeConfig::from_env();

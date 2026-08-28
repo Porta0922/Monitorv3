@@ -19,6 +19,7 @@ export function Sidebar({ currentPage }: { currentPage: string }) {
     { path: '/metrics', label: 'Metricas', icon: '◈', current: 'metrics' },
     { path: '/security', label: 'Seguridad', icon: '⬢', current: 'security' },
     { path: '/alerts', label: 'Historial', icon: '◌', current: 'alerts' },
+    { path: '/wifi', label: 'WiFi', icon: '◎', current: 'wifi' },
   ];
 
   useEffect(() => {

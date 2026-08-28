@@ -454,6 +454,24 @@ impl Database {
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_security_events_fingerprint ON security_events(event_fingerprint) WHERE event_fingerprint IS NOT NULL"
         ).execute(pool).await?;
 
+        // Convert tables to TimescaleDB hypertables for time-series optimization
+        let hypertable_queries = [
+            "SELECT create_hypertable('activity_logs', 'timestamp', if_not_exists => TRUE)",
+            "SELECT create_hypertable('security_events', 'timestamp', if_not_exists => TRUE)",
+            "SELECT create_hypertable('security_alerts', 'created_at', if_not_exists => TRUE)",
+            "SELECT create_hypertable('usb_events', 'timestamp', if_not_exists => TRUE)",
+            "SELECT create_hypertable('wifi_events', 'timestamp', if_not_exists => TRUE)",
+            "SELECT create_hypertable('node_resource_metrics', 'timestamp', if_not_exists => TRUE)",
+            "SELECT create_hypertable('input_summaries', 'timestamp', if_not_exists => TRUE)",
+            "SELECT create_hypertable('audit_events', 'timestamp', if_not_exists => TRUE)",
+        ];
+
+        for query in &hypertable_queries {
+            if let Err(e) = sqlx::query(query).execute(pool).await {
+                tracing::warn!("TimescaleDB hypertable conversion skipped: {}", e);
+            }
+        }
+
         Ok(())
     }
 
@@ -1821,6 +1839,25 @@ impl Database {
                 nickname,
             })
             .collect())
+    }
+
+    pub async fn get_device_by_id(&self, device_id: Uuid) -> Result<Option<Device>, sqlx::Error> {
+        let result = sqlx::query_as::<_, (Uuid, String, Uuid, Option<String>, DateTime<Utc>, DateTime<Utc>, Option<String>)>(
+            "SELECT device_id AS id, hostname, device_id, nickname, last_seen, created_at, mac_address FROM devices WHERE device_id = $1"
+        )
+        .bind(device_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(result.map(|(id, hostname, device_id, nickname, last_seen, created_at, mac_address)| Device {
+            id,
+            hostname,
+            device_id,
+            mac_address,
+            created_at,
+            last_seen,
+            nickname,
+        }))
     }
 
     #[allow(dead_code)]

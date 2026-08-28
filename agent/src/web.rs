@@ -11,10 +11,21 @@ pub struct WebState {
     pub connected: Arc<AtomicBool>,
     pub events_today: Arc<AtomicU64>,
     pub cache_pending: Arc<AtomicU64>,
+    pub auth_token: String,
 }
 
 impl WebState {
     pub fn new(hostname: String, version: String, device_id: String) -> Self {
+        let auth_token = std::env::var("WEB_UI_TOKEN")
+            .unwrap_or_else(|_| {
+                use rand::Rng;
+                let mut rng = rand::thread_rng();
+                let token: String = (0..32).map(|_| {
+                    let idx = rng.gen_range(0..36);
+                    if idx < 10 { (b'0' + idx) as char } else { (b'a' + idx - 10) as char }
+                }).collect();
+                token
+            });
         Self {
             hostname,
             version,
@@ -22,15 +33,17 @@ impl WebState {
             connected: Arc::new(AtomicBool::new(false)),
             events_today: Arc::new(AtomicU64::new(0)),
             cache_pending: Arc::new(AtomicU64::new(0)),
+            auth_token,
         }
     }
 }
 
 pub fn spawn_web_server(state: Arc<WebState>) {
+    let auth_token = state.auth_token.clone();
     thread::spawn(move || {
         let server = match Server::http("0.0.0.0:9876") {
             Ok(s) => {
-                tracing::info!("Web UI started on http://localhost:9876");
+                tracing::info!("Web UI started on http://localhost:9876 (token: {})", &auth_token[..4]);
                 s
             }
             Err(e) => {
@@ -43,14 +56,37 @@ pub fn spawn_web_server(state: Arc<WebState>) {
             let url = request.url().to_string();
             let method = request.method().as_str().to_string();
 
+            // Check auth token on API endpoints
+            if url.starts_with("/api/") {
+                let url_has_token = url.contains(&format!("token={}", auth_token));
+                let header_has_token = request.headers().iter().any(|h| {
+                    let field_name = format!("{}", h.field);
+                    let field_lower = field_name.to_lowercase();
+                    if field_lower == "authorization" {
+                        let val = format!("{}", h.value);
+                        val == format!("Bearer {}", auth_token)
+                    } else {
+                        false
+                    }
+                });
+                if !url_has_token && !header_has_token {
+                    let _ = request.respond(
+                        Response::from_string(r#"{"error":"unauthorized"}"#)
+                            .with_status_code(StatusCode(401))
+                            .with_header(Header::from_bytes(b"Content-Type", b"application/json").unwrap())
+                    );
+                    continue;
+                }
+            }
+
             match (&method[..], &url[..]) {
                 ("GET", "/") => {
                     let _ = request.respond(index_html(&state));
                 }
-                ("GET", "/api/status") => {
+                ("GET", url) if url.starts_with("/api/status") => {
                     let _ = request.respond(api_status(&state));
                 }
-                ("POST", "/api/help") => {
+                ("POST", url) if url.starts_with("/api/help") => {
                     let mut body = String::new();
                     let _ = request.as_reader().read_to_string(&mut body);
                     let _ = request.respond(api_help_body(&state, &body));

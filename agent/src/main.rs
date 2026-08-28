@@ -569,13 +569,13 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
             loop {
                 tracing::info!("[AutoUpdate] Checking for updates...");
 
-                match crate::updater::check_for_update() {
+                match crate::updater::check_for_update().await {
                     crate::updater::UpdateStatus::UpdateAvailable { version, download_url } => {
                         tracing::info!("[AutoUpdate] Update v{} available, downloading...", version);
                         let temp_dir = std::env::temp_dir();
                         let dest_path = temp_dir.join("am_update.exe");
 
-                        if let Err(e) = crate::updater::download_and_install(&download_url, &dest_path) {
+                        if let Err(e) = crate::updater::download_and_install(&download_url, &dest_path).await {
                             tracing::error!("[AutoUpdate] Download failed: {}", e);
                         } else {
                             let service_name = if cfg!(windows) { "ActivityMonitor" } else { "activity-monitor" };
@@ -583,9 +583,16 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                                 Ok(script_path) => {
                                     tracing::info!("[AutoUpdate] Update script created, applying...");
                                     tracing::info!("[AutoUpdate] Spawning cmd.exe for update script: {}", script_path.display());
-                                    let _ = std::process::Command::new("cmd.exe")
-                                        .args(&["/c", &script_path.to_string_lossy()])
-                                        .spawn();
+                                    #[allow(unused_mut)]
+                                    let mut cmd = std::process::Command::new("cmd.exe");
+                                    cmd.args(&["/c", &script_path.to_string_lossy()]);
+                                    #[cfg(windows)]
+                                    {
+                                        use std::os::windows::process::CommandExt;
+                                        const CREATE_NO_WINDOW: u32 = 0x08000000;
+                                        cmd.creation_flags(CREATE_NO_WINDOW);
+                                    }
+                                    let _ = cmd.spawn();
                                     break;
                                 }
                                 Err(e) => {

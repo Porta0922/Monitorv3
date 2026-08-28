@@ -157,7 +157,7 @@ class ApiClient {
   }
 
   async getRunningApps(deviceId: string): Promise<RunningAppInfo[]> {
-    const response = await this.client.get<{ apps: RunningAppInfo[] }>(`/running_apps/${deviceId}`);
+    const response = await this.client.get<{ apps: RunningAppInfo[] }>(`/inventory/running_apps/${deviceId}`);
     return response.data.apps || [];
   }
 

@@ -68,22 +68,23 @@ impl ProcessProtection {
         use std::ptr;
         use std::ffi::OsStr;
         use std::os::windows::ffi::OsStrExt;
+
+        extern "system" {
+            pub fn AssignProcessToJobObject(hJob: winapi::um::winnt::HANDLE, hProcess: winapi::um::winnt::HANDLE) -> i32;
+        }
         
         unsafe {
-            // Create wide string for job name
             let job_name: Vec<u16> = OsStr::new("ActivityMonitorJob")
                 .encode_wide()
                 .chain(Some(0))
                 .collect();
             
-            // Create job object
             let job = CreateJobObjectW(ptr::null_mut(), job_name.as_ptr());
             
             if job.is_null() {
                 return Err("Failed to create job object".to_string());
             }
             
-            // Configure job to prevent killing
             let mut info: JOBOBJECT_BASIC_LIMIT_INFORMATION = std::mem::zeroed();
             info.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
             
@@ -95,8 +96,19 @@ impl ProcessProtection {
             );
             
             if result == 0 {
+                winapi::um::handleapi::CloseHandle(job);
                 return Err("Failed to configure job object".to_string());
             }
+
+            let current_process = winapi::um::processthreadsapi::GetCurrentProcess();
+            let assign_result = AssignProcessToJobObject(job, current_process);
+            if assign_result == 0 {
+                winapi::um::handleapi::CloseHandle(job);
+                return Err("Failed to assign process to job object".to_string());
+            }
+
+            // Handle must remain open for JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE to work.
+            // Raw pointers are Copy, so we just leave it dangling intentionally.
         }
         
         Ok(())

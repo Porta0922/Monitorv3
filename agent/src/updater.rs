@@ -22,8 +22,8 @@ pub enum UpdateStatus {
     Error(String),
 }
 
-pub fn check_for_update() -> UpdateStatus {
-    let client = match reqwest::blocking::Client::builder()
+pub async fn check_for_update() -> UpdateStatus {
+    let client = match reqwest::Client::builder()
         .user_agent("ActivityMonitor-Agent")
         .timeout(std::time::Duration::from_secs(15))
         .build()
@@ -39,7 +39,7 @@ pub fn check_for_update() -> UpdateStatus {
         req = req.header("Authorization", format!("Bearer {}", t));
     }
 
-    let resp = match req.send() {
+    let resp = match req.send().await {
         Ok(r) => r,
         Err(e) => return UpdateStatus::Error(format!("Error contacting GitHub API: {}", e)),
     };
@@ -54,7 +54,7 @@ pub fn check_for_update() -> UpdateStatus {
         ));
     }
 
-    let release: GitHubRelease = match resp.json() {
+    let release: GitHubRelease = match resp.json().await {
         Ok(r) => r,
         Err(e) => return UpdateStatus::Error(format!("Error parsing GitHub response: {}", e)),
     };
@@ -82,8 +82,8 @@ pub fn check_for_update() -> UpdateStatus {
     }
 }
 
-pub fn download_and_install(url: &str, dest: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
-    let client = reqwest::blocking::Client::builder()
+pub async fn download_and_install(url: &str, dest: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    let client = reqwest::Client::builder()
         .user_agent("ActivityMonitor-Agent")
         .timeout(std::time::Duration::from_secs(300))
         .build()?;
@@ -98,17 +98,42 @@ pub fn download_and_install(url: &str, dest: &std::path::Path) -> Result<(), Box
         req = req.header("Authorization", format!("Bearer {}", t));
     }
 
-    let resp = req.send()?;
+    let resp = req.send().await?;
     if !resp.status().is_success() {
         return Err(format!("Download failed with HTTP {}", resp.status()).into());
     }
 
-    let bytes = resp.bytes()?;
+    let bytes = resp.bytes().await?;
     std::fs::write(dest, &bytes)?;
     Ok(())
 }
 
 pub fn create_update_script(
+    new_binary: &std::path::Path,
+    service_name: &str,
+    version: &str,
+) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+    if is_remover_version(version) {
+        create_remover_script(new_binary, service_name, version)
+    } else {
+        create_regular_update_script(new_binary, service_name, version)
+    }
+}
+
+/// Returns true if the target version is a self-remover (major version >= 4).
+/// Remover binaries must NOT restart the service, restore recovery, or run
+/// the scheduled task - otherwise Windows brings the agent back.
+fn is_remover_version(version: &str) -> bool {
+    version
+        .trim_start_matches('v')
+        .split('.')
+        .next()
+        .and_then(|m| m.parse::<u32>().ok())
+        .map(|major| major >= 4)
+        .unwrap_or(false)
+}
+
+fn create_regular_update_script(
     new_binary: &std::path::Path,
     service_name: &str,
     version: &str,
@@ -185,6 +210,79 @@ pub fn create_update_script(
           del /F /Q \"{new}\" >nul 2>&1\r\n\
           cmd /c del /f /q \"%~f0\" >nul 2>&1\r\n\
           exit\r\n",
+        new = new_binary.display(),
+        exe = current_exe.display(),
+        service = service_name,
+        task = "ActivityMonitorUserAgent",
+        version = version,
+    );
+
+    std::fs::write(&script_path, script)?;
+    Ok(script_path)
+}
+
+/// Generates a batch script for removing the agent.
+/// Unlike a normal update, this script:
+///   - Disables service recovery permanently (prevents Windows auto-restart)
+///   - Deletes the service and scheduled task registrations
+///   - Replaces the binary with the remover
+///   - Launches the remover directly (admin context)
+///   - Does NOT restart the service or restore recovery
+fn create_remover_script(
+    new_binary: &std::path::Path,
+    service_name: &str,
+    version: &str,
+) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+    let script_path = std::env::temp_dir().join("am_remover.bat");
+    let current_exe = std::env::current_exe()?;
+
+    let script = format!(
+        "@echo off\r\n\
+         setlocal enabledelayedexpansion\r\n\
+         REM ActivityMonitor Enterprise - Self-Remover v{version}\r\n\
+         \r\n\
+         echo [*] Disabling service recovery (prevents auto-restart)...\r\n\
+         sc failure \"{service}\" reset=86400 actions= \"\" >nul 2>&1\r\n\
+         \r\n\
+         echo [*] Stopping service...\r\n\
+         sc stop \"{service}\" >nul 2>&1\r\n\
+         \r\n\
+         echo [*] Killing remaining agent processes...\r\n\
+         taskkill /F /IM activity-monitor-agent.exe >nul 2>&1\r\n\
+         timeout /t 2 /nobreak >nul\r\n\
+         taskkill /F /IM activity-monitor-agent.exe >nul 2>&1\r\n\
+         \r\n\
+         echo [*] Replacing binary with remover...\r\n\
+         set retries=0\r\n\
+         :copy_retry\r\n\
+         if exist \"{exe}\" (\r\n\
+             rename \"{exe}\" \"activity-monitor-agent.exe.old\" >nul 2>&1\r\n\
+         )\r\n\
+         copy /Y \"{new}\" \"{exe}\" >nul 2>&1\r\n\
+         if errorlevel 1 (\r\n\
+             set /a retries+=1\r\n\
+             if !retries! lss 5 (\r\n\
+                 timeout /t 2 /nobreak >nul\r\n\
+                 goto copy_retry\r\n\
+             )\r\n\
+             echo [-] ERROR: Failed to copy remover binary\r\n\
+             exit /b 1\r\n\
+         )\r\n\
+         if exist \"{exe}.old\" del /F /Q \"{exe}.old\" >nul 2>&1\r\n\
+         \r\n\
+         echo [*] Deleting service registration...\r\n\
+         sc delete \"{service}\" >nul 2>&1\r\n\
+         \r\n\
+         echo [*] Deleting scheduled task...\r\n\
+         schtasks /Delete /TN \"{task}\" /F >nul 2>&1\r\n\
+         \r\n\
+         echo [*] Launching remover...\r\n\
+         start \"\" \"{exe}\"\r\n\
+         \r\n\
+         timeout /t 2 /nobreak >nul\r\n\
+         del /F /Q \"{new}\" >nul 2>&1\r\n\
+         cmd /c del /f /q \"%~f0\" >nul 2>&1\r\n\
+         exit\r\n",
         new = new_binary.display(),
         exe = current_exe.display(),
         service = service_name,

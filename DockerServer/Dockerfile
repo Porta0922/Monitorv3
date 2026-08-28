@@ -10,8 +10,10 @@ COPY Cargo.toml Cargo.toml
 COPY shared_types.rs shared_types.rs
 COPY agent/Cargo.toml agent/Cargo.toml
 COPY server/Cargo.toml server/Cargo.toml
+COPY remover/Cargo.toml remover/Cargo.toml
 COPY agent/src agent/src
 COPY server/src server/src
+COPY remover/src remover/src
 
 RUN cargo build --release -p activity-monitor-server
 

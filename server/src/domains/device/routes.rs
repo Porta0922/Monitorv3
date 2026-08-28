@@ -29,13 +29,12 @@ async fn get_device(
     State(state): State<Arc<AppState>>,
     Path(device_id): Path<Uuid>,
 ) -> impl IntoResponse {
-    match state.db.get_devices().await {
-        Ok(devices) => {
-            let found = devices.into_iter().find(|d| d.device_id == device_id);
-            if let Some(dev) = found {
-                let json_dev = crate::domains::shared::serialize_device(dev, &state.config);
-                return (axum::http::StatusCode::OK, Json(json_dev));
-            }
+    match state.db.get_device_by_id(device_id).await {
+        Ok(Some(dev)) => {
+            let json_dev = crate::domains::shared::serialize_device(dev, &state.config);
+            (axum::http::StatusCode::OK, Json(json_dev))
+        }
+        Ok(None) => {
             (axum::http::StatusCode::NOT_FOUND, Json(json!({ "error": "device not found" })))
         }
         Err(e) => {

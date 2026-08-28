@@ -19,11 +19,11 @@ struct SecurityQuery {
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/", get(list_security_events))
-        .route("/:device_id", get(list_security_events_for_device))
         .route("/summary", get(security_summary))
         .route("/alerts", get(list_security_alerts).post(create_security_alert))
         .route("/alerts/:id/resolve", patch(resolve_alert))
+        .route("/", get(list_security_events))
+        .route("/:device_id", get(list_security_events_for_device))
 }
 
 async fn parse_opt_datetime(s: &Option<String>) -> Option<DateTime<Utc>> {
@@ -118,14 +118,14 @@ async fn security_summary(
 }
 
 #[derive(Debug, serde::Deserialize)]
-struct AlertsQuery {
+pub struct AlertsQuery {
     device_id: Option<String>,
     severity: Option<String>,
     resolved: Option<bool>,
     limit: Option<i64>,
 }
 
-async fn list_security_alerts(
+pub async fn list_security_alerts(
     State(state): State<Arc<AppState>>,
     Query(q): Query<AlertsQuery>,
 ) -> impl IntoResponse {
@@ -159,11 +159,11 @@ async fn list_security_alerts(
 }
 
 #[derive(Debug, serde::Deserialize)]
-struct ResolvePayload {
+pub struct ResolvePayload {
     resolution_notes: Option<String>,
 }
 
-async fn resolve_alert(
+pub async fn resolve_alert(
     State(state): State<Arc<AppState>>,
     Path(alert_id): Path<i64>,
     Json(payload): Json<ResolvePayload>,
@@ -192,7 +192,7 @@ async fn resolve_alert(
 }
 
 #[derive(Debug, serde::Deserialize)]
-struct CreateAlertBody {
+pub struct CreateAlertBody {
     device_id: String,
     alert_type: String,
     app_name: Option<String>,
@@ -201,7 +201,7 @@ struct CreateAlertBody {
     severity: String,
 }
 
-async fn create_security_alert(
+pub async fn create_security_alert(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateAlertBody>,
 ) -> impl IntoResponse {

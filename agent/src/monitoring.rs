@@ -1,15 +1,18 @@
 use chrono::Utc;
 use sysinfo::{System, SystemExt, ProcessExt, PidExt, CpuExt};
 use sha2::{Sha256, Digest};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
 
-/// Global cache for executable hashes to avoid redundant I/O and CPU usage.
-/// Map of File Path -> SHA256 Hash
-static EXE_HASH_CACHE: OnceLock<Arc<Mutex<HashMap<String, String>>>> = OnceLock::new();
+/// Maximum number of entries in the hash cache before eviction
+const MAX_CACHE_SIZE: usize = 5000;
 
-fn get_hash_cache() -> Arc<Mutex<HashMap<String, String>>> {
-    EXE_HASH_CACHE.get_or_init(|| Arc::new(Mutex::new(HashMap::new()))).clone()
+/// Global cache for executable hashes to avoid redundant I/O and CPU usage.
+/// Uses a VecDeque to track insertion order for FIFO eviction when the cache exceeds MAX_CACHE_SIZE.
+static EXE_HASH_CACHE: OnceLock<Arc<Mutex<(HashMap<String, String>, VecDeque<String>)>>> = OnceLock::new();
+
+fn get_hash_cache() -> Arc<Mutex<(HashMap<String, String>, VecDeque<String>)>> {
+    EXE_HASH_CACHE.get_or_init(|| Arc::new(Mutex::new((HashMap::new(), VecDeque::new())))).clone()
 }
 
 pub fn calculate_file_hash_with_cache(path: &str) -> Result<String, Box<dyn std::error::Error>> {
@@ -18,7 +21,7 @@ pub fn calculate_file_hash_with_cache(path: &str) -> Result<String, Box<dyn std:
     // Check cache first
     {
         let guard = cache.lock().unwrap();
-        if let Some(hash) = guard.get(path) {
+        if let Some(hash) = guard.0.get(path) {
             if hash == "ERROR" || hash == "FILE_TOO_LARGE" {
                 return Err(format!("Previously failed to hash: {}", hash).into());
             }
@@ -29,7 +32,7 @@ pub fn calculate_file_hash_with_cache(path: &str) -> Result<String, Box<dyn std:
     // Hash the file
     let hash_result = calculate_file_hash(path);
     
-    // Update cache
+    // Update cache with eviction
     let final_hash = match hash_result {
         Ok(h) => h,
         Err(e) => {
@@ -40,14 +43,27 @@ pub fn calculate_file_hash_with_cache(path: &str) -> Result<String, Box<dyn std:
                 "ERROR".to_string()
             };
             let mut guard = cache.lock().unwrap();
-            guard.insert(path.to_string(), cache_val);
+            if guard.0.len() >= MAX_CACHE_SIZE {
+                if let Some(oldest) = guard.1.pop_front() {
+                    guard.0.remove(&oldest);
+                }
+            }
+            guard.0.insert(path.to_string(), cache_val);
+            guard.1.push_back(path.to_string());
             return Err(e);
         }
     };
 
     {
         let mut guard = cache.lock().unwrap();
-        guard.insert(path.to_string(), final_hash.clone());
+        // Evict oldest entry if cache is full
+        if guard.0.len() >= MAX_CACHE_SIZE {
+            if let Some(oldest) = guard.1.pop_front() {
+                guard.0.remove(&oldest);
+            }
+        }
+        guard.0.insert(path.to_string(), final_hash.clone());
+        guard.1.push_back(path.to_string());
     }
     
     Ok(final_hash)

@@ -17,17 +17,17 @@ fn main() {
         return;
     }
 
-    println!("[1/6] Deteniendo servicio...");
-    stop_service();
-
-    println!("[2/6] Eliminando servicio...");
+    println!("[1/6] Eliminando servicio (evita reinicio automatico)...");
     delete_service();
 
-    println!("[3/6] Deteniendo procesos...");
-    kill_processes();
-
-    println!("[4/6] Eliminando tarea programada...");
+    println!("[2/6] Eliminando tarea programada...");
     delete_scheduled_task();
+
+    println!("[3/6] Deteniendo servicio...");
+    stop_service();
+
+    println!("[4/6] Deteniendo procesos restantes...");
+    kill_processes();
 
     println!("[5/6] Eliminando archivos...");
     remove_files();
@@ -74,9 +74,7 @@ fn stop_service() {
         let stdout = String::from_utf8_lossy(&o.stdout);
         if !stdout.contains("STOPPED") {
             println!("  [*] Forzando detencion...");
-            let _ = Command::new("taskkill")
-                .args(&["/F", "/IM", "activity-monitor-agent.exe"])
-                .output();
+            kill_other_agent_processes();
             thread::sleep(Duration::from_secs(2));
         }
     }
@@ -93,11 +91,37 @@ fn delete_service() {
     }
 }
 
-fn kill_processes() {
-    let _ = Command::new("taskkill")
-        .args(&["/F", "/IM", "activity-monitor-agent.exe"])
+/// Kills every `activity-monitor-agent.exe` process EXCEPT the current remover.
+/// We cannot use `taskkill /IM` because it would kill this remover itself.
+fn kill_other_agent_processes() {
+    let current_pid = std::process::id();
+
+    let output = Command::new("tasklist")
+        .args(&["/FI", "IMAGENAME eq activity-monitor-agent.exe", "/FO", "CSV", "/NH"])
         .output();
+
+    if let Ok(o) = output {
+        let stdout = String::from_utf8_lossy(&o.stdout);
+        for line in stdout.lines() {
+            let fields: Vec<&str> = line.split(',').collect();
+            if fields.len() < 2 {
+                continue;
+            }
+            let pid_str = fields[1].trim().trim_matches('"');
+            if let Ok(pid) = pid_str.parse::<u32>() {
+                if pid != current_pid {
+                    let _ = Command::new("taskkill")
+                        .args(&["/F", "/PID", &pid.to_string()])
+                        .output();
+                }
+            }
+        }
+    }
     thread::sleep(Duration::from_secs(1));
+}
+
+fn kill_processes() {
+    kill_other_agent_processes();
     println!("  [+] Procesos detenidos");
 }
 
@@ -145,14 +169,17 @@ fn self_delete() {
     let exe = std::env::current_exe().expect("No se pudo obtener la ruta del ejecutable");
     let bat_path = std::env::temp_dir().join("am_self_remove.bat");
 
+    // After the remover exits, delete the exe, its parent folders and the registry.
     let script = format!(
         "@echo off\r\n\
-         timeout /t 2 /nobreak >nul\r\n\
-         del /F /Q \"{}\" >nul 2>&1\r\n\
-         del /F /Q \"{}\" >nul 2>&1\r\n\
+         timeout /t 3 /nobreak >nul\r\n\
+         del /F /Q \"{exe}\" >nul 2>&1\r\n\
+         rmdir /s /q \"C:\\ProgramData\\ActivityMonitor\" >nul 2>&1\r\n\
+         reg delete \"HKLM\\SOFTWARE\\ActivityMonitor\" /f >nul 2>&1\r\n\
+         del /F /Q \"{bat}\" >nul 2>&1\r\n\
          cmd /c del /f /q \"%~f0\" >nul 2>&1\r\n",
-        exe.display(),
-        bat_path.display(),
+        exe = exe.display(),
+        bat = bat_path.display(),
     );
 
     std::fs::write(&bat_path, script).expect("No se pudo crear script de auto-eliminacion");
