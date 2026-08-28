@@ -1,5 +1,5 @@
 [workspace]
-members = ["agent", "server", "remover"]
+members = ["agent", "server", "remover", "manager"]
 exclude = ["Instaladores/agent"]
 resolver = "2"
 

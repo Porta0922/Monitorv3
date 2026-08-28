@@ -76,6 +76,7 @@ pub fn serialize_device(device: Device, config: &RuntimeConfig) -> serde_json::V
         "hostname": device.hostname,
         "nickname": device.nickname,
         "mac_address": device.mac_address.unwrap_or_else(|| "Unknown".to_string()),
+        "version": device.version,
         "created_at": device.created_at.to_rfc3339(),
         "last_seen": device.last_seen.to_rfc3339(),
         "online": online,

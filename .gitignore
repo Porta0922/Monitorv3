@@ -14,3 +14,5 @@ Cargo.lock
 # Docker
 .data/
 target/
+
+github_token.txt

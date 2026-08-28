@@ -27,6 +27,7 @@ pub struct Device {
     pub hostname: String,
     pub device_id: Uuid,
     pub mac_address: Option<String>,
+    pub version: Option<String>,
     pub created_at: DateTime<Utc>,
     pub last_seen: DateTime<Utc>,
     pub nickname: Option<String>,

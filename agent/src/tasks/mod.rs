@@ -71,6 +71,7 @@ impl TaskContext {
             "device_id": self.device_id,
             "hostname": self.hostname,
             "mac_address": self.mac_address,
+            "version": env!("CARGO_PKG_VERSION"),
             "timestamp": Utc::now().to_rfc3339(),
             "auth_token": self.auth_token,
             "payload": payload,

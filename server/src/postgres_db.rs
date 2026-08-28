@@ -69,6 +69,7 @@ impl Database {
                 hostname VARCHAR(255) NOT NULL,
                 nickname VARCHAR(255),
                 mac_address VARCHAR(17),
+                version VARCHAR(64),
                 last_seen TIMESTAMPTZ NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -115,6 +116,9 @@ impl Database {
             .execute(pool)
             .await?;
         sqlx::query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            .execute(pool)
+            .await?;
+        sqlx::query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS version VARCHAR(64)")
             .execute(pool)
             .await?;
 
@@ -1782,6 +1786,7 @@ impl Database {
         device_id: String,
         mac_address: Option<String>,
         nickname: Option<String>,
+        version: Option<String>,
     ) -> Result<Device, sqlx::Error> {
         let last_seen = Utc::now();
         let device_uuid = Uuid::parse_str(&device_id)
@@ -1789,12 +1794,13 @@ impl Database {
 
         sqlx::query(
             r#"
-            INSERT INTO devices (device_id, hostname, nickname, mac_address, last_seen)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO devices (device_id, hostname, nickname, mac_address, version, last_seen)
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (device_id) DO UPDATE SET
                 hostname = EXCLUDED.hostname,
                 nickname = COALESCE(EXCLUDED.nickname, devices.nickname),
                 mac_address = COALESCE(EXCLUDED.mac_address, devices.mac_address),
+                version = COALESCE(EXCLUDED.version, devices.version),
                 last_seen = EXCLUDED.last_seen,
                 updated_at = NOW()
             "#,
@@ -1803,6 +1809,7 @@ impl Database {
         .bind(&hostname)
         .bind(&nickname)
         .bind(&mac_address)
+        .bind(&version)
         .bind(last_seen)
         .execute(&self.pool)
         .await?;
@@ -1814,6 +1821,7 @@ impl Database {
             hostname,
             device_id: device_uuid,
             mac_address,
+            version,
             created_at: last_seen,
             last_seen,
             nickname,
@@ -1821,19 +1829,20 @@ impl Database {
     }
 
     pub async fn get_devices(&self) -> Result<Vec<Device>, sqlx::Error> {
-        let devices = sqlx::query_as::<_, (Uuid, String, Uuid, Option<String>, DateTime<Utc>, DateTime<Utc>, Option<String>)>(
-            "SELECT device_id AS id, hostname, device_id, nickname, last_seen, created_at, mac_address FROM devices ORDER BY last_seen DESC"
+        let devices = sqlx::query_as::<_, (Uuid, String, Uuid, Option<String>, DateTime<Utc>, DateTime<Utc>, Option<String>, Option<String>)>(
+            "SELECT device_id AS id, hostname, device_id, nickname, last_seen, created_at, mac_address, version FROM devices ORDER BY last_seen DESC"
         )
         .fetch_all(&self.pool)
         .await?;
 
         Ok(devices
             .into_iter()
-            .map(|(id, hostname, device_id, nickname, last_seen, created_at, mac_address)| Device {
+            .map(|(id, hostname, device_id, nickname, last_seen, created_at, mac_address, version)| Device {
                 id,
                 hostname,
                 device_id,
                 mac_address,
+                version,
                 created_at,
                 last_seen,
                 nickname,
@@ -1842,18 +1851,19 @@ impl Database {
     }
 
     pub async fn get_device_by_id(&self, device_id: Uuid) -> Result<Option<Device>, sqlx::Error> {
-        let result = sqlx::query_as::<_, (Uuid, String, Uuid, Option<String>, DateTime<Utc>, DateTime<Utc>, Option<String>)>(
-            "SELECT device_id AS id, hostname, device_id, nickname, last_seen, created_at, mac_address FROM devices WHERE device_id = $1"
+        let result = sqlx::query_as::<_, (Uuid, String, Uuid, Option<String>, DateTime<Utc>, DateTime<Utc>, Option<String>, Option<String>)>(
+            "SELECT device_id AS id, hostname, device_id, nickname, last_seen, created_at, mac_address, version FROM devices WHERE device_id = $1"
         )
         .bind(device_id)
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(result.map(|(id, hostname, device_id, nickname, last_seen, created_at, mac_address)| Device {
+        Ok(result.map(|(id, hostname, device_id, nickname, last_seen, created_at, mac_address, version)| Device {
             id,
             hostname,
             device_id,
             mac_address,
+            version,
             created_at,
             last_seen,
             nickname,

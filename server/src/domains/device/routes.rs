@@ -66,13 +66,14 @@ struct RegisterDeviceBody {
     device_id: String,
     hostname: String,
     mac_address: Option<String>,
+    version: Option<String>,
 }
 
 async fn register_device(
     State(state): State<Arc<AppState>>,
     Json(body): Json<RegisterDeviceBody>,
 ) -> impl IntoResponse {
-    match state.db.register_device(body.hostname, body.device_id.clone(), body.mac_address, None).await {
+    match state.db.register_device(body.hostname, body.device_id.clone(), body.mac_address, None, body.version).await {
         Ok(dev) => (axum::http::StatusCode::OK, Json(json!(crate::domains::shared::serialize_device(dev, &state.config)))),
         Err(e) => {
             tracing::error!("Failed to register device: {}", e);

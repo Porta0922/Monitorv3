@@ -425,11 +425,13 @@ impl RabbitMQConsumer {
         }
 
         // Register device if not exists
+        let version = event.get("version").and_then(|v| v.as_str()).map(str::to_string);
         let _ = db.register_device(
             hostname,
             device_id.clone(),
             mac_address,
             None,
+            version,
         ).await;
 
         // Insert activity log
@@ -456,11 +458,13 @@ impl RabbitMQConsumer {
         let mac_address = event["mac_address"].as_str().map(str::to_string);
         
         // Register device if not exists
+        let version = event.get("version").and_then(|v| v.as_str()).map(str::to_string);
         let _ = db.register_device(
             hostname,
             device_id.clone(),
             mac_address,
             None,
+            version,
         ).await;
 
         // New format: payload.apps = [ { app_name, version, exe_hash, detected_at } ]
@@ -515,7 +519,8 @@ impl RabbitMQConsumer {
         let mac_address = event["mac_address"].as_str().map(str::to_string);
         let status = payload["status"].as_str().unwrap_or("active");
 
-        let _ = db.register_device(hostname, device_id.clone(), mac_address, None).await;
+        let version = event.get("version").and_then(|v| v.as_str()).map(str::to_string);
+        let _ = db.register_device(hostname, device_id.clone(), mac_address, None, version).await;
 
         // Only input_summary events should contribute to persisted time counters.
         // Regular heartbeat events contain cumulative idle_seconds and would inflate totals.
@@ -592,7 +597,8 @@ impl RabbitMQConsumer {
         let hostname = event["hostname"].as_str().unwrap_or(&device_id).to_string();
         let mac_address = event["mac_address"].as_str().map(str::to_string);
 
-        let _ = db.register_device(hostname, device_id.clone(), mac_address, None).await;
+        let version = event.get("version").and_then(|v| v.as_str()).map(str::to_string);
+        let _ = db.register_device(hostname, device_id.clone(), mac_address, None, version).await;
 
         let device_name = payload["device_name"].as_str().unwrap_or("USB Device").to_string();
         let action = payload["action"].as_str().unwrap_or("IN").to_string();
@@ -621,7 +627,8 @@ impl RabbitMQConsumer {
         let hostname = event["hostname"].as_str().unwrap_or(&device_id).to_string();
         let mac_address = event["mac_address"].as_str().map(str::to_string);
 
-        let _ = db.register_device(hostname, device_id.clone(), mac_address, None).await;
+        let version = event.get("version").and_then(|v| v.as_str()).map(str::to_string);
+        let _ = db.register_device(hostname, device_id.clone(), mac_address, None, version).await;
 
         let event_timestamp = event
             .get("timestamp")
@@ -658,7 +665,8 @@ impl RabbitMQConsumer {
         let hostname = event["hostname"].as_str().unwrap_or(&device_id).to_string();
         let mac_address = event["mac_address"].as_str().map(str::to_string);
 
-        let _ = db.register_device(hostname, device_id.clone(), mac_address, None).await;
+        let version = event.get("version").and_then(|v| v.as_str()).map(str::to_string);
+        let _ = db.register_device(hostname, device_id.clone(), mac_address, None, version).await;
 
         let mut apps = Vec::new();
         if let Some(items) = payload["apps"].as_array() {
@@ -694,7 +702,8 @@ impl RabbitMQConsumer {
             .map(|dt| dt.with_timezone(&chrono::Utc))
             .unwrap_or_else(chrono::Utc::now);
 
-        let _ = db.register_device(hostname, device_id.clone(), mac_address, None).await;
+        let version = event.get("version").and_then(|v| v.as_str()).map(str::to_string);
+        let _ = db.register_device(hostname, device_id.clone(), mac_address, None, version).await;
 
         let query_name = payload["query_name"].as_str();
         let inferred_alert_type = match query_name {
