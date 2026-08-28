@@ -26,7 +26,6 @@ pub mod updater;
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use chrono::Timelike;
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::{sleep, Duration};
 use device_id::{load_or_create_device_identity, get_device_nickname};
@@ -549,22 +548,15 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         });
     }
 
-    // Spawn daily auto-update checker (runs at 9:00 AM every day)
+    // Spawn auto-update checker (first check after 5 minutes, then every hour)
     {
         tokio::spawn(async move {
             use std::time::Duration;
 
-            let now = chrono::Local::now();
-            let now_secs = now.time().num_seconds_from_midnight();
-            let target = 9 * 3600u32;
-            let initial_delay = if now_secs < target {
-                target - now_secs
-            } else {
-                24 * 3600 - now_secs + target
-            };
+            let initial_delay = 5 * 60u64;
 
             tracing::info!("[AutoUpdate] First check in {:.1}h", initial_delay as f64 / 3600.0);
-            tokio::time::sleep(Duration::from_secs(initial_delay as u64)).await;
+            tokio::time::sleep(Duration::from_secs(initial_delay)).await;
 
             loop {
                 tracing::info!("[AutoUpdate] Checking for updates...");
@@ -610,8 +602,8 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                     }
                 }
 
-                tracing::info!("[AutoUpdate] Next check in 24 hours");
-                tokio::time::sleep(Duration::from_secs(24 * 3600)).await;
+                tracing::info!("[AutoUpdate] Next check in 1 hour");
+                tokio::time::sleep(Duration::from_secs(3600)).await;
             }
         });
     }
