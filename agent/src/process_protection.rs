@@ -63,7 +63,7 @@ impl ProcessProtection {
     /// Windows: Create Job Object to protect process
     #[cfg(target_os = "windows")]
     fn init_windows(&self) -> Result<(), String> {
-        use winapi::um::winnt::{JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JobObjectBasicLimitInformation, JOBOBJECT_BASIC_LIMIT_INFORMATION};
+        use winapi::um::winnt::{JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_BREAKAWAY_OK, JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK, JobObjectBasicLimitInformation, JOBOBJECT_BASIC_LIMIT_INFORMATION};
         use winapi::um::jobapi2::{CreateJobObjectW, SetInformationJobObject};
         use std::ptr;
         use std::ffi::OsStr;
@@ -86,7 +86,9 @@ impl ProcessProtection {
             }
             
             let mut info: JOBOBJECT_BASIC_LIMIT_INFORMATION = std::mem::zeroed();
-            info.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            info.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+                | JOB_OBJECT_LIMIT_BREAKAWAY_OK
+                | JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
             
             let result = SetInformationJobObject(
                 job,

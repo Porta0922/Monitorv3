@@ -590,7 +590,8 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
                                     {
                                         use std::os::windows::process::CommandExt;
                                         const CREATE_NO_WINDOW: u32 = 0x08000000;
-                                        cmd.creation_flags(CREATE_NO_WINDOW);
+                                        const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x01000000;
+                                        cmd.creation_flags(CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB);
                                     }
                                     let _ = cmd.spawn();
                                     break;

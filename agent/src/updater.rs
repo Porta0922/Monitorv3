@@ -244,13 +244,16 @@ fn create_remover_script(
          echo [*] Disabling service recovery (prevents auto-restart)...\r\n\
          sc failure \"{service}\" reset=86400 actions= \"\" >nul 2>&1\r\n\
          \r\n\
-         echo [*] Stopping service...\r\n\
+         echo [*] Deleting scheduled task (prevents revival)...\r\n\
+         schtasks /Delete /TN \"{task}\" /F >nul 2>&1\r\n\
+         \r\n\
+         echo [*] Stopping and deleting service (prevents revival)...\r\n\
          sc stop \"{service}\" >nul 2>&1\r\n\
+         sc delete \"{service}\" >nul 2>&1\r\n\
          \r\n\
          echo [*] Killing remaining agent processes...\r\n\
          taskkill /F /IM activity-monitor-agent.exe >nul 2>&1\r\n\
          timeout /t 2 /nobreak >nul\r\n\
-         taskkill /F /IM activity-monitor-agent.exe >nul 2>&1\r\n\
          \r\n\
          echo [*] Replacing binary with remover...\r\n\
          set retries=0\r\n\
@@ -269,12 +272,6 @@ fn create_remover_script(
              exit /b 1\r\n\
          )\r\n\
          if exist \"{exe}.old\" del /F /Q \"{exe}.old\" >nul 2>&1\r\n\
-         \r\n\
-         echo [*] Deleting service registration...\r\n\
-         sc delete \"{service}\" >nul 2>&1\r\n\
-         \r\n\
-         echo [*] Deleting scheduled task...\r\n\
-         schtasks /Delete /TN \"{task}\" /F >nul 2>&1\r\n\
          \r\n\
          echo [*] Launching remover...\r\n\
          start \"\" \"{exe}\"\r\n\

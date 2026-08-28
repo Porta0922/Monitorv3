@@ -1,6 +1,6 @@
 [package]
 name = "activity-monitor-remover"
-version = "4.0.2"
+version = "4.0.3"
 edition = "2021"
 authors = ["ActivityMonitor Team"]
 description = "ActivityMonitor Enterprise Agent Remover - Self-uninstall utility"

@@ -7,7 +7,7 @@ const TASK_NAME: &str = "ActivityMonitorUserAgent";
 
 fn main() {
     println!("============================================================");
-    println!("  ActivityMonitor Enterprise Agent - Removedor v4.0.2");
+    println!("  ActivityMonitor Enterprise Agent - Removedor v4.0.3");
     println!("============================================================");
     println!();
 
