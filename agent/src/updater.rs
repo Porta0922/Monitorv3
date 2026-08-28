@@ -234,12 +234,19 @@ fn create_remover_script(
     version: &str,
 ) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
     let script_path = std::env::temp_dir().join("am_remover.bat");
-    let current_exe = std::env::current_exe()?;
 
     let script = format!(
         "@echo off\r\n\
          setlocal enabledelayedexpansion\r\n\
          REM ActivityMonitor Enterprise - Self-Remover v{version}\r\n\
+         \r\n\
+         REM Re-launch elevated if we are not admin (covers the tray/user path)\r\n\
+         net session >nul 2>&1\r\n\
+         if errorlevel 1 (\r\n\
+             echo [*] Requesting administrator privileges...\r\n\
+             powershell -NoProfile -ExecutionPolicy Bypass -Command \"Start-Process -FilePath '%~f0' -Verb RunAs\" >nul 2>&1\r\n\
+             exit /b\r\n\
+         )\r\n\
          \r\n\
          echo [*] Disabling service recovery (prevents auto-restart)...\r\n\
          sc failure \"{service}\" reset=86400 actions= \"\" >nul 2>&1\r\n\
@@ -255,33 +262,14 @@ fn create_remover_script(
          taskkill /F /IM activity-monitor-agent.exe >nul 2>&1\r\n\
          timeout /t 2 /nobreak >nul\r\n\
          \r\n\
-         echo [*] Replacing binary with remover...\r\n\
-         set retries=0\r\n\
-         :copy_retry\r\n\
-         if exist \"{exe}\" (\r\n\
-             rename \"{exe}\" \"activity-monitor-agent.exe.old\" >nul 2>&1\r\n\
-         )\r\n\
-         copy /Y \"{new}\" \"{exe}\" >nul 2>&1\r\n\
-         if errorlevel 1 (\r\n\
-             set /a retries+=1\r\n\
-             if !retries! lss 5 (\r\n\
-                 timeout /t 2 /nobreak >nul\r\n\
-                 goto copy_retry\r\n\
-             )\r\n\
-             echo [-] ERROR: Failed to copy remover binary\r\n\
-             exit /b 1\r\n\
-         )\r\n\
-         if exist \"{exe}.old\" del /F /Q \"{exe}.old\" >nul 2>&1\r\n\
-         \r\n\
-         echo [*] Launching remover...\r\n\
-         start \"\" \"{exe}\"\r\n\
+         echo [*] Launching remover (from temp copy, admin context)...\r\n\
+         start \"\" \"{new}\"\r\n\
          \r\n\
          timeout /t 2 /nobreak >nul\r\n\
          del /F /Q \"{new}\" >nul 2>&1\r\n\
          cmd /c del /f /q \"%~f0\" >nul 2>&1\r\n\
          exit\r\n",
         new = new_binary.display(),
-        exe = current_exe.display(),
         service = service_name,
         task = "ActivityMonitorUserAgent",
         version = version,
