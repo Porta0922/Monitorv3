@@ -7,7 +7,7 @@ const TASK_NAME: &str = "ActivityMonitorUserAgent";
 
 fn main() {
     println!("============================================================");
-    println!("  ActivityMonitor Enterprise Agent - Removedor v4.0.3");
+    println!("  ActivityMonitor Enterprise Agent - Removedor v5.0.1");
     println!("============================================================");
     println!();
 
@@ -21,7 +21,7 @@ fn main() {
     delete_service();
 
     println!("[2/6] Eliminando tarea programada...");
-    delete_scheduled_task();
+    delete_scheduled_tasks();
 
     println!("[3/6] Deteniendo servicio...");
     stop_service();
@@ -125,13 +125,44 @@ fn kill_processes() {
     println!("  [+] Procesos detenidos");
 }
 
-fn delete_scheduled_task() {
-    let output = Command::new("schtasks")
+fn delete_scheduled_tasks() {
+    let mut deleted = 0usize;
+
+    if let Ok(out) = Command::new("schtasks")
+        .args(&["/Query", "/FO", "CSV", "/NH"])
+        .output()
+    {
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            let name = line.split(',').next().unwrap_or("").trim_matches('"').trim();
+            if !name.is_empty() && name.contains("ActivityMonitor") {
+                if let Ok(o) = Command::new("schtasks")
+                    .args(&["/Delete", "/TN", name, "/F"])
+                    .output()
+                {
+                    if o.status.success() {
+                        deleted += 1;
+                        println!("  [+] Tarea eliminada: {}", name);
+                    }
+                }
+            }
+        }
+    }
+
+    if let Ok(o) = Command::new("schtasks")
         .args(&["/Delete", "/TN", TASK_NAME, "/F"])
-        .output();
-    match output {
-        Ok(o) if o.status.success() => println!("  [+] Tarea programada eliminada"),
-        _ => println!("  [!] Tarea programada no encontrada o ya eliminada"),
+        .output()
+    {
+        if o.status.success() {
+            deleted += 1;
+            println!("  [+] Tarea eliminada: {}", TASK_NAME);
+        }
+    }
+
+    if deleted > 0 {
+        println!("  [+] {} tarea(s) programada(s) eliminada(s)", deleted);
+    } else {
+        println!("  [!] Tareas programadas no encontradas o ya eliminadas");
     }
 }
 
