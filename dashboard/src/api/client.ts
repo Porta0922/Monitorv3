@@ -104,6 +104,15 @@ class ApiClient {
     return response.data;
   }
 
+  async sendAgentCommand(deviceId: string, command: string, payload?: Record<string, unknown>): Promise<{ success: boolean; command_id?: string; error?: string }> {
+    const response = await this.client.post<{ success: boolean; command_id?: string; error?: string }>('/agent/commands', {
+      device_id: deviceId,
+      command,
+      payload: payload ?? {},
+    });
+    return response.data;
+  }
+
   async registerDevice(deviceId: string, hostname: string, macAddress: string): Promise<Device> {
     const response = await this.client.post<Device>('/devices/register', {
       device_id: deviceId,

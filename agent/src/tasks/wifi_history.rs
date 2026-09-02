@@ -1,10 +1,9 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use tokio::time::Duration;
 use chrono::Utc;
 use crate::wifi_detection::WifiMonitor;
 use crate::is_running_in_session_0;
-use super::{TaskContext, skip_interval};
+use super::{TaskContext, TaskInterval, live_sleep};
 
 pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
     let is_session_0 = is_running_in_session_0();
@@ -19,9 +18,8 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
         // learns the current WiFi state within the first scan.
         wifi_monitor.force_resend();
 
-        let mut interval = skip_interval(Duration::from_secs(120)); // Check every 120 seconds
         loop {
-            interval.tick().await;
+            live_sleep(&context, TaskInterval::Wifi).await;
 
             // If RabbitMQ reconnected since last scan, force a state re-broadcast.
             if context.wifi_resend_flag.swap(false, Ordering::Relaxed) {

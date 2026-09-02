@@ -1,9 +1,8 @@
 use std::sync::Arc;
-use tokio::time::Duration;
 use chrono::Utc;
 use crate::monitoring::MonitoringLoop;
 use crate::is_running_in_session_0;
-use super::{TaskContext, skip_interval};
+use super::{TaskContext, TaskInterval, live_sleep};
 
 pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
     let is_session_0 = is_running_in_session_0();
@@ -14,11 +13,10 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
 
     tokio::spawn(async move {
         let mut monitor = MonitoringLoop::new();
-        let mut interval = skip_interval(Duration::from_secs(60)); // Slower for "silence"
         let mut last_fingerprint = String::new();
 
         loop {
-            interval.tick().await;
+            live_sleep(&context, TaskInterval::RunningApps).await;
 
             let apps = monitor.capture_open_apps();
             let fingerprint = apps

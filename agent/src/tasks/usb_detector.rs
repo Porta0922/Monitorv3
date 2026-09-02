@@ -1,8 +1,7 @@
 use std::sync::Arc;
-use tokio::time::Duration;
 use crate::usb_detection::UsbMonitor;
 use crate::is_running_in_session_0;
-use super::{TaskContext, skip_interval};
+use super::{TaskContext, TaskInterval, live_sleep};
 
 pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
     let is_session_0 = is_running_in_session_0();
@@ -13,9 +12,8 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
 
     tokio::spawn(async move {
         let mut usb_monitor = UsbMonitor::new();
-        let mut interval = skip_interval(Duration::from_secs(60)); // Check every 60 seconds
         loop {
-            interval.tick().await;
+            live_sleep(&context, TaskInterval::UsbDetector).await;
             
             match usb_monitor.scan_devices().await {
                 Ok(events) => {

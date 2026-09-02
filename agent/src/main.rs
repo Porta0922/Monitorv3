@@ -23,6 +23,7 @@ pub mod web;
 #[cfg(windows)]
 pub mod ui;
 pub mod updater;
+pub mod uninstall;
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -449,52 +450,52 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let supervisor = task_supervisor::TaskSupervisor::new();
 
     // Track all background telemetry tasks via supervisor
-    supervisor.track("window_activity", {
+    track_if_enabled(&supervisor, &config_manager, "window_activity", {
         let ctx = context.clone();
         move || tasks::window_activity::spawn(ctx.clone())
     }).await;
 
-    supervisor.track("heartbeat", {
+    track_if_enabled(&supervisor, &config_manager, "heartbeat", {
         let ctx = context.clone();
         move || tasks::heartbeat::spawn(ctx.clone())
     }).await;
 
-    supervisor.track("usb_detector", {
+    track_if_enabled(&supervisor, &config_manager, "usb_detector", {
         let ctx = context.clone();
         move || tasks::usb_detector::spawn(ctx.clone())
     }).await;
 
-    supervisor.track("usb_copy", {
+    track_if_enabled(&supervisor, &config_manager, "usb_copy", {
         let ctx = context.clone();
         move || tasks::usb_copy::spawn(ctx.clone())
     }).await;
 
-    supervisor.track("wifi_history", {
+    track_if_enabled(&supervisor, &config_manager, "wifi_history", {
         let ctx = context.clone();
         move || tasks::wifi_history::spawn(ctx.clone())
     }).await;
 
-    supervisor.track("running_apps", {
+    track_if_enabled(&supervisor, &config_manager, "running_apps", {
         let ctx = context.clone();
         move || tasks::running_apps::spawn(ctx.clone())
     }).await;
 
-    supervisor.track("inventory", {
+    track_if_enabled(&supervisor, &config_manager, "inventory", {
         let ctx = context.clone();
         move || tasks::inventory::spawn(ctx.clone())
     }).await;
 
-    supervisor.track("heatmap", {
+    track_if_enabled(&supervisor, &config_manager, "heatmap", {
         let ctx = context.clone();
         move || tasks::heatmap::spawn(ctx.clone())
     }).await;
 
-    supervisor.track("resource_logger", {
+    track_if_enabled(&supervisor, &config_manager, "resource_logger", {
         let ctx = context.clone();
         move || tasks::resource_logger::spawn(ctx.clone())
     }).await;
 
-    supervisor.track("security_osquery", {
+    track_if_enabled(&supervisor, &config_manager, "security_osquery", {
         let ctx = context.clone();
         move || tasks::security_osquery::spawn(ctx.clone())
     }).await;
@@ -552,6 +553,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     {
         tokio::spawn(async move {
             use std::time::Duration;
+            use crate::updater::ApplyUpdateResult;
 
             let initial_delay = 5 * 60u64;
 
@@ -561,43 +563,15 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
             loop {
                 tracing::info!("[AutoUpdate] Checking for updates...");
 
-                match crate::updater::check_for_update().await {
-                    crate::updater::UpdateStatus::UpdateAvailable { version, download_url } => {
-                        tracing::info!("[AutoUpdate] Update v{} available, downloading...", version);
-                        let temp_dir = std::env::temp_dir();
-                        let dest_path = temp_dir.join("am_update.exe");
-
-                        if let Err(e) = crate::updater::download_and_install(&download_url, &dest_path).await {
-                            tracing::error!("[AutoUpdate] Download failed: {}", e);
-                        } else {
-                            let service_name = if cfg!(windows) { "ActivityMonitor" } else { "activity-monitor" };
-                            match crate::updater::create_update_script(&dest_path, service_name, &version) {
-                                Ok(script_path) => {
-                                    tracing::info!("[AutoUpdate] Update script created, applying...");
-                                    tracing::info!("[AutoUpdate] Spawning cmd.exe for update script: {}", script_path.display());
-                                    #[allow(unused_mut)]
-                                    let mut cmd = std::process::Command::new("cmd.exe");
-                                    cmd.args(&["/c", &script_path.to_string_lossy()]);
-                                    #[cfg(windows)]
-                                    {
-                                        use std::os::windows::process::CommandExt;
-                                        const CREATE_NO_WINDOW: u32 = 0x08000000;
-                                        const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x01000000;
-                                        cmd.creation_flags(CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB);
-                                    }
-                                    let _ = cmd.spawn();
-                                    break;
-                                }
-                                Err(e) => {
-                                    tracing::error!("[AutoUpdate] Failed to create update script: {}", e);
-                                }
-                            }
-                        }
+                match crate::updater::apply_update().await {
+                    ApplyUpdateResult::Updated { version } => {
+                        tracing::info!("[AutoUpdate] Update v{} applied. Exiting agent.", version);
+                        break;
                     }
-                    crate::updater::UpdateStatus::UpToDate => {
+                    ApplyUpdateResult::UpToDate => {
                         tracing::info!("[AutoUpdate] Already up to date (v{})", env!("CARGO_PKG_VERSION"));
                     }
-                    crate::updater::UpdateStatus::Error(e) => {
+                    ApplyUpdateResult::Failed(e) => {
                         tracing::warn!("[AutoUpdate] Check failed: {}", e);
                     }
                 }
@@ -636,6 +610,22 @@ pub fn is_running_in_session_0() -> bool {
     #[cfg(not(windows))]
     {
         unsafe { libc::getuid() == 0 }
+    }
+}
+
+async fn track_if_enabled<F>(
+    supervisor: &Arc<task_supervisor::TaskSupervisor>,
+    config_manager: &Arc<config_manager::ConfigManager>,
+    name: &str,
+    factory: F,
+) where
+    F: Fn() -> tokio::task::JoinHandle<()> + Send + 'static,
+{
+    if config_manager.get().await.is_monitor_enabled(name) {
+        supervisor.track(name, factory).await;
+        tracing::info!("[Startup] monitor '{}' enabled", name);
+    } else {
+        tracing::info!("[Startup] monitor '{}' disabled by policy (enabled_monitors)", name);
     }
 }
 

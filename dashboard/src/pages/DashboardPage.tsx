@@ -87,6 +87,27 @@ export function DashboardPage() {
     }
   };
 
+  const handleUninstall = async (device: Device) => {
+    const nodeName = getNodeName(device);
+    const confirmed = window.confirm(
+      `¿Desinstalar el agente en "${nodeName}"?\n\nSe detendrá el servicio, se eliminarán las tareas programadas y se borrarán los datos locales del agente en esa máquina.`
+    );
+    if (!confirmed) return;
+
+    if (!window.confirm(`ULTIMA CONFIRMACION: la maquina "${nodeName}" quedará sin monitoreo.\n¿Continuar?`)) return;
+
+    try {
+      const result = await apiClient.sendAgentCommand(device.device_id, 'uninstall');
+      if (result.success) {
+        alert(`Comando de desinstalación enviado a "${nodeName}". Se aplicará cuando el agente haga su próximo chequeo (hasta ~20 segundos).`);
+      } else {
+        alert('Error al encolar el comando: ' + (result.error || 'desconocido'));
+      }
+    } catch (err: any) {
+      alert('Error al enviar el comando: ' + (err?.message || 'desconocido'));
+    }
+  };
+
   return (
     <AppShell
       currentPage="dashboard"
@@ -253,6 +274,12 @@ export function DashboardPage() {
                             className="rounded-full border border-[#00ff88]/40 bg-[#00ff88]/10 px-3 py-1.5 font-mono text-[10px] text-[#00ff88] hover:border-[#00ff88]"
                           >
                             Abrir consola
+                          </button>
+                          <button
+                            onClick={() => handleUninstall(device)}
+                            className="rounded-full border border-red-500/40 bg-red-500/10 px-3 py-1.5 font-mono text-[10px] text-red-300 hover:border-red-500 hover:bg-red-500/20"
+                          >
+                            Desinstalar
                           </button>
                         </div>
                       </td>

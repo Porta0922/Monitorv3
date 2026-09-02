@@ -1,8 +1,7 @@
 use std::sync::Arc;
-use tokio::time::Duration;
 use crate::usb_file_copy_detection::UsbFileCopyMonitor;
 use crate::is_running_in_session_0;
-use super::{TaskContext, skip_interval};
+use super::{TaskContext, TaskInterval, live_sleep};
 
 pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
     let is_session_0 = is_running_in_session_0();
@@ -13,10 +12,9 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
 
     tokio::spawn(async move {
         let mut detector = UsbFileCopyMonitor::new(900);
-        let mut interval = skip_interval(Duration::from_secs(60));
 
         loop {
-            interval.tick().await;
+            live_sleep(&context, TaskInterval::UsbCopy).await;
 
             // Wider lookback/cap helps on larger USB volumes where recursive scans
             // can be slower and recent writes might otherwise fall out of the window.

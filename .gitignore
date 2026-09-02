@@ -7,6 +7,9 @@ Cargo.lock
 *.pdb
 *.dll
 
+# Temp
+query
+
 # Configuración sensible (¡Muy importante!)
 .env
 .env.*

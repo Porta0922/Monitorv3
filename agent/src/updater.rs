@@ -1,11 +1,13 @@
 use reqwest::StatusCode;
 use serde::Deserialize;
+use sha2::Digest;
 
 const GITHUB_API: &str = "https://api.github.com/repos/Porta0922/Monitorv3/releases/latest";
 
 #[derive(Deserialize)]
 struct GitHubRelease {
     tag_name: String,
+    body: String,
     assets: Vec<GitHubAsset>,
 }
 
@@ -18,7 +20,11 @@ struct GitHubAsset {
 #[derive(Debug, PartialEq)]
 pub enum UpdateStatus {
     UpToDate,
-    UpdateAvailable { version: String, download_url: String },
+    UpdateAvailable {
+        version: String,
+        download_url: String,
+        sha256: String,
+    },
     Error(String),
 }
 
@@ -68,10 +74,20 @@ pub async fn check_for_update() -> UpdateStatus {
 
             let asset = release.assets.iter().find(|a| a.name == asset_name);
             match asset {
-                Some(a) => UpdateStatus::UpdateAvailable {
-                    version: release.tag_name.clone(),
-                    download_url: a.url.clone(),
-                },
+                Some(a) => {
+                    let sha256 = parse_sha256_from_body(&release.body);
+                    match sha256 {
+                        Some(s) => UpdateStatus::UpdateAvailable {
+                            version: release.tag_name.clone(),
+                            download_url: a.url.clone(),
+                            sha256: s,
+                        },
+                        None => UpdateStatus::Error(format!(
+                            "SHA256 not found in release body for {}",
+                            release.tag_name
+                        )),
+                    }
+                }
                 None => UpdateStatus::Error(format!(
                     "Asset '{}' not found in release {}",
                     asset_name, release.tag_name
@@ -82,7 +98,33 @@ pub async fn check_for_update() -> UpdateStatus {
     }
 }
 
-pub async fn download_and_install(url: &str, dest: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+fn parse_sha256_from_body(body: &str) -> Option<String> {
+    let idx = body.find("SHA256:")?;
+    let rest = &body[idx + "SHA256:".len()..];
+    let hash: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_hexdigit() || *c == ' ')
+        .collect();
+    let hash = hash.trim();
+    if hash.len() == 64 {
+        Some(hash.to_lowercase())
+    } else {
+        None
+    }
+}
+
+fn sha256_hex(data: &[u8]) -> String {
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(data);
+    let out = hasher.finalize();
+    hex::encode(out)
+}
+
+pub async fn download_and_install(
+    url: &str,
+    dest: &std::path::Path,
+    expected_sha256: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let client = reqwest::Client::builder()
         .user_agent("ActivityMonitor-Agent")
         .timeout(std::time::Duration::from_secs(300))
@@ -104,6 +146,16 @@ pub async fn download_and_install(url: &str, dest: &std::path::Path) -> Result<(
     }
 
     let bytes = resp.bytes().await?;
+
+    let actual = sha256_hex(&bytes);
+    if !actual.eq_ignore_ascii_case(expected_sha256) {
+        return Err(format!(
+            "SHA256 mismatch: expected {}, got {}. Update aborted.",
+            expected_sha256, actual
+        )
+        .into());
+    }
+
     std::fs::write(dest, &bytes)?;
     Ok(())
 }
@@ -113,24 +165,66 @@ pub fn create_update_script(
     service_name: &str,
     version: &str,
 ) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
-    if is_remover_version(version) {
-        create_remover_script(new_binary, service_name, version)
-    } else {
-        create_regular_update_script(new_binary, service_name, version)
+    create_regular_update_script(new_binary, service_name, version)
+}
+
+#[derive(Debug)]
+pub enum ApplyUpdateResult {
+    UpToDate,
+    Updated { version: String },
+    Failed(String),
+}
+
+/// Runs the full update pipeline: check -> download (+SHA256 verify) -> apply script.
+pub async fn apply_update() -> ApplyUpdateResult {
+    match check_for_update().await {
+        UpdateStatus::UpToDate => ApplyUpdateResult::UpToDate,
+        UpdateStatus::UpdateAvailable { version, download_url, sha256 } => {
+            tracing::info!("[AutoUpdate] Update v{} available, downloading...", version);
+            let temp_dir = std::env::temp_dir();
+            let dest_path = temp_dir.join("am_update.exe");
+
+            if let Err(e) = download_and_install(&download_url, &dest_path, &sha256).await {
+                return ApplyUpdateResult::Failed(format!("download/verify failed: {}", e));
+            }
+
+            let service_name = if cfg!(windows) { "ActivityMonitor" } else { "activity-monitor" };
+            match create_update_script(&dest_path, service_name, &version) {
+                Ok(script_path) => {
+                    tracing::info!("[AutoUpdate] Spawning cmd.exe for update script: {}", script_path.display());
+                    if spawn_update_script(&script_path).is_some() {
+                        ApplyUpdateResult::Updated { version }
+                    } else {
+                        ApplyUpdateResult::Failed("failed to spawn update script".to_string())
+                    }
+                }
+                Err(e) => ApplyUpdateResult::Failed(format!("create_update_script failed: {}", e)),
+            }
+        }
+        UpdateStatus::Error(e) => ApplyUpdateResult::Failed(e),
     }
 }
 
-/// Returns true if the target version is a self-remover (major version >= 4).
-/// Remover binaries must NOT restart the service, restore recovery, or run
-/// the scheduled task - otherwise Windows brings the agent back.
-fn is_remover_version(version: &str) -> bool {
-    version
-        .trim_start_matches('v')
-        .split('.')
-        .next()
-        .and_then(|m| m.parse::<u32>().ok())
-        .map(|major| major >= 4)
-        .unwrap_or(false)
+/// Spawns cmd.exe running the update batch script. No window, breaks away from the
+/// current job object so it can survive service shutdown.
+#[cfg(windows)]
+pub fn spawn_update_script(script_path: &std::path::Path) -> Option<std::process::Child> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x01000000;
+
+    let mut cmd = std::process::Command::new("cmd.exe");
+    cmd.args(&["/c", &script_path.to_string_lossy()]);
+    cmd.creation_flags(CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB);
+    cmd.spawn().ok()
+}
+
+#[cfg(not(windows))]
+pub fn spawn_update_script(script_path: &std::path::Path) -> Option<std::process::Child> {
+    std::process::Command::new("sh")
+        .arg(script_path)
+        .spawn()
+        .ok()
 }
 
 fn create_regular_update_script(
@@ -212,64 +306,6 @@ fn create_regular_update_script(
           exit\r\n",
         new = new_binary.display(),
         exe = current_exe.display(),
-        service = service_name,
-        task = "ActivityMonitorUserAgent",
-        version = version,
-    );
-
-    std::fs::write(&script_path, script)?;
-    Ok(script_path)
-}
-
-/// Generates a batch script for removing the agent.
-/// Unlike a normal update, this script:
-///   - Disables service recovery permanently (prevents Windows auto-restart)
-///   - Deletes the service and scheduled task registrations
-///   - Replaces the binary with the remover
-///   - Launches the remover directly (admin context)
-///   - Does NOT restart the service or restore recovery
-fn create_remover_script(
-    new_binary: &std::path::Path,
-    service_name: &str,
-    version: &str,
-) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
-    let script_path = std::env::temp_dir().join("am_remover.bat");
-
-    let script = format!(
-        "@echo off\r\n\
-         setlocal enabledelayedexpansion\r\n\
-         REM ActivityMonitor Enterprise - Self-Remover v{version}\r\n\
-         \r\n\
-         REM Re-launch elevated if we are not admin (covers the tray/user path)\r\n\
-         net session >nul 2>&1\r\n\
-         if errorlevel 1 (\r\n\
-             echo [*] Requesting administrator privileges...\r\n\
-             powershell -NoProfile -ExecutionPolicy Bypass -Command \"Start-Process -FilePath '%~f0' -Verb RunAs\" >nul 2>&1\r\n\
-             exit /b\r\n\
-         )\r\n\
-         \r\n\
-         echo [*] Disabling service recovery (prevents auto-restart)...\r\n\
-         sc failure \"{service}\" reset=86400 actions= \"\" >nul 2>&1\r\n\
-         \r\n\
-         echo [*] Deleting scheduled task (prevents revival)...\r\n\
-         schtasks /Delete /TN \"{task}\" /F >nul 2>&1\r\n\
-         \r\n\
-         echo [*] Stopping and deleting service (prevents revival)...\r\n\
-         sc stop \"{service}\" >nul 2>&1\r\n\
-         sc delete \"{service}\" >nul 2>&1\r\n\
-         \r\n\
-         echo [*] Killing remaining agent processes...\r\n\
-         taskkill /F /IM activity-monitor-agent.exe >nul 2>&1\r\n\
-         timeout /t 2 /nobreak >nul\r\n\
-         \r\n\
-         echo [*] Launching remover (from temp copy, admin context)...\r\n\
-         start \"\" \"{new}\"\r\n\
-         \r\n\
-         timeout /t 2 /nobreak >nul\r\n\
-         del /F /Q \"{new}\" >nul 2>&1\r\n\
-         cmd /c del /f /q \"%~f0\" >nul 2>&1\r\n\
-         exit\r\n",
-        new = new_binary.display(),
         service = service_name,
         task = "ActivityMonitorUserAgent",
         version = version,

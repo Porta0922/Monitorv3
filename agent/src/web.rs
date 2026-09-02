@@ -41,13 +41,14 @@ impl WebState {
 pub fn spawn_web_server(state: Arc<WebState>) {
     let auth_token = state.auth_token.clone();
     thread::spawn(move || {
-        let server = match Server::http("0.0.0.0:9876") {
+        let bind = std::env::var("WEB_BIND").unwrap_or_else(|_| "0.0.0.0:9876".to_string());
+        let server = match Server::http(&bind) {
             Ok(s) => {
-                tracing::info!("Web UI started on http://localhost:9876 (token: {})", &auth_token[..4]);
+                tracing::info!("Web UI started on http://{} (token: {})", &bind, &auth_token[..4]);
                 s
             }
             Err(e) => {
-                tracing::warn!("Failed to start Web UI on port 9876: {}", e);
+                tracing::warn!("Failed to start Web UI on {}: {}", bind, e);
                 return;
             }
         };
@@ -91,6 +92,9 @@ pub fn spawn_web_server(state: Arc<WebState>) {
                     let _ = request.as_reader().read_to_string(&mut body);
                     let _ = request.respond(api_help_body(&state, &body));
                 }
+                ("POST", url) if url.starts_with("/api/uninstall") => {
+                    let _ = request.respond(api_uninstall());
+                }
                 _ => {
                     let _ = request.respond(
                         Response::from_string("404 Not Found")
@@ -102,6 +106,14 @@ pub fn spawn_web_server(state: Arc<WebState>) {
     });
 }
 
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
 fn index_html(state: &WebState) -> Response<Cursor<Vec<u8>>> {
     let connected = state.connected.load(Ordering::Relaxed);
     let events = state.events_today.load(Ordering::Relaxed);
@@ -109,6 +121,11 @@ fn index_html(state: &WebState) -> Response<Cursor<Vec<u8>>> {
     let status_icon = if connected { "\u{1f7e2}" } else { "\u{1f534}" };
     let status_text = if connected { "Conectado" } else { "Desconectado" };
     let device_short = if state.device_id.len() > 8 { &state.device_id[..8] } else { &state.device_id };
+
+    let hn = html_escape(&state.hostname);
+    let ver = html_escape(&state.version);
+    let did = html_escape(device_short);
+    let st = html_escape(status_text);
 
     let html = format!(
         r#"<!DOCTYPE html>
@@ -170,10 +187,10 @@ btn.disabled=false;
 </script>
 </body></html>"#,
         si = status_icon,
-        st = status_text,
-        hn = state.hostname,
-        ver = state.version,
-        did = device_short,
+        st = st,
+        hn = hn,
+        ver = ver,
+        did = did,
         ev = events,
         cp = pending,
     );
@@ -200,14 +217,14 @@ fn api_status(state: &WebState) -> Response<Cursor<Vec<u8>>> {
     let events = state.events_today.load(Ordering::Relaxed);
     let pending = state.cache_pending.load(Ordering::Relaxed);
 
-    let json = format!(
-        r#"{{"connected":{},"hostname":"{}","version":"{}","events_today":{},"cache_pending":{}}}"#,
-        if connected { "true" } else { "false" },
-        state.hostname,
-        state.version,
-        events,
-        pending,
-    );
+    let json = serde_json::json!({
+        "connected": connected,
+        "hostname": state.hostname,
+        "version": state.version,
+        "events_today": events,
+        "cache_pending": pending,
+    })
+    .to_string();
 
     json_response(json)
 }
@@ -225,4 +242,17 @@ fn api_help_body(_state: &WebState, body: &str) -> Response<Cursor<Vec<u8>>> {
 
     let json = format!(r#"{{"success":{}}}"#, if success { "true" } else { "false" });
     json_response(json)
+}
+
+fn api_uninstall() -> Response<Cursor<Vec<u8>>> {
+    match crate::uninstall::spawn_uninstall() {
+        Ok(_) => {
+            tracing::warn!("Uninstall requested from local Web UI. Launching self-uninstall.");
+            json_response(r#"{"success":true,"message":"Uninstall launched"}"#.to_string())
+        }
+        Err(e) => json_response(
+            serde_json::json!({ "success": false, "message": format!("Failed to launch uninstall: {}", e) })
+                .to_string(),
+        ),
+    }
 }

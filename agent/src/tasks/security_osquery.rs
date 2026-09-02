@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::time::Duration;
 use crate::osquery_runner::OsqueryRunner;
-use super::{TaskContext, skip_interval};
+use super::{TaskContext, TaskInterval, live_sleep};
 
 fn local_osquery_scheduler_seconds() -> u64 {
     std::env::var("AGENT_OSQUERY_SCHEDULER_SECONDS")
@@ -112,9 +112,8 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
         }
 
         let mut runner = OsqueryRunner::new();
-        let mut scan_interval = skip_interval(Duration::from_secs(osquery_scheduler_seconds.max(60)));
         loop {
-            scan_interval.tick().await;
+            live_sleep(&context_clone, TaskInterval::Osquery).await;
 
             if context_clone.keystroke_tracker.is_idle().await {
                 let findings = runner.scan_due().await;

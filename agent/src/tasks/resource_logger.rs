@@ -1,8 +1,8 @@
 use std::sync::Arc;
-use tokio::time::{Duration, Instant};
+use tokio::time::Instant;
 use crate::monitoring::ResourceMonitor;
 use crate::is_running_in_session_0;
-use super::{TaskContext, skip_interval};
+use super::{TaskContext, TaskInterval, live_sleep};
 
 pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
     // ── Immediate Startup Heartbeat ──
@@ -38,15 +38,14 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
         });
     }
 
-    // ── Every 60 seconds loop ──
+    // ── Every configured interval loop ──
     tokio::spawn(async move {
         let mut resource_monitor = ResourceMonitor::new();
-        let mut interval = skip_interval(Duration::from_secs(60));
         let mut last_summary_instant = Instant::now();
         let is_session_0 = is_running_in_session_0();
 
         loop {
-            interval.tick().await;
+            live_sleep(&context, TaskInterval::ResourceLogger).await;
 
             let key_stats = context.keystroke_tracker.get_stats().await;
             let resources = resource_monitor.capture_snapshot();

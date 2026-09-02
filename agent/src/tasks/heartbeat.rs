@@ -1,16 +1,14 @@
 use std::sync::Arc;
-use tokio::time::Duration;
 use chrono::Utc;
 use crate::is_running_in_session_0;
-use super::{TaskContext, skip_interval};
+use super::{TaskContext, TaskInterval, live_sleep};
 
 pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut hb = skip_interval(Duration::from_secs(60));
         let mut last_idle_state: Option<bool> = None;
 
         loop {
-            hb.tick().await;
+            live_sleep(&context, TaskInterval::Heartbeat).await;
             
             // Re-check session 0 every time to be safe
             let is_session_0 = is_running_in_session_0();

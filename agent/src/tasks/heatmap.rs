@@ -1,7 +1,6 @@
 use std::sync::Arc;
-use tokio::time::Duration;
 use crate::is_running_in_session_0;
-use super::{TaskContext, skip_interval};
+use super::{TaskContext, TaskInterval, live_sleep};
 
 pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
     let is_session_0 = is_running_in_session_0();
@@ -11,9 +10,8 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
     }
 
     tokio::spawn(async move {
-        let mut interval = skip_interval(Duration::from_secs(3600));  // Every hour
         loop {
-            interval.tick().await;
+            live_sleep(&context, TaskInterval::Heatmap).await;
             
             // Check if heatmap should be uploaded
             if context.input_tracker.should_upload().await {

@@ -1,10 +1,9 @@
 use std::sync::Arc;
 use std::collections::HashSet;
-use tokio::time::Duration;
 use chrono::Utc;
 use crate::inventory::InventoryScanner;
 use crate::is_running_in_session_0;
-use super::{TaskContext, skip_interval};
+use super::{TaskContext, TaskInterval, live_sleep};
 
 pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
     let is_session_0 = is_running_in_session_0();
@@ -15,7 +14,6 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
 
     tokio::spawn(async move {
         let mut known_inventory_fingerprints: HashSet<String> = HashSet::new();
-        let mut interval = skip_interval(Duration::from_secs(60 * 60 * 24 * 30)); // Every 30 days
 
         // Initial baseline snapshot when agent starts.
         let initial_apps = match InventoryScanner::scan_installed_software().await {
@@ -55,8 +53,8 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
         }
 
         loop {
-            interval.tick().await;
-            
+            live_sleep(&context, TaskInterval::Inventory).await;
+
             let apps = match InventoryScanner::scan_installed_software().await {
                 Ok(apps) => Some(apps),
                 Err(e) => {

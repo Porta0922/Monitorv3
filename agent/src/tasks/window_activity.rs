@@ -3,7 +3,7 @@ use tokio::time::{Duration, Instant};
 use chrono::Utc;
 use crate::monitoring::MonitoringLoop;
 use crate::is_running_in_session_0;
-use super::{TaskContext, skip_interval};
+use super::{TaskContext, TaskInterval, live_sleep};
 
 fn is_unknown_like(value: &str) -> bool {
     let normalized = value.trim().to_lowercase();
@@ -37,13 +37,12 @@ fn sanitize_activity_fields(app_name: &str, window_title: &str) -> (String, Stri
 pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let monitoring = MonitoringLoop::new();
-        let mut interval = skip_interval(Duration::from_secs(2));
         let mut last_window: Option<(String, String, Instant)> = None;
         let mut last_report_instant: Option<Instant> = None;
         let mut last_loop_time = Instant::now();
 
         loop {
-            interval.tick().await;
+            live_sleep(&context, TaskInterval::WindowActivity).await;
             
             // Session 0 (Windows Service or Unix root service) cannot see user windows or capture input.
             // We skip these monitors if running as a system service.
@@ -54,7 +53,15 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
             let now_instant = Instant::now();
             let time_since_last_loop = now_instant.duration_since(last_loop_time);
 
-            if time_since_last_loop > Duration::from_secs(10) {
+            // Systems suspension detector: only finalize the previous window when the
+            // gap is clearly beyond a live-config heartbeat (5x the tick, min 30s).
+            let suspension_threshold = {
+                let config = context.config_manager.get().await;
+                let tick = config.window_activity_interval_secs.clamp(2, 60).max(1);
+                Duration::from_secs(tick.saturating_mul(5).max(30))
+            };
+
+            if time_since_last_loop > suspension_threshold {
                 tracing::info!(
                     "⏰ System suspension detected. Elapsed since last loop: {}s. Resetting activity duration.",
                     time_since_last_loop.as_secs()

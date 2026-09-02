@@ -3,11 +3,13 @@ use axum::{
     extract::{Query, Path, State},
     Json,
     http::StatusCode,
+    http::HeaderMap,
     response::IntoResponse,
 };
 use serde_json::to_value;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use uuid::Uuid;
 use crate::api::AppState;
 
 fn verify_agent_token(headers: &axum::http::HeaderMap) -> bool {
@@ -19,11 +21,20 @@ fn verify_agent_token(headers: &axum::http::HeaderMap) -> bool {
         .unwrap_or(false)
 }
 
+fn verify_admin_token(state: &AppState, headers: &HeaderMap) -> bool {
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or("");
+    state.auth.verify_token(token).is_ok()
+}
+
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/osquery-policy", axum::routing::get(osquery_policy))
         .route("/policy", axum::routing::get(agent_policy))
-        .route("/commands", axum::routing::get(pending_commands))
+        .route("/commands", axum::routing::get(pending_commands).post(create_command))
         .route("/commands/{id}/ack", axum::routing::post(ack_command))
 }
 
@@ -136,29 +147,98 @@ struct CommandsResponse {
 }
 
 async fn pending_commands(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<DeviceQuery>,
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
     if !verify_agent_token(&headers) {
-        // Don't leak info, just return empty
+        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "success": false, "commands": [] })));
     }
 
-    let response = CommandsResponse {
-        success: true,
-        commands: Vec::new(),
+    let device_uuid = match Uuid::parse_str(&query.device_id) {
+        Ok(u) => u,
+        Err(_) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "success": false, "commands": [] }))),
     };
 
-    (StatusCode::OK, Json(to_value(&response).unwrap()))
+    let commands = match state.db.get_pending_agent_commands(device_uuid).await {
+        Ok(cmds) => cmds,
+        Err(e) => {
+            tracing::error!("Failed to fetch pending commands: {}", e);
+            Vec::new()
+        }
+    };
+
+    let mut items: Vec<serde_json::Value> = Vec::new();
+    for c in commands {
+        let id = c.id.to_string();
+        if state.db.mark_agent_command_delivered(c.id).await.is_ok() {
+            items.push(serde_json::json!({
+                "id": id,
+                "command": c.command,
+                "payload": c.payload,
+            }));
+        }
+    }
+
+    (StatusCode::OK, Json(to_value(&CommandsResponse { success: true, commands: items }).unwrap()))
+}
+
+#[derive(Deserialize)]
+struct CreateCommandBody {
+    device_id: String,
+    command: String,
+    #[serde(default)]
+    payload: Option<serde_json::Value>,
+}
+
+async fn create_command(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<CreateCommandBody>,
+) -> impl IntoResponse {
+    if !verify_admin_token(&state, &headers) {
+        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "success": false, "error": "unauthorized" })));
+    }
+
+    let device_uuid = match Uuid::parse_str(&body.device_id) {
+        Ok(u) => u,
+        Err(_) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "success": false, "error": "invalid device_id" }))),
+    };
+
+    let payload = body.payload.unwrap_or_else(|| serde_json::json!({}));
+
+    match state.db.insert_agent_command(device_uuid, &body.command, payload).await {
+        Ok(command_id) => (StatusCode::CREATED, Json(serde_json::json!({ "success": true, "command_id": command_id, "command": body.command }))),
+        Err(e) => {
+            tracing::error!("Failed to insert agent command: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "success": false, "error": "failed to queue command" })))
+        }
+    }
 }
 
 async fn ack_command(
-    State(_state): State<Arc<AppState>>,
-    Path(_command_id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Path(command_id): Path<String>,
     headers: axum::http::HeaderMap,
+    Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     if !verify_agent_token(&headers) {
         return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "success": false })));
     }
 
-    (StatusCode::OK, Json(serde_json::json!({ "success": true })))
+    let command_uuid = match Uuid::parse_str(&command_id) {
+        Ok(u) => u,
+        Err(_) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "success": false, "error": "invalid command id" }))),
+    };
+
+    let ack_status = body.get("status").and_then(|v| v.as_str()).unwrap_or("failed");
+    let result = body.get("result").cloned().unwrap_or_else(|| serde_json::json!(null));
+
+    match state.db.ack_agent_command(command_uuid, ack_status, result).await {
+        Ok(_) => (StatusCode::OK, Json(serde_json::json!({ "success": true }))),
+        Err(e) => {
+            tracing::error!("Failed to ack agent command: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "success": false })))
+        }
+    }
 }

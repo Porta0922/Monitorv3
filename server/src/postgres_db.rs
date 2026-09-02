@@ -34,6 +34,19 @@ pub struct StreamEvent {
     pub last_seen: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct AgentCommand {
+    pub id: Uuid,
+    pub device_id: Uuid,
+    pub command: String,
+    pub payload: serde_json::Value,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+    pub acked_at: Option<DateTime<Utc>>,
+    pub result: Option<serde_json::Value>,
+}
+
 
 
 
@@ -121,6 +134,31 @@ impl Database {
         sqlx::query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS version VARCHAR(64)")
             .execute(pool)
             .await?;
+
+        // Create agent_commands table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS agent_commands (
+                id UUID PRIMARY KEY,
+                device_id UUID NOT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
+                command VARCHAR(64) NOT NULL,
+                payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                delivered_at TIMESTAMPTZ,
+                acked_at TIMESTAMPTZ,
+                result JSONB
+            )
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_agent_commands_pending ON agent_commands(device_id, status)"
+        )
+        .execute(pool)
+        .await?;
 
         // Create activity_logs table
         sqlx::query(
@@ -1868,6 +1906,122 @@ impl Database {
             last_seen,
             nickname,
         }))
+    }
+
+    pub async fn insert_agent_command(
+        &self,
+        device_id: Uuid,
+        command: &str,
+        payload: serde_json::Value,
+    ) -> Result<Uuid, sqlx::Error> {
+        let id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO agent_commands (id, device_id, command, payload, status)
+            VALUES ($1, $2, $3, $4, 'pending')
+            "#,
+        )
+        .bind(id)
+        .bind(device_id)
+        .bind(command)
+        .bind(payload)
+        .execute(&self.pool)
+        .await?;
+
+        tracing::info!("📟 Agent command queued: {} -> {} (id={})", device_id, command, id);
+        Ok(id)
+    }
+
+    pub async fn get_pending_agent_commands(
+        &self,
+        device_id: Uuid,
+    ) -> Result<Vec<AgentCommand>, sqlx::Error> {
+        let rows = sqlx::query_as::<_, (Uuid, Uuid, String, serde_json::Value, String, DateTime<Utc>, Option<DateTime<Utc>>, Option<serde_json::Value>)>(
+            "SELECT id, device_id, command, payload, status, created_at, acked_at, result \
+             FROM agent_commands \
+             WHERE device_id = $1 AND status = 'pending' \
+             ORDER BY created_at ASC"
+        )
+        .bind(device_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(|(id, device_id, command, payload, status, created_at, acked_at, result)| AgentCommand {
+            id,
+            device_id,
+            command,
+            payload,
+            status,
+            created_at,
+            acked_at,
+            result,
+        }).collect())
+    }
+
+    pub async fn mark_agent_command_delivered(&self, command_id: Uuid) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE agent_commands SET status = 'delivered', delivered_at = NOW() \
+             WHERE id = $1 AND status = 'pending'"
+        )
+        .bind(command_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn ack_agent_command(
+        &self,
+        command_id: Uuid,
+        ack_status: &str,
+        result: serde_json::Value,
+    ) -> Result<(), sqlx::Error> {
+        let final_status = if ack_status == "ok" { "done" } else { "failed" };
+        sqlx::query(
+            "UPDATE agent_commands SET status = $2, acked_at = NOW(), result = $3 \
+             WHERE id = $1"
+        )
+        .bind(command_id)
+        .bind(final_status)
+        .bind(result)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list_agent_commands(
+        &self,
+        device_id: Option<Uuid>,
+    ) -> Result<Vec<AgentCommand>, sqlx::Error> {
+        let rows = match device_id {
+            Some(did) => {
+                sqlx::query_as::<_, (Uuid, Uuid, String, serde_json::Value, String, DateTime<Utc>, Option<DateTime<Utc>>, Option<serde_json::Value>)>(
+                    "SELECT id, device_id, command, payload, status, created_at, acked_at, result \
+                     FROM agent_commands WHERE device_id = $1 ORDER BY created_at DESC LIMIT 100"
+                )
+                .bind(did)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            None => {
+                sqlx::query_as::<_, (Uuid, Uuid, String, serde_json::Value, String, DateTime<Utc>, Option<DateTime<Utc>>, Option<serde_json::Value>)>(
+                    "SELECT id, device_id, command, payload, status, created_at, acked_at, result \
+                     FROM agent_commands ORDER BY created_at DESC LIMIT 100"
+                )
+                .fetch_all(&self.pool)
+                .await?
+            }
+        };
+
+        Ok(rows.into_iter().map(|(id, device_id, command, payload, status, created_at, acked_at, result)| AgentCommand {
+            id,
+            device_id,
+            command,
+            payload,
+            status,
+            created_at,
+            acked_at,
+            result,
+        }).collect())
     }
 
     #[allow(dead_code)]

@@ -106,3 +106,42 @@ pub fn skip_interval(duration: std::time::Duration) -> tokio::time::Interval {
     int.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     int
 }
+
+#[derive(Clone, Copy)]
+pub enum TaskInterval {
+    WindowActivity,
+    Heartbeat,
+    UsbDetector,
+    UsbCopy,
+    Wifi,
+    RunningApps,
+    Inventory,
+    Heatmap,
+    ResourceLogger,
+    Osquery,
+}
+
+impl TaskInterval {
+    /// Effective tick seconds for this task reading the LIVE config.
+    fn secs(&self, config: &crate::config_manager::AgentConfig) -> u64 {
+        match self {
+            TaskInterval::WindowActivity => config.window_activity_interval_secs.clamp(2, 60),
+            TaskInterval::Heartbeat => config.heartbeat_interval_secs.max(1),
+            TaskInterval::UsbDetector => config.usb_detector_interval_secs.max(1),
+            TaskInterval::UsbCopy => config.usb_copy_interval_secs.max(1),
+            TaskInterval::Wifi => config.wifi_interval_secs.max(1),
+            TaskInterval::RunningApps => config.running_apps_interval_secs.max(1),
+            TaskInterval::Inventory => (config.inventory_interval_days as u64 * 86400).max(1),
+            TaskInterval::Heatmap => config.heatmap_interval_secs.max(1),
+            TaskInterval::ResourceLogger => config.resource_logger_interval_secs.max(1),
+            TaskInterval::Osquery => (config.osquery_scheduler_seconds as u64).max(60),
+        }
+    }
+}
+
+/// Sleeps for the task's configured interval, re-reading the live config on
+/// every cycle so policy changes take effect without restarting the agent.
+pub async fn live_sleep(context: &TaskContext, interval: TaskInterval) {
+    let config = context.config_manager.get().await;
+    tokio::time::sleep(std::time::Duration::from_secs(interval.secs(&config))).await;
+}

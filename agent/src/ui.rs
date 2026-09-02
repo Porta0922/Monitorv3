@@ -15,8 +15,8 @@ use winapi::um::wingdi::{
 use winapi::um::winuser::{
     self, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyIcon,
     DispatchMessageW, GetCursorPos, GetDC, GetMessageW, GetWindowLongPtrW,
-    ICONINFO, IDI_APPLICATION, IDYES, KillTimer, LoadIconW, MB_ICONERROR, MB_ICONINFORMATION,
-    MB_ICONQUESTION, MB_OK, MB_YESNO, MessageBoxW,
+    ICONINFO, IDI_APPLICATION, KillTimer, LoadIconW, MB_ICONINFORMATION,
+    MB_OK, MessageBoxW,
     PostQuitMessage, RegisterClassW, ReleaseDC, SetForegroundWindow, SetTimer,
     SetWindowLongPtrW, TrackPopupMenu, TranslateMessage, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
     WNDCLASSW, GWLP_USERDATA, CreateIconIndirect,
@@ -29,7 +29,6 @@ use crate::web::WebState;
 const WM_TRAYICON: UINT = WM_APP + 1;
 const ID_TRAY: UINT = 1;
 const CMD_OPEN_STATUS: usize = 1002;
-const CMD_CHECK_UPDATE: usize = 1003;
 const CMD_ABOUT: usize = 1005;
 const TIMER_ICON_UPDATE: usize = 2001;
 
@@ -167,7 +166,6 @@ pub fn spawn_tray(state: Arc<WebState>) {
 
             let popup = CreatePopupMenu();
             winuser::AppendMenuW(popup, MF_STRING, CMD_OPEN_STATUS, to_wide("Abrir Estado").as_ptr());
-            winuser::AppendMenuW(popup, MF_STRING, CMD_CHECK_UPDATE, to_wide("Buscar Actualización").as_ptr());
             winuser::AppendMenuW(popup, MF_SEPARATOR, 0, std::ptr::null());
             winuser::AppendMenuW(popup, MF_STRING, CMD_ABOUT, to_wide("Acerca de").as_ptr());
 
@@ -252,83 +250,6 @@ unsafe extern "system" fn tray_wndproc(
             match cmd {
                 CMD_OPEN_STATUS => {
                     let _ = open::that("http://localhost:9876");
-                }
-                CMD_CHECK_UPDATE => {
-                    let hwnd_raw = hwnd as usize;
-                    std::thread::spawn(move || {
-                        let hwnd = hwnd_raw as HWND;
-                        let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime for update check");
-                        let status = rt.block_on(crate::updater::check_for_update());
-
-                        unsafe {
-                            match status {
-                                crate::updater::UpdateStatus::UpToDate => {
-                                    let title = to_wide("ActivityMonitor Agent");
-                                    let msg = format!("Ya tenés la última versión (v{}).", env!("CARGO_PKG_VERSION"));
-                                    let msg_wide = to_wide(&msg);
-                                    MessageBoxW(hwnd, msg_wide.as_ptr(), title.as_ptr(), MB_OK | MB_ICONINFORMATION);
-                                }
-                                crate::updater::UpdateStatus::UpdateAvailable { version, download_url } => {
-                                    let title = to_wide("Actualización Disponible");
-                                    let msg = format!("Nueva versión {} disponible.\n\n¿Descargar e instalar ahora?", version);
-                                    let msg_wide = to_wide(&msg);
-                                    let result = MessageBoxW(hwnd, msg_wide.as_ptr(), title.as_ptr(), MB_YESNO | MB_ICONQUESTION);
-
-                                    if result == IDYES {
-                                        let temp_dir = std::env::temp_dir();
-                                        let dest_path = temp_dir.join("am_update.exe");
-
-                                        match rt.block_on(crate::updater::download_and_install(&download_url, &dest_path)) {
-                                            Ok(_) => {
-                                                let service_name = if cfg!(windows) { "ActivityMonitor" } else { "activity-monitor" };
-                                                match crate::updater::create_update_script(&dest_path, service_name, &version) {
-                                                    Ok(script_path) => {
-                                                        let script_str = script_path.to_string_lossy().to_string();
-                                                        tracing::info!("[UI] Spawning cmd.exe for update script: {}", script_str);
-                                                        #[allow(unused_mut)]
-                                                        let mut cmd = std::process::Command::new("cmd.exe");
-                                                        cmd.args(&["/c", &script_str]);
-                                                        #[cfg(windows)]
-                                                        {
-                                                            use std::os::windows::process::CommandExt;
-                                                            const CREATE_NO_WINDOW: u32 = 0x08000000;
-                                                            const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x01000000;
-                                                            cmd.creation_flags(CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB);
-                                                        }
-                                                        let _ = cmd.spawn();
-
-                                                        let title_done = to_wide("Actualización");
-                                                        let done_msg = to_wide("La actualización se aplicará automáticamente.\nEl agente se reiniciará en breve.");
-                                                        MessageBoxW(hwnd, done_msg.as_ptr(), title_done.as_ptr(), MB_OK | MB_ICONINFORMATION);
-
-                                                        PostQuitMessage(0);
-                                                    }
-                                                    Err(e) => {
-                                                        let err_msg = format!("Error creando script de actualización: {}", e);
-                                                        let err_wide = to_wide(&err_msg);
-                                                        let title_err = to_wide("Error");
-                                                        MessageBoxW(hwnd, err_wide.as_ptr(), title_err.as_ptr(), MB_OK | MB_ICONERROR);
-                                                    }
-                                                }
-                                            }
-                                            Err(e) => {
-                                                let err_msg = format!("Error descargando actualización: {}", e);
-                                                let err_wide = to_wide(&err_msg);
-                                                let title_err = to_wide("Error");
-                                                MessageBoxW(hwnd, err_wide.as_ptr(), title_err.as_ptr(), MB_OK | MB_ICONERROR);
-                                            }
-                                        }
-                                    }
-                                }
-                                crate::updater::UpdateStatus::Error(e) => {
-                                    let title = to_wide("Error");
-                                    let msg = format!("Error al buscar actualización:\n{}", e);
-                                    let msg_wide = to_wide(&msg);
-                                    MessageBoxW(hwnd, msg_wide.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR);
-                                }
-                            }
-                        }
-                    });
                 }
                 CMD_ABOUT => {
                     let title = to_wide("ActivityMonitor Agent");

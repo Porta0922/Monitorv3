@@ -91,6 +91,25 @@ pub async fn process_command(
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })
         }
+        "force_update" => {
+            match crate::updater::apply_update().await {
+                crate::updater::ApplyUpdateResult::Updated { version } => {
+                    serde_json::json!({ "status": "ok", "message": format!("Update v{} applied", version) })
+                }
+                crate::updater::ApplyUpdateResult::UpToDate => {
+                    serde_json::json!({ "status": "ok", "message": "already up to date" })
+                }
+                crate::updater::ApplyUpdateResult::Failed(e) => {
+                    serde_json::json!({ "status": "error", "message": e })
+                }
+            }
+        }
+        "uninstall" => {
+            match crate::uninstall::spawn_uninstall() {
+                Ok(_) => serde_json::json!({ "status": "ok", "message": "Uninstall script launched (self-elevating). Agent will be removed shortly." }),
+                Err(e) => serde_json::json!({ "status": "error", "message": format!("Failed to launch uninstall: {}", e) }),
+            }
+        }
         _ => {
             serde_json::json!({
                 "status": "error",

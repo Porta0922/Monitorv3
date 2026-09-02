@@ -1,9 +1,14 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex as StdMutex;
+use std::collections::VecDeque;
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
 use tokio::time::Instant;
+
+const RESTART_CAP_PER_HOUR: usize = 10;
+const BACKOFF_BASE_SECS: u64 = 5;
+const BACKOFF_MAX_SECS: u64 = 600;
 
 #[derive(Clone)]
 pub struct TaskHandle {
@@ -22,6 +27,9 @@ struct ManagedTask {
     restart_count: AtomicU64,
     last_error: Arc<StdMutex<Option<String>>>,
     started_at: StdMutex<Instant>,
+    restart_times: VecDeque<Instant>,
+    next_restart_at: Instant,
+    gave_up: bool,
 }
 
 pub struct TaskSupervisor {
@@ -85,6 +93,9 @@ impl TaskSupervisor {
             restart_count: AtomicU64::new(0),
             last_error: last_error.clone(),
             started_at: StdMutex::new(Instant::now()),
+            restart_times: VecDeque::new(),
+            next_restart_at: Instant::now(),
+            gave_up: false,
         };
 
         self.tasks.lock().unwrap().push(managed);
@@ -98,19 +109,59 @@ impl TaskSupervisor {
             loop {
                 interval.tick().await;
                 let mut tasks = this.tasks.lock().unwrap();
+                let now = Instant::now();
                 for task in tasks.iter_mut() {
                     let is_finished = task.handle.lock().unwrap().is_finished();
-                    if is_finished {
-                        task.restart_count.fetch_add(1, Ordering::Relaxed);
-                        let count = task.restart_count.load(Ordering::Relaxed);
-                        tracing::warn!(
-                            "[Supervisor] Restarting task '{}' (attempt #{})",
-                            task.name, count
-                        );
-                        task.running.store(true, Ordering::Relaxed);
-                        *task.started_at.lock().unwrap() = Instant::now();
-                        *task.handle.lock().unwrap() = (task.factory)();
+                    if !is_finished {
+                        continue;
                     }
+
+                    if task.gave_up {
+                        continue;
+                    }
+
+                    // Prune restart timestamps older than one hour.
+                    while let Some(&t) = task.restart_times.front() {
+                        if now.duration_since(t) > Duration::from_secs(3600) {
+                            task.restart_times.pop_front();
+                        } else {
+                            break;
+                        }
+                    }
+
+                    // Give up if we already restarted too many times this hour.
+                    if task.restart_times.len() >= RESTART_CAP_PER_HOUR {
+                        task.gave_up = true;
+                        task.running.store(false, Ordering::Relaxed);
+                        let msg = format!(
+                            "exceeded {} restarts/hour — task halted",
+                            RESTART_CAP_PER_HOUR
+                        );
+                        *task.last_error.lock().unwrap() = Some(msg.clone());
+                        tracing::error!("[Supervisor] Task '{}': {}", task.name, msg);
+                        continue;
+                    }
+
+                    // Exponential backoff: 5s, 10s, 20s, ... capped at 10min.
+                    if now < task.next_restart_at {
+                        continue;
+                    }
+                    let attempt = task.restart_times.len() + 1;
+                    let exp = ((attempt - 1) as u32).min(7);
+                    let delay_secs =
+                        BACKOFF_BASE_SECS.saturating_mul(1u64 << exp).min(BACKOFF_MAX_SECS);
+
+                    task.restart_count.fetch_add(1, Ordering::Relaxed);
+                    let count = task.restart_count.load(Ordering::Relaxed);
+                    tracing::warn!(
+                        "[Supervisor] Restarting task '{}' (attempt #{}, backoff {}s)",
+                        task.name, count, delay_secs
+                    );
+                    task.restart_times.push_back(now);
+                    task.next_restart_at = now + Duration::from_secs(delay_secs);
+                    task.running.store(true, Ordering::Relaxed);
+                    *task.started_at.lock().unwrap() = Instant::now();
+                    *task.handle.lock().unwrap() = (task.factory)();
                 }
             }
         });
