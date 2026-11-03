@@ -1,5 +1,18 @@
 # Changelog
 
+## Cierre de implementación UX — 2026-11-03
+
+- Consultas independientes, reintentos locales y conservación de datos por consulta; exportación fallida no oculta el detalle.
+- Filtros en URL, retorno al listado, búsqueda/paginación de tablas y diagnóstico compacto; ayuda integrada y manejo explícito de permisos.
+- WiFi no inventa duración hasta el presente; métricas horarias en UTC y alternativa tabular a gráficos.
+- Comprobación Chromium con datos sintéticos, temas/tamaños, teclado y contraste de tokens principales. Aceptación humana y asistiva completa pendiente. Agente conserva 0.1.0.
+
+## Limpieza de arquitectura — 2026-11-03
+
+- Retirados 73 archivos heredados de instalación, publicación, diagnóstico y documentación obsoleta.
+- Eliminados manager/remover del workspace, lockfile y contextos Docker; sin actualización de dependencias ni cambio de versión del agente.
+- Conservadas migraciones usadas por pruebas, evidencia histórica y datos privados del piloto. Mapa vigente en docs/REPOSITORY_LAYOUT.md.
+
 ## Recuperación y preparación de GitHub — 2026-11-03
 
 - Piloto Windows: reconexión tras 75 s sin RabbitMQ y recuperación automática de SCM en 16 s comprobadas; binario 0.1.0 sin cambios.

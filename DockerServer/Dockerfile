@@ -11,15 +11,11 @@ COPY Cargo.lock Cargo.lock
 COPY shared_types.rs shared_types.rs
 COPY agent/Cargo.toml agent/Cargo.toml
 COPY server/Cargo.toml server/Cargo.toml
-COPY remover/Cargo.toml remover/Cargo.toml
-COPY manager/Cargo.toml manager/Cargo.toml
 COPY agent/src agent/src
 COPY server/src server/src
 COPY server/migrations server/migrations
 COPY server/build.rs server/build.rs
 COPY scripts/production/grants.sql scripts/production/grants.sql
-COPY remover/src remover/src
-COPY manager/src manager/src
 COPY tools/agent-transport-probe tools/agent-transport-probe
 
 RUN cargo build --locked --release -p activity-monitor-server

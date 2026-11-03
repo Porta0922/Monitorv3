@@ -104,6 +104,7 @@ class ApiClient {
     this.client.defaults.headers.common['X-Monitor-Client']='dashboard';
     this.client.interceptors.response.use(response=>{const role=response.headers['x-monitor-role'];if(['viewer','operator','admin'].includes(role)&&this.role!==role){this.role=role;this.changed();}return response;},error=>{
       if(error.response?.status===401){this.clearAuth();if(!error.config?.url?.startsWith('/auth/'))window.location.href='/login';}
+      if(error.response?.status===403&&!error.config?.url?.startsWith('/auth/'))window.dispatchEvent(new Event('monitor:forbidden'));
       if(error.response?.status===403&&!error.config?.url?.startsWith('/auth/'))void this.client.get<LoginResponse>('/auth/session').then(r=>this.acceptSession(r.data)).catch(()=>{});
       return Promise.reject(error);
     });

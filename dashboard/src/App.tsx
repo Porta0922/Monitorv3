@@ -1,3 +1,4 @@
+import {HelpPage} from './pages/HelpPage';
 import {SessionPage} from './pages/SessionPage';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
@@ -33,6 +34,7 @@ function App() {
     <ErrorBoundary>
     <BrowserRouter>
       <Routes>
+        <Route path="/help" element={<PrivateRoute><HelpPage/></PrivateRoute>}/>
         <Route path="/session" element={<PrivateRoute><SessionPage/></PrivateRoute>}/>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/administration" element={<PrivateRoute><AdministrationPage /></PrivateRoute>} />

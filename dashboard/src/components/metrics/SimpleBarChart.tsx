@@ -124,6 +124,7 @@ export function SimpleBarChart({
           {label}
         </text>
       </svg>
+      <details><summary>Ver valores de {label.toLowerCase()}</summary><div className="table-scroll" tabIndex={0} role="region" aria-label={label}><table><caption className="sr-only">{label}, por hora UTC</caption><thead><tr><th scope="col">Hora UTC</th><th scope="col">{label}</th></tr></thead><tbody>{data.map((row,i)=><tr key={row.hour??i}><th scope="row">{row.hour??i}:00</th><td>{Number.isFinite(row[dataKey])?row[dataKey].toLocaleString('es'):'Sin datos'}</td></tr>)}</tbody></table></div></details>
     </div>
   );
 }

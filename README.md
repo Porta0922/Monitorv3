@@ -44,6 +44,7 @@ El servicio no captura el escritorio desde la sesión de sistema. Esa función c
 - Recursos actuales e históricos, disponibilidad de recolectores y diagnóstico por sesión.
 - Grupos, políticas globales/por equipo, versiones reportadas, alertas e investigaciones.
 - Tema oscuro predeterminado, con opciones Claro y Sistema y preferencia local persistente.
+- Cargas independientes y reintentos por sección, tablas paginadas y filtros conservados en enlaces; ayuda integrada desde la barra superior. Ver [UX y límites de validación](docs/DASHBOARD_UX.md).
 - Vista local del equipo, sin administración de otras computadoras.
 
 La última actividad es un reporte, no una transmisión del escritorio. Las muestras ausentes o antiguas deben distinguirse de un valor cero. La cobertura depende del sistema operativo, los permisos y la política de recolección.
@@ -63,6 +64,8 @@ Pendientes relevantes: validar el despliegue de identidades por equipo en las pl
 El alcance completo y los criterios de aceptación están en [TODO de producción](docs/TODO.md).
 
 ## Estructura del repositorio
+
+Los instaladores y utilidades del proyecto anterior fueron retirados. Consulta el [mapa vigente y las excepciones de compatibilidad](docs/REPOSITORY_LAYOUT.md).
 
 ```text
 agent/                    Agente nativo, tareas, IPC, caché y vista local

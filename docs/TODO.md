@@ -6,6 +6,8 @@ Este documento reemplaza el orden de trabajo anterior. El [TODO histórico](TODO
 
 ## Estado de partida
 
+- [x] Limpieza del árbol heredado: 73 archivos retirados, workspace y Docker ajustados; alcance y límites en [REPOSITORY_LAYOUT.md](REPOSITORY_LAYOUT.md). No equivale a certificación productiva.
+
 - Piloto limpio 0.1.0 instalado y recibiendo recursos, actividad, ventanas y contadores de sesión. Datos anteriores descartados por autorización explícita; ver REFACTOR_PROGRESS.md (2026-11-03).
 - Dashboard renovado: resumen por equipo, actividad agrupada, búsqueda, paginación, secciones separadas y tema oscuro predeterminado.
 - Diecisiete migraciones aplicadas sobre la instalación limpia; no certifica migración de volúmenes heredados.
@@ -39,7 +41,7 @@ No publicar ni reemplazar el repositorio remoto, distribuir secretos o desplegar
 | 5 | Privacidad, retención y restauración | Bloqueante | Parcial, falta validación integrada |
 | 6 | Agente multiplataforma y recuperación | Bloqueante por plataforma | Parcial, Windows en piloto |
 | 7 | Instaladores, actualización y releases | Bloqueante | Paquete local; firma pendiente |
-| 8 | UX, accesibilidad y operación diaria | Necesario para aceptación | Base renovada; pendientes |
+| 8 | UX, accesibilidad y operación diaria | Necesario para aceptación | Implementación y comprobación focalizada cerradas; aceptación en bloque 9 |
 | 9 | Validación integrada y piloto de aceptación | Puerta de salida | Evidencia parcial |
 | 10 | Operación y autorización de producción | Puerta final | Pendiente |
 
@@ -158,19 +160,23 @@ Cierre 2026-11-02: implementación y comprobación focalizada completas para el 
 
 ## 8. UX, accesibilidad y operación diaria
 
-- [ ] Completar resumen con contadores por sesión fiables y mensajes accionables; mantener diagnóstico técnico fuera del recorrido habitual.
-- [ ] Revisar aplicaciones/inventario, USB/WiFi y diagnóstico para evitar tablas sin búsqueda/paginación o pantallas excesivamente largas.
-- [ ] Preservar contexto de equipo, pestaña, fecha, búsqueda y filtros al navegar, volver o compartir un enlace autorizado.
-- [ ] Aislar fallos de carga por sección: una API secundaria caída no debe impedir consultar todo el equipo. Añadir reintento local y conservación explícita de datos anteriores.
-- [ ] Alinear botones y permisos con el rol sin depender de la interfaz como control de seguridad; explicar acciones rechazadas.
-- [ ] Validar estados vacíos, lentos, desconectados, desactualizados y errores de exportación; evitar cifras o estados ficticios.
-- [ ] Revisar teclado, foco, lector de pantalla, contraste y tablas/gráficos en temas claro/oscuro y tamaños escritorio/tablet/móvil.
-- [ ] Unificar nombres, unidades, duraciones y textos de ayuda; diferenciar aplicaciones reportadas, software instalado y actividad enfocada.
-- [ ] Completar ayuda operativa para incorporar equipos, resolver incidencias y consultar Mi equipo; no exponer credenciales en capturas/documentación.
+Implementación completada el 2026-11-03. Evidencia, alcance y límites en [DASHBOARD_UX.md](DASHBOARD_UX.md); regresión focalizada en `tests/dashboard_ux.py`.
 
-**Cierre:** recorridos cotidianos completos con usuarios representativos, sin errores de renderizado ni bloqueos de navegación, accesibles y con información priorizada.
+- [x] Resumen con contadores de sesión, cobertura explícita, ausencia diferenciada de cero y diagnóstico desplegable.
+- [x] Búsqueda y paginación en aplicaciones, inventario, USB/WiFi, actividad reciente, historial y diagnóstico; límites de consulta visibles.
+- [x] Equipo, sección, fecha, búsqueda, filtros y páginas persistidos en URL; retorno al listado con la consulta original.
+- [x] Cargas y reintentos independientes; conservación explícita de la respuesta anterior solo para la misma consulta.
+- [x] Acciones según rol y aviso de rechazo del servidor; exportación no bloquea el resto del detalle.
+- [x] Estados de carga, consulta vacía, datos ausentes/atrasados y error; WiFi no extrapola duración sin evento posterior.
+- [x] Teclado, foco, semántica de tablas, alternativa textual a gráficos, movimiento reducido y revisión focalizada claro/oscuro a 390/768/1440 px. Contraste comprobado para tokens principales, no auditoría WCAG completa.
+- [x] Nombres y unidades coherentes; fechas agregadas UTC; distinción entre software instalado, ventana reportada y actividad.
+- [x] Ayuda integrada para incorporación, diagnóstico, permisos y Mi equipo sin credenciales reales.
+
+**Estado:** código y comprobación focalizada cerrados. La aceptación con usuarios y lector de pantalla real sigue en bloque 9; no se declara certificación productiva ni accesibilidad completa.
 
 ## 9. Validación integrada y piloto de aceptación
+
+- [ ] Aceptación de UX con usuarios representativos y lector de pantalla real; recorrer roles, errores y gráficos en navegadores soportados con datos del piloto. La comprobación sintética del bloque 8 no sustituye esta certificación.
 
 Ejecutar la campaña sobre una versión candidata identificada después de completar los bloques anteriores. Repetir solo casos afectados por cambios posteriores o fallos encontrados.
 

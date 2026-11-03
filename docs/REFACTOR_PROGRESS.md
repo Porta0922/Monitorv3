@@ -359,3 +359,13 @@ No se ejecutaron pruebas, builds, paquetes, instaladores, migraciones ni desplie
 Añadido overlay separado sin puertos internos publicados y con secretos por archivo; Redis optativo. Generador Linux de configuración privada, sin iniciar servicios ni reemplazar archivos. Validación de configuración antes de conectar DB/escuchar API; producción exige cuentas administradas y CORS del mismo origen. Límites iniciales de servidor/dashboard/mantenimiento.
 
 No se modificó el piloto en ejecución ni el agente. Pendientes: despliegue funcional Linux, TLS/identidad por agente, roles DB, UID/permisos y resto de hardening. README y guía de despliegue actualizados; bloque 1 parcial.
+
+
+## 2026-11-03 — Limpieza del árbol heredado
+
+Retirados 73 archivos obsoletos y los crates manager/remover. Ajustados Cargo.lock y tres Dockerfiles; documentación vigente enlazada desde README. Ver [REPOSITORY_LAYOUT.md](REPOSITORY_LAYOUT.md) para inventario, reemplazos y excepciones. Metadata del workspace, preflight y diff aprobados; resolución completa offline limitada por adler2 ausente. Sin reinstalación, reinicio ni cambios a datos del piloto. Esta limpieza no cierra los bloques pendientes de producción.
+
+
+## 2026-11-03 — Bloque 8: implementación UX
+
+Cargas independientes y estados por consulta, filtros persistentes, tablas paginadas, diagnóstico desplegable, ayuda integrada, accesibilidad estructural y permisos comprensibles. Ver [DASHBOARD_UX.md](DASHBOARD_UX.md). Build TypeScript/Vite y ESLint focalizado; regresión Chromium sintética con revisión visual de capturas, ambos temas y tres tamaños. El bloque 9 conserva aceptación humana, lector de pantalla real e integración multiplataforma. No se modificó la versión del agente ni se desplegó el dashboard sobre Docker.

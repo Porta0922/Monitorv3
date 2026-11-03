@@ -1,6 +1,5 @@
 [workspace]
-members = ["agent", "server", "remover", "manager", "tools/agent-transport-probe"]
-exclude = ["Instaladores/agent"]
+members = ["agent", "server", "tools/agent-transport-probe"]
 resolver = "2"
 
 [workspace.package]

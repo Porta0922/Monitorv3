@@ -1,40 +1,21 @@
+import {useRemoteSection} from '../hooks/useRemoteSection';
+import {CollectionTable} from '../components/CollectionTable';
 import {SessionActivityPanel} from '../components/metrics/SessionActivityPanel';
 import {AgentCredentialsPanel} from '../components/AgentCredentialsPanel';
 import {DeviceOverview} from '../components/DeviceOverview';
 import {DeviceActivityExplorer} from '../components/DeviceActivityExplorer';
 import type {HourGroup} from '../api/desktop';
-import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import React, { useCallback, useMemo, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import { AppShell } from '../components/AppShell';
 import { InventoryStatePanel } from '../components/InventoryStatePanel';
 import { DeviceTelemetryPanel } from '../components/metrics/DeviceTelemetryPanel';
 import { DailyMetricsPanel } from '../components/metrics/DailyMetricsPanel';
-import type { AppInfo, Device, RunningAppInfo, USBEvent, WifiEvent, NodeResourceMetric } from '../types';
+import type { USBEvent, WifiEvent, NodeResourceMetric } from '../types';
 
 type TabKey = 'overview' | 'activity' | 'inventory' | 'usb' | 'wifi' | 'resources' | 'diagnostic';
 type WifiStateFilter = 'all' | 'connected' | 'disconnected';
-
-interface HourlyProgramItem {
-  app: string;
-  seconds: number;
-  duration: string;
-  intervals: number;
-  is_idle: boolean;
-  window_count?: number;
-  windows?: Array<{
-    title: string;
-    seconds: number;
-    duration: string;
-    intervals: number;
-  }>;
-}
-
-interface HourlyProgramsGroup {
-  hour: number;
-  label: string;
-  programs: HourlyProgramItem[];
-}
 
 interface UsbSummaryRow {
   key: string;
@@ -50,76 +31,47 @@ interface UsbSummaryRow {
 }
 
 interface WifiEventWithDuration extends WifiEvent {
-  connected_duration_seconds: number;
+  connected_duration_seconds: number | null;
 }
 
 export function DeviceDetailPage() {
   const { deviceId } = useParams<{ deviceId: string }>();
   const navigate = useNavigate();
 
-  const [device, setDevice] = useState<Device | null>(null);
-  const [hourlyPrograms, setHourlyPrograms] = useState<HourlyProgramsGroup[]>([]);
-  const [resourceMetrics, setResourceMetrics] = useState<NodeResourceMetric[]>([]);
-
-  const [inventory, setInventory] = useState<AppInfo[]>([]);
-  const [runningApps, setRunningApps] = useState<RunningAppInfo[]>([]);
-  const [usbEvents, setUsbEvents] = useState<USBEvent[]>([]);
-  const [wifiEvents, setWifiEvents] = useState<WifiEvent[]>([]);
-  const [tab, setTab] = useState<TabKey>('overview');
-  const [wifiStateFilter, setWifiStateFilter] = useState<WifiStateFilter>('all');
-  const [isLoading, setIsLoading] = useState(true);
+  const [params, setParams] = useSearchParams();
+  const change = (key: string, value: string) => setParams(previous => { const next = new URLSearchParams(previous); next.set(key,value); return next; }, {replace:true});
+  const tabs = ['overview','activity','inventory','usb','wifi','resources','diagnostic'];
+  const tab = (tabs.includes(params.get('tab') ?? '') ? params.get('tab') : 'overview') as TabKey;
+  const setTab = (value: TabKey) => change('tab', value);
+  const dateToday = new Date().toISOString().slice(0,10);
+  const requestedDate = params.get('date') ?? dateToday;
+  const selectedDate = /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) && Number.isFinite(Date.parse(requestedDate)) && new Date(requestedDate).toISOString().slice(0,10) === requestedDate && requestedDate <= dateToday ? requestedDate : dateToday;
+  const setSelectedDate = (value: string) => change('date', value);
+  const wifiStateFilter = (['connected','disconnected'].includes(params.get('wifi') ?? '') ? params.get('wifi') : 'all') as WifiStateFilter;
+  const setWifiStateFilter = (value: WifiStateFilter) => change('wifi', value);
   const [isExporting, setIsExporting] = useState(false);
-  const [revision, setRevision] = useState(0);
-  const [error, setError] = useState('');
-
-  const dateToday = useMemo(() => new Date().toISOString().slice(0,10), []);
-  const [selectedDate, setSelectedDate] = useState<string>(() => new Date().toISOString().slice(0,10));
-
-  useEffect(() => {
-    if (!deviceId) return;
-
-    let alive = true;
-    const load = async () => {
-      setIsLoading(true);
-      setDevice(null);
-      setHourlyPrograms([]);
-      setResourceMetrics([]); setInventory([]); setRunningApps([]); setUsbEvents([]); setWifiEvents([]);
-      setError('');
-
-      try {
-        const [devices, apps, openApps, usb, wifi, resources] = await Promise.all([
-          apiClient.getDevices(),
-          apiClient.getApps(deviceId),
-          apiClient.getRunningApps(deviceId),
-          apiClient.getUsbHistory(deviceId, 250, selectedDate),
-          apiClient.getWifiHistory(deviceId, 250, selectedDate),
-          apiClient.getDeviceResources(deviceId, selectedDate, 2880),
-        ]);
-
-        if (!alive) return;
-        const selected = devices.find((d) => d.device_id === deviceId) || null;
-        if (!selected) throw new Error('El equipo no existe o ya no está disponible.');
-        setDevice(selected);
-        setInventory(apps);
-        setRunningApps(openApps);
-        setUsbEvents(usb);
-        setWifiEvents(wifi);
-        setResourceMetrics(resources);
-
-        const hourlyProgramsData = await apiClient.getHistoryHourlyPrograms(deviceId, selectedDate);
-
-        if (!alive) return;
-        setHourlyPrograms(hourlyProgramsData as HourlyProgramsGroup[]);
-      } catch (err: unknown) {
-        if (alive) setError(err instanceof Error ? err.message : 'No se pudo consultar el detalle. Vuelve a seleccionar el día para reintentar.');
-      } finally {
-        if (alive) setIsLoading(false);
-      }
-    };
-
-    void load();
-    return () => { alive = false; };
-  }, [deviceId, selectedDate, revision]);
+  const [exportError, setExportError] = useState('');
+  const equipment = useRemoteSection(useCallback(async () => {
+    const devices = await apiClient.getDevices();
+    const selected = devices.find(d => d.device_id === deviceId);
+    if (!selected) throw new Error('Equipo no disponible');
+    return selected;
+  }, [deviceId]));
+  const apps = useRemoteSection(useCallback(() => apiClient.getApps(deviceId!), [deviceId]));
+  const openApps = useRemoteSection(useCallback(() => apiClient.getRunningApps(deviceId!), [deviceId]));
+  const usb = useRemoteSection(useCallback(() => apiClient.getUsbHistory(deviceId!,250,selectedDate), [deviceId,selectedDate]));
+  const wifi = useRemoteSection(useCallback(() => apiClient.getWifiHistory(deviceId!,250,selectedDate), [deviceId,selectedDate]));
+  const resources = useRemoteSection(useCallback(() => apiClient.getDeviceResources(deviceId!,selectedDate,2880), [deviceId,selectedDate]));
+  const activity = useRemoteSection(useCallback(() => apiClient.getHistoryHourlyPrograms(deviceId!,selectedDate), [deviceId,selectedDate]));
+  const device = equipment.data;
+  const usbEvents = useMemo(() => usb.data ?? [], [usb.data]);
+  const wifiEvents = useMemo(() => wifi.data ?? [], [wifi.data]);
+  const resourceMetrics = useMemo(() => resources.data ?? [], [resources.data]);
+  const hourlyPrograms = activity.data ?? [];
+  const isLoading = equipment.loading;
+  const error = equipment.error;
+  const refresh = () => {equipment.refresh(); apps.refresh(); openApps.refresh(); usb.refresh(); wifi.refresh(); resources.refresh(); activity.refresh();};
+  const returnQuery = params.get('equipmentQuery') ?? '';
 
   const formatTopProcessCpu = (value?: number) => {
     return Math.round(Math.min(100, Math.max(0, value || 0)));
@@ -250,23 +202,12 @@ export function DeviceDetailPage() {
   }, [usbEvents]);
 
   const wifiEventsWithDuration = useMemo<WifiEventWithDuration[]>(() => {
-    return wifiEvents.map((event: WifiEvent, index: number) => {
-      const startedAtMs = new Date(event.timestamp).getTime();
-      const endedAtMs =
-        index === 0
-          ? Date.now()
-          : new Date(wifiEvents[index - 1].timestamp).getTime();
-
-      const connectedDurationSeconds =
-        event.state === 'connected'
-          ? Math.max(0, Math.floor((endedAtMs - startedAtMs) / 1000))
-          : 0;
-
-      return {
-        ...event,
-        connected_duration_seconds: connectedDurationSeconds,
-      };
-    });
+    const chronological=[...wifiEvents].sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp));
+    return chronological.map((event,index)=>{
+      const next=chronological.slice(index+1).find(row=>row.interface_name===event.interface_name);
+      const seconds=event.state==='connected'&&next ? Math.max(0,Math.floor((Date.parse(next.timestamp)-Date.parse(event.timestamp))/1000)) : null;
+      return {...event,connected_duration_seconds:seconds};
+    }).reverse();
   }, [wifiEvents]);
 
   const filteredWifiEvents = useMemo(() => {
@@ -281,28 +222,6 @@ export function DeviceDetailPage() {
     });
   }, [wifiEventsWithDuration, wifiStateFilter, selectedDate]);
 
-  const currentWifiEvent = useMemo(() => {
-    return wifiEventsWithDuration[0] || null;
-  }, [wifiEventsWithDuration]);
-
-  const wifiTotalsBySsid = useMemo(() => {
-    const totals = new Map<string, number>();
-
-    for (const event of filteredWifiEvents) {
-      if (event.state !== 'connected' || event.connected_duration_seconds <= 0) {
-        continue;
-      }
-
-      const ssidKey = event.ssid?.trim() ? event.ssid.trim() : '(sin SSID)';
-      totals.set(ssidKey, (totals.get(ssidKey) || 0) + event.connected_duration_seconds);
-    }
-
-    return Array.from(totals.entries())
-      .map(([ssid, seconds]) => ({ ssid, seconds }))
-      .sort((a, b) => b.seconds - a.seconds)
-      .slice(0, 6);
-  }, [filteredWifiEvents]);
-
   const formatLongDuration = (seconds?: number) => {
     const safeSeconds = Math.max(0, seconds || 0);
     const hours = Math.floor(safeSeconds / 3600);
@@ -316,6 +235,7 @@ export function DeviceDetailPage() {
   const handleExportCsv = async () => {
     if (!deviceId) return;
     setIsExporting(true);
+    setExportError('');
     try {
       const blob = await apiClient.exportCsv({
         deviceId,
@@ -332,7 +252,7 @@ export function DeviceDetailPage() {
       a.remove();
       window.URL.revokeObjectURL(url);
     } catch {
-      setError('No fue posible exportar CSV.');
+      setExportError('No fue posible exportar la actividad. Comprueba tu conexión y tus permisos, y vuelve a intentarlo.');
     } finally {
       setIsExporting(false);
     }
@@ -346,14 +266,14 @@ export function DeviceDetailPage() {
       subtitle="Recursos, actividad y conexiones del equipo seleccionado."
       actions={
         <button
-          onClick={() => navigate('/dashboard')}
+          onClick={() => navigate(`/dashboard${returnQuery ? `?${returnQuery}` : ''}`)}
           className="rounded-full border border-[var(--palette-dfe7e3)]/50 bg-[var(--palette-17715a)]/10 px-4 py-2 text-xs font-semibold tracking-wide text-[var(--palette-17715a)] hover:border-[var(--palette-dfe7e3)] hover:bg-[var(--palette-17715a)]/20"
         >
           Volver a los equipos
         </button>
       }
     >
-      {device && <div className="device-identity"><span className={device.online?'device-online':'device-offline'}>{device.online?'Conectado':'Sin conexión'}</span><strong>{device.hostname}</strong><span className="muted">Última señal: {new Date(device.last_seen).toLocaleString()}</span><details><summary>Identificación</summary><p>Identificador: {device.device_id}</p><p>MAC: {device.mac_address||'Sin informar'}</p></details><button className="button button-small" disabled={isLoading} onClick={()=>setRevision(v=>v+1)}>{isLoading?'Actualizando…':'Actualizar'}</button></div>}
+      {device && <div className="device-identity"><span className={device.online?'device-online':'device-offline'}>{device.online?'Conectado':'Sin conexión'}</span><strong>{device.hostname}</strong><span className="muted">Última señal: {new Date(device.last_seen).toLocaleString()}</span><details><summary>Identificación</summary><p>Identificador: {device.device_id}</p><p>MAC: {device.mac_address||'Sin informar'}</p></details><button className="button button-small" disabled={isLoading} onClick={refresh}>{isLoading?'Actualizando…':'Actualizar'}</button></div>}
 
       <section className="device-navigation">
         <nav className="device-tabs" aria-label="Secciones del equipo">{([['overview','Resumen'],['activity','Actividad'],['inventory','Aplicaciones'],['resources','Recursos'],['usb','USB'],['wifi','WiFi'],['diagnostic','Diagnóstico']] as [TabKey,string][]).map(([key,label])=><button key={key} className={tabClass(key)} aria-current={tab===key?'page':undefined} onClick={()=>setTab(key)}>{label}</button>)}</nav>
@@ -370,7 +290,7 @@ export function DeviceDetailPage() {
             />
             <button
               onClick={handleExportCsv}
-              disabled={isExporting}
+              disabled={isExporting || apiClient.getRole()==='viewer'} title={apiClient.getRole()==='viewer'?'La exportación requiere un rol operador o administrador':undefined}
               className="rounded-full border border-[var(--palette-dfe7e3)]/40 bg-[var(--palette-31764d)]/10 px-3 py-1.5 font-sans text-[12px] text-[var(--palette-31764d)] hover:border-[var(--palette-dfe7e3)] disabled:opacity-60"
             >
               {isExporting ? 'Exportando…' : 'Exportar actividad'}
@@ -382,7 +302,7 @@ export function DeviceDetailPage() {
           <div className="flex items-center gap-2">
             <span className="font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">Estado</span>
             <select
-              value={wifiStateFilter}
+              aria-label="Estado de conexión WiFi" value={wifiStateFilter}
               onChange={(event: React.ChangeEvent<HTMLSelectElement>) => setWifiStateFilter(event.target.value as WifiStateFilter)}
               className="rounded-full border border-[var(--palette-dfe7e3)] bg-[var(--palette-f5f7f6)] px-3 py-1.5 text-[12px] text-[var(--palette-53685c)]"
             >
@@ -394,7 +314,12 @@ export function DeviceDetailPage() {
         )}
       </section>
 
-      {tab === 'resources' && !error && !isLoading && resourceMetrics.length > 0 && (
+      {([['overview','Actividad del día',activity],['activity','Actividad del día',activity],['resources','Historial de recursos',resources]] as const).map(([section,label,state]) => tab===section && <div key={section}>
+        {state.loading && <p role="status">Consultando {label.toLowerCase()}…</p>}
+        {state.error && <p className="notice notice-warning" role="alert">No se pudo actualizar {label.toLowerCase()}. {state.data ? 'Se conserva la consulta anterior de esta fecha.' : 'No hay datos confirmados para esta consulta.'} <button className="button" disabled={state.loading} onClick={state.refresh}>Reintentar {label.toLowerCase()}</button></p>}
+      </div>)}
+
+      {tab === 'resources' && resourceMetrics.length > 0 && (
         <section className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-[var(--palette-dfe7e3)] bg-[var(--palette-f5f7f6)] px-4 py-2.5">
           <span className="font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">Recursos: {selectedDate}</span>
           <span className="flex items-center gap-1.5 rounded-full border border-[var(--palette-dfe7e3)]/30 bg-[var(--palette-b2433d)]/10 px-2.5 py-1">
@@ -420,232 +345,47 @@ export function DeviceDetailPage() {
 
       {deviceId && tab === 'inventory' && <InventoryStatePanel key={deviceId} deviceId={deviceId} />}
       {deviceId && tab === 'diagnostic' && <><DeviceTelemetryPanel key={deviceId} deviceId={deviceId} />{apiClient.getRole()==='admin' && <AgentCredentialsPanel key={`credentials-${deviceId}`} deviceId={deviceId}/>}</>}
-      {deviceId && tab === 'overview' && !isLoading && !error && <DeviceOverview key={deviceId} deviceId={deviceId} groups={hourlyPrograms as HourGroup[]} onActivity={()=>setTab('activity')} onResources={()=>setTab('resources')} onDiagnostic={()=>setTab('diagnostic')}/>}
-      {deviceId && tab === 'overview' && !isLoading && !error && <SessionActivityPanel key={`${deviceId}-${selectedDate}`} deviceId={deviceId} initialDay={selectedDate} compact/>}
+      {deviceId && tab === 'overview' && !!device && <DeviceOverview key={deviceId} deviceId={deviceId} groups={hourlyPrograms as HourGroup[]} activityKnown={activity.data !== null} onActivity={()=>setTab('activity')} onResources={()=>setTab('resources')} onDiagnostic={()=>setTab('diagnostic')}/>}
+      {deviceId && tab === 'overview' && !!device && <SessionActivityPanel key={`${deviceId}-${selectedDate}`} deviceId={deviceId} initialDay={selectedDate} compact/>}
       {deviceId && tab === 'resources' && <DeviceTelemetryPanel key={deviceId} deviceId={deviceId} resourcesOnly />}
-      {tab === 'activity' && !isLoading && !error && <DeviceActivityExplorer key={`${deviceId}-${selectedDate}`} groups={hourlyPrograms as HourGroup[]}/>}
+      {tab === 'activity' && activity.data !== null && <DeviceActivityExplorer key={`${deviceId}-${selectedDate}`} groups={hourlyPrograms as HourGroup[]}/>}
 
 
-      {tab === 'resources' && !error && !isLoading && deviceId && (
+      {tab === 'resources' && deviceId && (
         <DailyMetricsPanel deviceId={deviceId} endDate={selectedDate} />
       )}
 
-      {error && <section className="notice notice-error" role="alert">{error} <button className="text-button" onClick={() => setRevision(v => v + 1)}>Reintentar</button></section>}
+      {error && <section className="notice notice-error" role="alert">No se pudo consultar el equipo. Puede no estar disponible o no tienes acceso. <button className="text-button" onClick={equipment.refresh}>Reintentar</button></section>}
 
-      {error ? null : isLoading ? (
-        <section className="rounded-2xl border border-[var(--palette-dfe7e3)] bg-[var(--palette-f5f7f6)] px-6 py-10 text-center text-[var(--palette-53685c)]">Consultando datos del equipo…</section>
-      ) : ['inventory','usb','wifi'].includes(tab) ? (
-        <section className="overflow-hidden rounded-2xl border border-[var(--palette-dfe7e3)] bg-[var(--surface)] shadow-sm">
-          {tab === 'inventory' && (
-            <div className="space-y-6">
-              <section className="space-y-3">
-                <div>
-                  <h3 className="text-sm font-semibold text-[var(--palette-53685c)]">Últimas ventanas reportadas</h3>
-                  <p className="text-xs text-[var(--palette-53685c)]">Reportes por sesión de escritorio. Incluso un reporte reciente no confirma que la ventana siga abierta. Los de más de tres minutos se marcan como antiguos.</p>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr>
-                        <th>Aplicacion</th>
-                        <th>Ventanas</th>
-                        <th>Ventana principal</th>
-                        <th>Sesión y reporte</th>
-                        <th>Ruta</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {runningApps.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="py-8 text-center text-[var(--palette-53685c)]">No hay ventanas reportadas. Esto no permite distinguir entre ausencia de ventanas y falta de captura.</td>
-                        </tr>
-                      ) : (
-                        runningApps.map((app: RunningAppInfo) => (
-                          <tr key={app.id}>
-                            <td className="max-w-[260px] truncate text-[12px] text-[var(--palette-53685c)]" title={app.app_name}>{shortAppName(app.app_name)}</td>
-                            <td className="whitespace-nowrap font-sans text-[12px] text-[var(--palette-17715a)]">{app.window_count}</td>
-                            <td className="max-w-[420px] truncate text-[12px] text-[var(--palette-53685c)]" title={app.primary_title || 'Sin titulo'}>{app.primary_title || 'Sin titulo'}</td>
-                            <td className="text-xs"><div>{app.stale === false ? 'Reporte reciente' : app.stale === true ? 'Reporte antiguo' : 'Vigencia sin confirmar'}</div><time dateTime={app.updated_at}>{new Date(app.updated_at).toLocaleString()}</time><div title={app.principal || undefined}>{app.principal || 'Sin atribución de usuario'}</div><div title={app.session_id || undefined}>{app.session_id ? `Sesión ${app.session_id.slice(0, 8)}` : 'Origen heredado'}</div></td>
-                            <td className="max-w-[360px] truncate font-sans text-[12px] text-[var(--palette-53685c)]" title={app.exe_path || ''}>{app.exe_path || 'No disponible'}</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-
-              <section className="space-y-3">
-                <div>
-                  <h3 className="text-sm font-semibold text-[var(--palette-53685c)]">Detecciones heredadas (no confirman instalación actual)</h3>
-                  <p className="text-xs text-[var(--palette-53685c)]">Listado historico de software detectado en el equipo.</p>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr>
-                        <th>Aplicacion</th>
-                        <th>Version</th>
-                        <th>Estado</th>
-                        <th>Hash</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {inventory.length === 0 ? (
-                        <tr>
-                          <td colSpan={4} className="py-8 text-center text-[var(--palette-53685c)]">Sin datos de inventario para este equipo.</td>
-                        </tr>
-                      ) : (
-                        inventory.map((app: AppInfo, idx: number) => (
-                          <tr key={`${app.app_name}-${idx}`}>
-                            <td className="max-w-[360px] truncate text-[12px] text-[var(--palette-53685c)]" title={app.app_name}>{app.app_name}</td>
-                            <td className="text-[12px] text-[var(--palette-53685c)]">{app.version || 'Unknown'}</td>
-                            <td>
-                              <span className={`inline-flex rounded-full px-2.5 py-1 font-sans text-[12px] ${app.verified ? 'border border-[var(--palette-dfe7e3)]/40 bg-[var(--palette-31764d)]/10 text-[var(--palette-31764d)]' : 'border border-red-500/40 bg-red-500/10 text-red-700'}`}>
-                                {app.verified ? 'VERIFIED' : 'UNVERIFIED'}
-                              </span>
-                            </td>
-                            <td className="max-w-[440px] truncate font-sans text-[12px] text-[var(--palette-53685c)]" title={app.exe_hash}>{app.exe_hash}</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            </div>
-          )}
-
-          {tab === 'usb' && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr>
-                    <th>Par</th>
-                    <th>Ultimo evento</th>
-                    <th>Dispositivo</th>
-                    <th>Serial</th>
-                    <th>Identificador</th>
-                    <th>Accion</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {usbSummaryRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="py-8 text-center text-[var(--palette-53685c)]">Sin eventos USB para este equipo.</td>
-                    </tr>
-                  ) : (
-                    usbSummaryRows.map((event: UsbSummaryRow) => (
-                      <tr key={event.key}>
-                        <td className="whitespace-nowrap font-sans text-[12px] text-[var(--palette-53685c)]">
-                          {event.pair_id.split('#').pop()}
-                        </td>
-                        <td className="whitespace-nowrap font-sans text-[12px] text-[var(--palette-53685c)]">{new Date(event.timestamp).toLocaleString()}</td>
-                        <td className="max-w-[380px] truncate text-[12px] text-[var(--palette-53685c)]" title={event.device_name}>{event.device_name}</td>
-                        <td className="max-w-[340px] truncate font-sans text-[12px] text-[var(--palette-53685c)]" title={event.serial_number}>{event.serial_number || 'N/A'}</td>
-                        <td className="max-w-[420px] truncate font-sans text-[12px] text-[var(--palette-53685c)]" title={event.hardware_id}>{event.hardware_id || 'N/A'}</td>
-                        <td>
-                          <span className={`inline-flex rounded-full px-2.5 py-1 font-sans text-[12px] ${event.action === 'IN' ? 'border border-[var(--palette-dfe7e3)]/40 bg-[var(--palette-31764d)]/10 text-[var(--palette-31764d)]' : 'border border-red-500/40 bg-red-500/10 text-red-700'}`}>
-                            {event.action === 'IN' ? 'CONNECTED' : 'DISCONNECTED'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {tab === 'wifi' && (
-            <div className="space-y-3">
-              <div className="grid grid-cols-5 gap-3 rounded-xl border border-[var(--palette-dfe7e3)] bg-[var(--palette-f5f7f6)] px-4 py-3">
-                <div className="col-span-2">
-                  <p className="font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">Red actual</p>
-                  <p className="mt-1 truncate font-display text-base text-[var(--palette-53685c)]" title={currentWifiEvent?.ssid || 'Sin conexion'}>
-                    {currentWifiEvent?.ssid || 'Sin conexion'}
-                  </p>
-                </div>
-                <div>
-                  <p className="font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">Estado</p>
-                  <p className={`mt-1 font-sans text-sm ${currentWifiEvent?.state === 'connected' ? 'text-[var(--palette-31764d)]' : 'text-[var(--palette-97621b)]'}`}>
-                    {(currentWifiEvent?.state || 'unknown').toUpperCase()}
-                  </p>
-                </div>
-                <div>
-                  <p className="font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">Senal</p>
-                  <p className="mt-1 font-sans text-sm text-[var(--palette-17715a)]">{currentWifiEvent?.signal_percent !== undefined ? `${currentWifiEvent.signal_percent}%` : 'N/A'}</p>
-                </div>
-                <div>
-                  <p className="font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">Ultimo cambio</p>
-                  <p className="mt-1 truncate font-sans text-[12px] text-[var(--palette-53685c)]" title={currentWifiEvent?.timestamp}>
-                    {currentWifiEvent ? new Date(currentWifiEvent.timestamp).toLocaleString() : 'N/A'}
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-[var(--palette-dfe7e3)] bg-[var(--palette-f5f7f6)] px-4 py-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <p className="font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">Top redes por tiempo conectado</p>
-                  <span className="font-sans text-[12px] text-[var(--palette-53685c)]">{wifiTotalsBySsid.length} SSID</span>
-                </div>
-
-                {wifiTotalsBySsid.length === 0 ? (
-                  <p className="font-sans text-[12px] text-[var(--palette-53685c)]">Sin tiempo conectado acumulado para el filtro actual.</p>
-                ) : (
-                  <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                    {wifiTotalsBySsid.map((item: { ssid: string; seconds: number }) => (
-                      <div key={item.ssid} className="flex items-center justify-between rounded-lg border border-[var(--palette-dfe7e3)] bg-[var(--palette-f5f7f6)] px-3 py-2">
-                        <p className="max-w-[70%] truncate font-sans text-[12px] text-[var(--palette-53685c)]" title={item.ssid}>{item.ssid}</p>
-                        <p className="font-sans text-[12px] text-[var(--palette-31764d)]">{formatLongDuration(item.seconds)}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr>
-                      <th>Hora</th>
-                      <th>SSID</th>
-                      <th>BSSID</th>
-                      <th>Senal</th>
-                      <th>Duracion conectada</th>
-                      <th>Estado</th>
-                      <th>Interfaz</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredWifiEvents.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="py-8 text-center text-[var(--palette-53685c)]">Sin historial WiFi para el filtro seleccionado.</td>
-                      </tr>
-                    ) : (
-                      filteredWifiEvents.map((event: WifiEventWithDuration, idx: number) => (
-                        <tr key={`${event.timestamp}-${idx}`}>
-                          <td className="whitespace-nowrap font-sans text-[12px] text-[var(--palette-53685c)]">{new Date(event.timestamp).toLocaleString()}</td>
-                          <td className="max-w-[280px] truncate text-[12px] text-[var(--palette-53685c)]" title={event.ssid}>{event.ssid || 'N/A'}</td>
-                          <td className="max-w-[280px] truncate font-sans text-[12px] text-[var(--palette-53685c)]" title={event.bssid}>{event.bssid || 'N/A'}</td>
-                          <td className="whitespace-nowrap font-sans text-[12px] text-[var(--palette-17715a)]">{event.signal_percent !== undefined ? `${event.signal_percent}%` : 'N/A'}</td>
-                          <td className="whitespace-nowrap font-sans text-[12px] text-[var(--palette-31764d)]">{event.state === 'connected' ? formatLongDuration(event.connected_duration_seconds) : '--'}</td>
-                          <td>
-                            <span className={`inline-flex rounded-full px-2.5 py-1 font-sans text-[12px] ${event.state === 'connected' ? 'border border-[var(--palette-dfe7e3)]/40 bg-[var(--palette-31764d)]/10 text-[var(--palette-31764d)]' : 'border border-[var(--palette-dfe7e3)]/40 bg-[var(--palette-97621b)]/10 text-[var(--palette-97621b)]'}`}>
-                              {event.state.toUpperCase()}
-                            </span>
-                          </td>
-                          <td className="max-w-[220px] truncate font-sans text-[12px] text-[var(--palette-53685c)]" title={event.interface_name}>{event.interface_name}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </section>
-      ) : null}
+      {isLoading && !device && <p role="status">Consultando equipo…</p>}
+      {exportError && <p className="notice notice-error" role="alert">{exportError}</p>}
+      {tab === 'inventory' && <>
+        <CollectionTable title="Ventanas reportadas" rows={openApps.data} loading={openApps.loading} error={openApps.error} refresh={openApps.refresh}
+          note="Último reporte por sesión; no confirma que la ventana siga abierta. Los reportes de más de tres minutos son antiguos."
+          searchText={r=>`${r.app_name} ${r.primary_title} ${r.principal} ${r.exe_path}`} columns={[
+            {label:'Aplicación',render:r=>shortAppName(r.app_name)}, {label:'Ventanas',render:r=>r.window_count},
+            {label:'Título',render:r=>r.primary_title||'Sin título'},
+            {label:'Reporte',render:r=><>{r.stale===true?'Antiguo':r.stale===false?'Reciente':'Vigencia sin confirmar'} · {new Date(r.updated_at).toLocaleString()}</>},
+            {label:'Persona / sesión',render:r=><>{r.principal||'Sin atribución'} · {r.session_id||'Origen heredado'}</>},
+            {label:'Ruta',render:r=>r.exe_path||'Sin informar'}]}/>
+        <details className="panel"><summary>Detecciones históricas de aplicaciones</summary><CollectionTable title="Detecciones heredadas" rows={apps.data} loading={apps.loading} error={apps.error} refresh={apps.refresh}
+          note="Estas detecciones no confirman instalación actual. Consulta Software por fuente para conocer el último inventario completo."
+          searchText={r=>`${r.app_name} ${r.version}`} columns={[{label:'Aplicación',render:r=>r.app_name},{label:'Versión',render:r=>r.version||'Sin informar'},{label:'Verificación',render:r=>r.verified?'Verificada':'Sin verificar'},{label:'Hash',render:r=>r.exe_hash}]}/></details>
+      </>}
+      {tab === 'usb' && <CollectionTable title="Conexiones USB" rows={usb.data === null ? null : usbSummaryRows} loading={usb.loading} error={usb.error} refresh={usb.refresh}
+        note="Hasta 250 eventos de la fecha UTC seleccionada; búsqueda y paginación sobre esos eventos. Los horarios se muestran en tu zona local."
+        searchText={r=>`${r.device_name} ${r.serial_number} ${r.hardware_id}`} columns={[
+          {label:'Fecha y hora',render:r=>new Date(r.timestamp).toLocaleString()},{label:'Dispositivo',render:r=>r.device_name},
+          {label:'Serie',render:r=>r.serial_number||'Sin informar'},{label:'Hardware',render:r=>r.hardware_id||'Sin informar'},
+          {label:'Evento',render:r=>r.action==='IN'?'Conexión':'Desconexión'}]}/>}
+      {tab === 'wifi' && <CollectionTable title="Conexiones WiFi" rows={wifi.data === null ? null : filteredWifiEvents} loading={wifi.loading} error={wifi.error} refresh={wifi.refresh}
+        note="Hasta 250 eventos del día UTC. Son conexiones reportadas, no una confirmación de la red actual. Duración hasta el siguiente evento de la misma interfaz; sin evento posterior no se estima duración. Horarios en tu zona local."
+        searchText={r=>`${r.ssid} ${r.bssid} ${r.interface_name}`} columns={[
+          {label:'Fecha y hora',render:r=>new Date(r.timestamp).toLocaleString()},{label:'Red',render:r=>r.ssid||'Sin informar'},
+          {label:'BSSID',render:r=>r.bssid||'Sin informar'},{label:'Señal',render:r=>r.signal_percent==null?'Sin informar':`${r.signal_percent}%`},
+          {label:'Duración reportada',render:r=>r.connected_duration_seconds==null?'Sin cierre observado':formatLongDuration(r.connected_duration_seconds)},
+          {label:'Estado',render:r=>r.state==='connected'?'Conectado':r.state==='disconnected'?'Desconectado':'Sin confirmar'},
+          {label:'Interfaz',render:r=>r.interface_name||'Sin informar'}]}/>}
     </AppShell>
   );
 }

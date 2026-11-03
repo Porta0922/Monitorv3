@@ -1,6 +1,6 @@
 # Operación del dashboard y preparación de versiones
 
-Implementación: 2026-10-28. Pendiente de validación P4. No se ha aplicado a producción.
+Actualizado: 2026-11-03. Ayuda integrada en `/help`; ver [UX vigente y evidencia](DASHBOARD_UX.md). Comprobación focalizada completada; aceptación integrada pendiente. No se ha aplicado a producción.
 
 ## Incorporación y organización
 
