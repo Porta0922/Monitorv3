@@ -214,4 +214,4 @@ Servidor y dashboard nuevos desplegados, 17 migraciones aplicadas y agente Windo
 
 Piloto Windows 0.1.0: recuperación automática del servicio en 16 s tras caída; corte RabbitMQ de 75 s con 11 eventos pendientes que luego se entregaron, cola final cero e identidad conservada. No sustituye reinicio completo ni desconexión prolongada. La salud de sesiones se consolida cada cinco minutos, por lo que puede estar vacía en el primer reporte.
 
-Publicación autorizada en el repositorio existente: [alcance y credenciales históricas pendientes](docs/GITHUB_PUBLICATION.md). Se retiraron credenciales heredadas del código actual; su revocación/rotación sigue pendiente. Se conserva el historial por decisión del usuario. Esta publicación de código piloto no certifica producción.
+Código piloto publicado en `Monitorv3/main` (commit `7217239`): [alcance y credenciales históricas pendientes](docs/GITHUB_PUBLICATION.md). Se retiraron credenciales heredadas del código actual; su revocación/rotación sigue pendiente. Se conserva el historial por decisión del usuario. Esta publicación de código piloto no certifica producción.

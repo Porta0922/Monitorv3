@@ -1,3 +1,9 @@
+## 2026-11-03 — Código publicado en Monitorv3/main
+
+Commit publicado: 721723970d59b3f88451a13d96e0d3e6207fdd84. Árbol remoto verificado idéntico al preparado localmente; historial conservado y copia local sincronizada en main. Preflight remoto aprobado. No se creó release ni tag.
+
+Primera ejecución de Storage retention: siete casos de almacenamiento aprobados; integración psql falló porque su fixture omitía 0010_input_quality. Se añadió esa migración al fixture y usuario explícito al healthcheck de PostgreSQL. La corrección no modifica el esquema del piloto, ya migrado. Resultado del nuevo CI pendiente de consultar; no se presenta toda la campaña como aprobada. Token histórico y aceptación productiva siguen pendientes.
+
 ## 2026-11-03 — Autorización de actualización del repositorio existente
 
 Usuario autoriza subir el árbol actual limpio a Monitorv3/main conservando historial. No se crea repositorio nuevo ni se hace force-push. Token histórico y credenciales antiguas pendientes de revocación/rotación; no se afirma que estén invalidados. Preflight del árbol actual aprobado; credenciales, DB e instaladores privados excluidos. La subida no constituye release ni aprobación productiva. Ver GITHUB_PUBLICATION.md y el resultado de CI asociado al commit remoto.

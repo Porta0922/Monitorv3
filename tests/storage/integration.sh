@@ -14,6 +14,7 @@ for table in ('devices', 'node_resource_metrics', 'input_activity_metrics'):
     print(ddl.group(0) + ';')
 PY
 psql -X -v ON_ERROR_STOP=1 -f "$ROOT/server/migrations/0002_daily_metrics.sql"
+psql -X -v ON_ERROR_STOP=1 -f "$ROOT/server/migrations/0010_input_quality.sql"
 
 psql -X -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO devices(device_id, hostname, last_seen)
