@@ -22,6 +22,7 @@ pub struct KeystrokeStats {
 
 /// Input activity detector and keystroke tracker
 pub struct KeystrokeTracker {
+    idle_threshold_seconds: AtomicU64,
     keystroke_count: AtomicU64,
     mouse_moves_count: AtomicU64,
     mouse_clicks_count: AtomicU64,
@@ -45,6 +46,7 @@ impl KeystrokeTracker {
         let now = Utc::now();
         let ts = now.timestamp();
         Self {
+            idle_threshold_seconds: AtomicU64::new(IDLE_THRESHOLD_SECONDS),
             keystroke_count: AtomicU64::new(0),
             mouse_moves_count: AtomicU64::new(0),
             mouse_clicks_count: AtomicU64::new(0),
@@ -57,6 +59,10 @@ impl KeystrokeTracker {
                 last_idle_accumulation_time: now,
             }),
         }
+    }
+
+    pub fn set_idle_threshold(&self, seconds: u64) {
+        self.idle_threshold_seconds.store(seconds.clamp(1, 86400), Ordering::Relaxed);
     }
 
     /// Record a keystroke event (Sync version for hooks)
@@ -121,7 +127,7 @@ impl KeystrokeTracker {
             (now.timestamp() - last_ts).max(0) as u64
         };
 
-        if seconds_idle >= IDLE_THRESHOLD_SECONDS {
+        if seconds_idle >= self.idle_threshold_seconds.load(Ordering::Relaxed) {
             status.is_idle = true;
             status.idle_duration_seconds = seconds_idle;
             
@@ -206,11 +212,13 @@ pub mod windows_input_listener {
     use std::sync::mpsc;
     use std::sync::OnceLock;
     use std::thread;
+    use crate::native_worker::NativeWorker;
+    use std::sync::atomic::Ordering;
     use std::time::Duration;
     use tokio::runtime::Handle;
     use winapi::um::winuser::{
         SetWindowsHookExA, UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL,
-        CallNextHookEx, HC_ACTION, GetMessageW, TranslateMessage, DispatchMessageW, MSG,
+        CallNextHookEx, HC_ACTION, TranslateMessage, DispatchMessageW, MSG,
         WM_KEYDOWN, WM_SYSKEYDOWN, WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MOUSEMOVE,
     };
 
@@ -218,11 +226,11 @@ pub mod windows_input_listener {
     static TOKIO_HANDLE: OnceLock<Handle> = OnceLock::new();
 
     /// Initialize Windows input listener
-    pub async fn init_input_listener(tracker: Arc<KeystrokeTracker>) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn init_input_listener(tracker: Arc<KeystrokeTracker>) -> Result<NativeWorker, Box<dyn std::error::Error>> {
         let runtime_handle = Handle::current();
         let (init_tx, init_rx) = mpsc::channel::<Result<(), String>>();
 
-        thread::spawn(move || {
+        let worker = NativeWorker::spawn(move |stopping| {
             unsafe {
                 let _ = KEYSTROKE_TRACKER.set(tracker);
                 let _ = TOKIO_HANDLE.set(runtime_handle);
@@ -256,9 +264,13 @@ pub mod windows_input_listener {
 
                 // Keep this thread alive and pumping messages so low-level hooks keep receiving events.
                 let mut msg: MSG = std::mem::zeroed();
-                while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
-                    TranslateMessage(&msg);
-                    DispatchMessageW(&msg);
+                while !stopping.load(Ordering::Acquire) {
+                    while winapi::um::winuser::PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, winapi::um::winuser::PM_REMOVE) > 0 {
+                        if msg.message == winapi::um::winuser::WM_QUIT { stopping.store(true, Ordering::Release); break; }
+                        TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
+                    thread::sleep(Duration::from_millis(10));
                 }
 
                 UnhookWindowsHookEx(mouse_hook);
@@ -267,7 +279,7 @@ pub mod windows_input_listener {
         });
 
         match init_rx.recv_timeout(Duration::from_secs(3)) {
-            Ok(Ok(())) => Ok(()),
+            Ok(Ok(())) => Ok(worker),
             Ok(Err(err)) => Err(err.into()),
             Err(_) => Err("Timed out initializing Windows input hooks".into()),
         }
@@ -315,33 +327,60 @@ pub mod windows_input_listener {
 #[cfg(target_os = "linux")]
 pub mod linux_input_listener {
     use super::*;
-    use std::sync::Arc;
-    use rdev::{listen, EventType};
+    use std::{sync::Arc, io::{Read, Write}, process::{Command, Stdio}, os::unix::process::CommandExt};
 
-    pub async fn init_input_listener(tracker: Arc<KeystrokeTracker>) -> Result<(), Box<dyn std::error::Error>> {
-        tracing::info!("Initializing Linux input listener (rdev)...");
-        
-        std::thread::spawn(move || {
-            tracing::info!("Starting rdev listener thread...");
-            if let Err(error) = listen(move |event| {
-                match event.event_type {
-                    EventType::KeyPress(_) => {
-                        tracker.record_keystroke_sync();
-                    }
-                    EventType::MouseMove { .. } => {
-                        tracker.record_mouse_movement_sync();
-                    }
-                    EventType::ButtonPress(_) => {
-                        tracker.record_mouse_click_sync();
-                    }
-                    _ => {}
-                }
-            }) {
-                tracing::error!("FATAL: Error in Linux input listener: {:?}", error);
-            }
-        });
-        
+    // rdev has no cancellation API. Isolate it in an owned child, never a detached
+    // thread: Stop terminates/reaps that child and closes its anonymous pipe.
+    pub fn worker_main() -> Result<(), Box<dyn std::error::Error>> {
+        if std::env::var_os("DISPLAY").is_none() {return Err("X11 display required".into());}
+        rdev::listen(move |event| {
+            let byte=match event.event_type {
+                rdev::EventType::KeyPress(_)=>b'K',
+                rdev::EventType::MouseMove{..}=>b'M',
+                rdev::EventType::ButtonPress(_)=>b'C',
+                _=>return,
+            };
+            // Only aggregate-event categories cross the pipe; no key names/text.
+            if std::io::stdout().write_all(&[byte]).is_err() {std::process::exit(0);}
+        }).map_err(|e|format!("X11 input listener failed: {e:?}"))?;
         Ok(())
+    }
+
+    pub async fn init_input_listener(tracker: Arc<KeystrokeTracker>) -> Result<crate::native_worker::NativeWorker, Box<dyn std::error::Error>> {
+        let mut command=Command::new(std::env::current_exe()?);
+        command.arg("--internal-x11-input-worker").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+        unsafe {
+            command.pre_exec(|| {
+                let parent=libc::getppid();
+                if libc::prctl(libc::PR_SET_PDEATHSIG,libc::SIGKILL)!=0 {return Err(std::io::Error::last_os_error());}
+                if parent==1 || libc::getppid()!=parent {return Err(std::io::Error::other("Input parent exited"));}
+                Ok(())
+            });
+        }
+        let mut child=command.spawn()?;
+        let mut output=child.stdout.take().ok_or("Input pipe missing")?;
+        crate::runtime::set_input_diagnostic(false, "waiting_for_first_event", None);
+        Ok(crate::native_worker::NativeWorker::spawn(move |stop| {
+            let reader=std::thread::spawn(move || {
+                let mut bytes=[0u8;256];
+                while let Ok(count)=output.read(&mut bytes) {
+                    if count==0 {break;}
+                    crate::runtime::mark_input_available();
+                    for byte in &bytes[..count] {
+                        match byte {b'K'=>tracker.record_keystroke_sync(),b'M'=>tracker.record_mouse_movement_sync(),b'C'=>tracker.record_mouse_click_sync(),_=>{}}
+                    }
+                }
+            });
+            while !stop.load(Ordering::Acquire) {
+                match child.try_wait() {
+                    Ok(None)=>std::thread::sleep(std::time::Duration::from_millis(25)),
+                    Ok(Some(status))=>{crate::runtime::set_input_diagnostic(false,"failed",Some(format!("X11 input worker exited: {status}")));break;},
+                    Err(error)=>{crate::runtime::set_input_diagnostic(false,"failed",Some(error.to_string()));break;}
+                }
+            }
+            let _=child.kill(); let _=child.wait(); let _=reader.join();
+            if stop.load(Ordering::Acquire) {crate::runtime::set_input_diagnostic(false,"stopped",None);}
+        }))
     }
 }
 

@@ -130,6 +130,7 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
             }
             
             if let Some(current) = monitoring.capture_active_window() {
+                if crate::capture_diagnostics::latest("window_activity")["state"]!="capture_error" {crate::capture_diagnostics::record("window_activity", "capture_ok", None);}
                 let (current_app, current_title) = sanitize_activity_fields(&current.app_name, &current.window_title);
 
                 if let Some((last_app, last_title, _started_at)) = &last_window {
@@ -195,6 +196,7 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
                     last_report_instant = Some(now_instant);
                 }
             } else {
+
                 // No window in focus: update last_report_instant so we don't accumulate this time
                 // to the next window that gets focus.
                 let now_instant = Instant::now();

@@ -1,209 +1,46 @@
-import { useState, useEffect } from 'react';
-import { apiClient } from '../api/client';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
-import type { SecurityAlert, DeviceResourcePeak } from '../types';
-import { useNavigate } from 'react-router-dom';
-
-interface DeviceMeta {
-  nodeName: string;
-  macAddress: string;
-}
-
+import { Icon } from '../components/Icon';
+import { apiClient } from '../api/client';
+import type { Device, SecurityAlert } from '../types';
+const labels: Record<string, string> = { CRITICAL: 'Crítica', HIGH: 'Alta', MEDIUM: 'Media', LOW: 'Baja' };
+const order: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 export function AlertsPage() {
-  const navigate = useNavigate();
-  const [alerts, setAlerts] = useState<SecurityAlert[]>([]);
-  const [resourcePeaks, setResourcePeaks] = useState<DeviceResourcePeak[]>([]);
-  const [deviceNames, setDeviceNames] = useState<Map<string, string>>(new Map());
-  const [deviceMeta, setDeviceMeta] = useState<Map<string, DeviceMeta>>(new Map());
-  const [resolvingIds, setResolvingIds] = useState<Set<number>>(new Set());
-  const [isLoading, setIsLoading] = useState(true);
-
+  const [alerts, setAlerts] = useState<SecurityAlert[] | null>(null);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [resolved, setResolved] = useState(false);
+  const [severity, setSeverity] = useState('all');
+  const [query, setQuery] = useState('');
+  const [revision, setRevision] = useState(0);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState('');
+  const [selected, setSelected] = useState<SecurityAlert | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [actionError, setActionError] = useState('');
+  const [notice, setNotice] = useState('');
+  const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    load();
-  }, []);
-
-  const load = async () => {
-    try {
-      setIsLoading(true);
-      const [alertsData, peaksData, devicesData] = await Promise.all([
-        apiClient.getAlerts(undefined, false).catch(() => [] as SecurityAlert[]),
-        apiClient.getResourcePeaks(50).catch(() => [] as DeviceResourcePeak[]),
-        apiClient.getDevices().catch(() => []),
-      ]);
-      setAlerts(alertsData);
-      setResourcePeaks(peaksData as DeviceResourcePeak[]);
-      setDeviceNames(new Map(devicesData.map((d) => [d.device_id, d.nickname || d.hostname])));
-      setDeviceMeta(
-        new Map(
-          devicesData.map((d) => [
-            d.device_id,
-            {
-              nodeName: d.nickname || d.hostname || d.device_id.slice(0, 8),
-              macAddress: d.mac_address || 'N/A',
-            },
-          ])
-        )
-      );
-    } catch (err) {
-      console.error('Error loading alerts:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleResolveAlert = async (alertId: number) => {
-    if (resolvingIds.has(alertId)) return;
-
-    try {
-      setResolvingIds((prev) => new Set(prev).add(alertId));
-      await apiClient.resolveAlert(alertId);
-      setAlerts((prev) => prev.filter((alert) => alert.id !== alertId));
-    } catch (err) {
-      console.error('Error resolving alert:', err);
-    } finally {
-      setResolvingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(alertId);
-        return next;
-      });
-    }
-  };
-
-  const severityBadge = (severity: string) => {
-    const map: Record<string, string> = {
-      CRITICAL: 'border-red-500/50 bg-red-500/10 text-red-300',
-      HIGH:     'border-[#ff9f1a]/50 bg-[#ff9f1a]/10 text-[#ff9f1a]',
-      MEDIUM:   'border-[#ffd54a]/50 bg-[#ffd54a]/10 text-[#ffd54a]',
-      LOW:      'border-[#00d9ff]/50 bg-[#00d9ff]/10 text-[#00d9ff]',
-    };
-    return `inline-flex rounded-full border px-2.5 py-0.5 font-mono text-[10px] ${map[severity] ?? 'border-[#223462] text-[#8ea0cf]'}`;
-  };
-
-  // Resource peaks above threshold (CPU >80% or RAM >88%)
-  const hotPeaks = resourcePeaks.filter(
-    (p) => (p.peak_cpu_percent || 0) > 80 || (p.peak_memory_percent || 0) > 88
-  );
-
-  return (
-    <AppShell
-      currentPage="alerts"
-      title="Alertas de Seguridad"
-      subtitle="Seguridad y picos de recursos por nodo"
-      noScroll
-      actions={
-        <button
-          onClick={load}
-          className="rounded-full border border-[#00d9ff]/50 bg-[#00d9ff]/10 px-3 py-1.5 font-mono text-[10px] text-[#00d9ff] hover:border-[#00d9ff]"
-        >
-          Actualizar
-        </button>
-      }
-    >
-      <div className="flex h-[calc(100vh-190px)] flex-col gap-4 overflow-hidden">
-
-        {/* Resource peaks strip */}
-        {hotPeaks.length > 0 && (
-          <section className="shrink-0 rounded-2xl border border-[#ff5f7a]/30 bg-[linear-gradient(160deg,#1f0a14,#0b1329)] p-4 shadow-[0_10px_22px_rgba(0,0,0,0.3)]">
-            <div className="mb-3 flex items-center gap-3">
-              <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#ff8ea0]">Picos de recursos — hoy</p>
-              <span className="rounded-full border border-[#ff5f7a]/40 bg-[#ff5f7a]/10 px-2.5 py-0.5 font-mono text-[10px] text-[#ff8ea0]">
-                {hotPeaks.length} nodos
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {hotPeaks.map((peak) => (
-                <button
-                  key={peak.device_id}
-                  onClick={() => navigate(`/devices/${peak.device_id}`)}
-                  className="flex flex-col gap-1.5 rounded-xl border border-[#ff5f7a]/30 bg-[#0a122a] px-3 py-2 text-left hover:border-[#ff5f7a]/60"
-                >
-                  <p className="font-mono text-[11px] text-[#dce6ff]">
-                    {deviceNames.get(peak.device_id) || peak.device_id.slice(0, 8)}
-                  </p>
-                  <div className="flex gap-3">
-                    <span className="flex items-center gap-1">
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#ff5f7a]" />
-                      <span className="font-mono text-[10px] text-[#ff8ea0]">CPU {Math.round(peak.peak_cpu_percent || 0)}%</span>
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#00d9ff]" />
-                      <span className="font-mono text-[10px] text-[#7deeff]">RAM {Math.round(peak.peak_memory_percent || 0)}%</span>
-                    </span>
-                  </div>
-                  {peak.top_process_name && (
-                    <p className="font-mono text-[9px] text-[#5a6a90]">▸ {peak.top_process_name}</p>
-                  )}
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Security alerts table */}
-        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-[#1a2748] bg-[linear-gradient(165deg,#0f1d43,#0b1329)] shadow-[0_14px_30px_rgba(0,0,0,0.35)]">
-          <div className="flex shrink-0 items-center justify-between border-b border-[#20315a] px-5 py-3">
-            <div className="flex items-center gap-3">
-              <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#8ea0cf]">Alertas de seguridad</p>
-              <span className="rounded-full border border-[#ff5f7a]/40 bg-[#ff5f7a]/10 px-2.5 py-0.5 font-mono text-[10px] text-[#ff8ea0]">
-                {alerts.length}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-auto">
-            {isLoading ? (
-              <p className="py-10 text-center font-mono text-[11px] text-[#5a6a90]">Cargando alertas...</p>
-            ) : alerts.length === 0 ? (
-              <p className="py-10 text-center font-mono text-[11px] text-[#00ff88]">Sin alertas activas.</p>
-            ) : (
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="sticky top-0 z-10 border-b border-[#20315a] bg-[#0a122a]">
-                    <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Severidad</th>
-                    <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Tipo</th>
-                    <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Nodo</th>
-                    <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">MAC</th>
-                    <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Descripcion</th>
-                    <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">App</th>
-                    <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Fecha</th>
-                    <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Accion</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {alerts.map((alert) => (
-                    <tr key={alert.id} className="border-b border-[#1a2748] hover:bg-[#0f1c3a]">
-                      <td className="px-5 py-2.5">
-                        <span className={severityBadge(alert.severity)}>{alert.severity}</span>
-                      </td>
-                      <td className="px-5 py-2.5 font-mono text-[10px] text-[#8ea0cf]">{alert.alert_type}</td>
-                      <td className="px-5 py-2.5 font-mono text-[11px] text-[#dce6ff]">
-                        {deviceMeta.get(alert.device_id)?.nodeName || deviceNames.get(alert.device_id) || alert.device_id.slice(0, 8)}
-                      </td>
-                      <td className="px-5 py-2.5 font-mono text-[10px] text-[#8ea0cf]">
-                        {deviceMeta.get(alert.device_id)?.macAddress || 'N/A'}
-                      </td>
-                      <td className="max-w-[320px] truncate px-5 py-2.5 font-mono text-[11px] text-[#dce6ff]">{alert.description}</td>
-                      <td className="px-5 py-2.5 font-mono text-[10px] text-[#8ea0cf]">{alert.app_name || '—'}</td>
-                      <td className="px-5 py-2.5 font-mono text-[10px] text-[#7c90c1]">
-                        {new Date(alert.created_at).toLocaleString()}
-                      </td>
-                      <td className="px-5 py-2.5">
-                        <button
-                          onClick={() => handleResolveAlert(alert.id)}
-                          disabled={resolvingIds.has(alert.id)}
-                          className="rounded-full border border-[#00ff88]/40 bg-[#00ff88]/10 px-3 py-1 font-mono text-[10px] text-[#00ff88] hover:border-[#00ff88] disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {resolvingIds.has(alert.id) ? 'Resolviendo...' : 'Resolver'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </section>
-      </div>
-    </AppShell>
-  );
+    let alive = true;
+    setBusy(true); setError(''); setAlerts(null);
+    Promise.allSettled([apiClient.getAlerts(undefined, resolved), apiClient.getDevices()] as const).then(([result, fleet]) => {
+      if (!alive) return;
+      if (result.status === 'fulfilled') setAlerts(result.value); else setError('No se pudieron consultar las alertas. Reintenta para conocer su estado.');
+      if (fleet.status === 'fulfilled') setDevices(fleet.value);
+      setBusy(false);
+    });
+    return () => { alive = false; };
+  }, [resolved, revision]);
+  useEffect(() => { if (selected) dialog.current?.showModal(); else dialog.current?.close(); }, [selected]);
+  const names = new Map(devices.map(d => [d.device_id, d.nickname || d.hostname]));
+  const visible = useMemo(() => (alerts ?? []).filter(a => (severity === 'all' || a.severity === severity) && `${a.alert_type} ${a.description} ${a.device_id} ${devices.find(d => d.device_id === a.device_id)?.hostname ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a, b) => (order[a.severity] ?? 9) - (order[b.severity] ?? 9)), [alerts, severity, query, devices]);
+  return <AppShell currentPage="alerts" title="Alertas" subtitle="Prioriza incidentes, consulta su contexto y registra su resolución." actions={<button className="button" disabled={busy} onClick={() => setRevision(v => v + 1)}><Icon name="refresh" />Actualizar</button>}>
+    {notice && <p className="notice notice-success" role="status">{notice}</p>}{error && <p className="notice notice-error" role="alert">{error}</p>}
+    <section className="panel"><div className="panel-header"><div><p className="eyebrow">Seguimiento de incidentes</p><h2>{resolved ? 'Alertas resueltas' : 'Alertas abiertas'}</h2></div><span className="muted">{alerts === null ? 'Sin consulta disponible' : `${visible.length} resultados`}</span></div>
+      <div className="fleet-toolbar"><label className="search-field"><Icon name="search" /><span className="sr-only">Buscar alertas</span><input type="search" placeholder="Buscar tipo, descripción o equipo…" value={query} onChange={e => setQuery(e.target.value)} /></label><label className="sort-field">Severidad<select value={severity} onChange={e => setSeverity(e.target.value)}><option value="all">Todas</option>{Object.entries(labels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
+      <div className="filter-tabs"><button aria-pressed={!resolved} className={!resolved ? 'active' : ''} onClick={() => setResolved(false)}>Abiertas</button><button aria-pressed={resolved} className={resolved ? 'active' : ''} onClick={() => setResolved(true)}>Resueltas</button></div>
+      {busy ? <div className="empty-state" role="status">Consultando alertas…</div> : error ? <div className="empty-state"><Icon name="shield" /><h3>Estado no disponible</h3><button className="button" onClick={() => setRevision(v => v + 1)}>Reintentar</button></div> : visible.length === 0 ? <div className="empty-state"><Icon name="shield" /><h3>Sin alertas en esta vista</h3><p>{severity !== 'all' || query ? 'Cambia los filtros para ampliar la búsqueda.' : 'No hay registros para el estado seleccionado.'}</p></div> : <div className="table-scroll" role="region" aria-label="Alertas" tabIndex={0}><table><thead><tr><th scope="col">Severidad</th><th scope="col">Incidente</th><th scope="col">Equipo</th><th scope="col">Fecha local</th><th scope="col">Acción</th></tr></thead><tbody>{visible.map(alert => <tr key={alert.id}><td><span className={`severity severity-${alert.severity.toLowerCase()}`}>{labels[alert.severity] ?? alert.severity}</span></td><td><strong>{alert.alert_type.replaceAll('_', ' ')}</strong><p className="muted" style={{ maxWidth: 420 }}>{alert.description}</p>{alert.app_name && <span className="cell-secondary">{alert.app_name}</span>}</td><td><Link to={`/devices/${alert.device_id}`}>{names.get(alert.device_id) ?? alert.device_id.slice(0, 8)}</Link></td><td>{new Date(alert.created_at).toLocaleString()}</td><td>{alert.resolved ? <span className="status-badge online">Resuelta</span> : <button className="button button-small" onClick={() => { setSelected(alert); setActionError(''); }}>Resolver</button>}</td></tr>)}</tbody></table></div>}
+    </section>
+    <dialog ref={dialog} className="action-dialog" aria-labelledby="resolve-title" onCancel={e => { if (saving) e.preventDefault(); }} onClose={() => setSelected(null)}><header><h2 id="resolve-title">Resolver alerta</h2><button className="icon-button" aria-label="Cerrar" disabled={saving} onClick={() => setSelected(null)}><Icon name="close" /></button></header><p>{selected?.description}</p><p className="field-note" style={{ margin: '16px 0' }}>La alerta pasará al historial de resueltas. Confirma después de revisar el incidente.</p>{actionError && <p className="notice notice-error" role="alert">{actionError}</p>}<button className="button button-primary" disabled={saving} onClick={async () => { if (!selected || saving) return; setSaving(true); setActionError(''); try { await apiClient.resolveAlert(selected.id); setNotice(`Alerta #${selected.id} marcada como resuelta.`); setSelected(null); setRevision(v => v + 1); } catch { setActionError('No se pudo confirmar la resolución. Actualiza la lista antes de repetirla.'); } finally { setSaving(false); } }}>{saving ? 'Guardando…' : 'Confirmar resolución'}</button></dialog>
+  </AppShell>;
 }

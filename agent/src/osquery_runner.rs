@@ -168,19 +168,20 @@ impl OsqueryRunner {
 
     pub async fn scan_due(&mut self) -> Vec<OsqueryFinding> {
         let Some(osqueryi) = Self::find_osqueryi() else {
+            crate::capture_diagnostics::record("security_osquery","capture_error",Some("osqueryi is not installed or not discoverable"));
             tracing::debug!("osqueryi not found, skipping security scan");
             return vec![];
         };
 
         let now = Utc::now();
-        let mut findings = Vec::new();
+        let mut findings = Vec::new();let mut attempted=false;let mut error=None;
 
         for query in QUERIES {
             if !self.is_due(query, now) {
                 continue;
             }
 
-            self.last_run.insert(query.name, now);
+            attempted=true;self.last_run.insert(query.name, now);
 
             match Self::run_query(&osqueryi, query).await {
                 Ok(rows) if !rows.is_empty() => {
@@ -197,11 +198,13 @@ impl OsqueryRunner {
                 }
                 Ok(_) => {}
                 Err(e) => {
+                    error=Some(format!("{}: {}",query.name,e));
                     tracing::debug!("osquery '{}' error: {}", query.name, e);
                 }
             }
         }
 
+        if attempted {crate::capture_diagnostics::record("security_osquery",if error.is_some() {"capture_error"} else {"capture_ok"},error.as_deref());}
         findings
     }
 

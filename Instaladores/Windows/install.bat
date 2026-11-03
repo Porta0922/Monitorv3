@@ -50,8 +50,8 @@ if not exist "%~dp0agent-config.json" (
 REM ---- Load configuration ----
 set AGENT_AUTH_TOKEN=change-me-in-production
 set AGENT_OFFLINE_CACHE_KEY=replace-with-32-byte-cache-key
-set AGENT_SERVER_URL=http://10.30.0.123:3000
-set RABBITMQ_URL=amqp://eclub:eCLUB123@10.30.0.123:5672/%%2f
+set AGENT_SERVER_URL=http://monitor.example.invalid:3000
+set RABBITMQ_URL=amqp://CHANGE_USER:CHANGE_PASSWORD@monitor.example.invalid:5672/%%2f
 
 if exist "%~dp0agent-config.json" (
     powershell -NoProfile -Command "$c = Get-Content '%~dp0agent-config.json' | ConvertFrom-Json; if ($c.agent.authToken) { Set-Content -Path (Join-Path $env:TEMP 'am_auth.txt') -Value $c.agent.authToken } if ($c.agent.offlineCacheKey) { Set-Content -Path (Join-Path $env:TEMP 'am_cachekey.txt') -Value $c.agent.offlineCacheKey } if ($c.server.url) { Set-Content -Path (Join-Path $env:TEMP 'am_server.txt') -Value $c.server.url } if ($c.rabbitmq.url) { Set-Content -Path (Join-Path $env:TEMP 'am_rabbit.txt') -Value $c.rabbitmq.url }" >nul 2>&1

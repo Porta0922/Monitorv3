@@ -1,15 +1,8 @@
 use std::sync::Arc;
 use crate::usb_file_copy_detection::UsbFileCopyMonitor;
-use crate::is_running_in_session_0;
 use super::{TaskContext, TaskInterval, live_sleep};
 
 pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
-    let is_session_0 = is_running_in_session_0();
-    if cfg!(windows) && is_session_0 {
-        tracing::info!("Skipping USB copy detection task (handled by user agent)");
-        return tokio::spawn(std::future::pending::<()>());
-    }
-
     tokio::spawn(async move {
         let mut detector = UsbFileCopyMonitor::new(900);
 
@@ -19,8 +12,9 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
             // Wider lookback/cap helps on larger USB volumes where recursive scans
             // can be slower and recent writes might otherwise fall out of the window.
             let findings = match detector.scan_recent_writes(1800, 200).await {
-                Ok(items) => items,
+                Ok(items) => {crate::capture_diagnostics::record("usb_copy","capture_ok",None);items},
                 Err(e) => {
+                    crate::capture_diagnostics::record("usb_copy","capture_error",Some(&e.to_string()));
                     tracing::warn!("USB copy detector scan failed: {}", e);
                     continue;
                 }

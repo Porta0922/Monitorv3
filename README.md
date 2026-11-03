@@ -1,284 +1,217 @@
-# ActivityMonitor Enterprise v3
+# Monitor — Supervisión de equipos de oficina
 
-[![Version](https://img.shields.io/badge/version-3.3.2-blue.svg)](CHANGELOG.md)
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
-[![License](https://img.shields.io/badge/license-Enterprise-red.svg)]()
+**Estado: piloto controlado; todavía no aprobado para producción.**
 
-*Actualizado: 20 de Mayo, 2026*
+**Agente piloto instalado: 0.1.0, sin publicación estable.** Actualizado: 2026-11-03.
 
-Sistema empresarial de monitoreo de actividad, auditoría de endpoints y seguridad distribuida de alto rendimiento.
+Monitor reúne recursos, actividad de aplicaciones, inventario y eventos de computadoras de oficina. El agente se instala en cada equipo; el servidor central recibe la información y el dashboard permite consultarla. RabbitMQ se mantiene como transporte de eventos.
 
-## 🚀 Vista General
+La nueva numeración comienza en 0.1.0. El piloto local fue reinstalado desde cero por autorización del usuario, descartando los datos 3.4.0. El MSI nuevo es privado y sin firma; los artefactos antiguos 3.x no deben reutilizarse. Esto no valida la migración que conserva datos de otras instalaciones. Consulta [versionado](docs/VERSIONING.md).
 
-ActivityMonitor Enterprise v3 es una solución robusta y multiplataforma diseñada para la supervisión analítica y de seguridad en infraestructuras corporativas:
-
-- **Agente Multiplataforma en Rust**: Cliente ultraligero y modular (`agent/src/tasks/`) de alto rendimiento para Windows, Linux y macOS.
-- **Separación Avanzada de Privilegios y Contextos (Sesión Dual)**:
-  - **Windows**: Servicio de Sistema (Sesión 0, `SYSTEM`) para persistencia, red, USB e inventario + Agente de Usuario Interactivo para captura gráfica en la sesión del usuario.
-  - **macOS**: Configuración dual nativa mediante `LaunchDaemon` (sistema) y `LaunchAgent` (sesión de usuario interactiva).
-  - **Linux**: Servicio `systemd` configurable con soporte completo para Wayland y X11 en sesiones gráficas.
-- **Caché Offline Persistente y de Alto Rendimiento (v3.3.1)**: Base de datos local SQLite con conexión thread-safe reutilizable (`Arc<Mutex<Connection>>`) configurada en modo WAL (Write-Ahead Logging), modo síncrono `NORMAL` y almacenamiento temporal en `MEMORY`, con autocuración y límites estrictos de almacenamiento.
-- **Cifrado Seguro Enlazado a Hardware (v3.3.1)**: Derivación dinámica de claves criptográficas (`resolve_secure_key`) utilizando identificadores de hardware físicos únicos: `MachineGuid` en Windows, `machine-id` en Linux y `IOPlatformUUID` en macOS, impidiendo el descifrado no autorizado de la caché en otros dispositivos.
-- **Poda y Rotación de Logs (v3.3.1)**: Política de retención automática de logs de 7 días para `agent_service.log` y `agent_user.log` en el arranque del agente, protegiendo activamente el almacenamiento del endpoint.
-- **Servidor Backend en Rust**: API REST de alto rendimiento y consumidor asíncrono con Axum, RabbitMQ y PostgreSQL/TimescaleDB.
-- **Dashboard de Control**: Panel web interactivo desarrollado en React, TypeScript y TailwindCSS.
-
----
-
-## 💎 Características Principales
-
-- **Monitoreo en Tiempo Casi Real**: Registro exacto de la aplicación en foco y título de ventana.
-- **Medición Monotónica del Tiempo Activo/Inactivo**: Medición de intervalos robusta basada en `Instant` y comportamiento de ticks `Skip` en Tokio para prevenir sobre-reportes o picos tras suspender el equipo.
-- **Contadores de Entrada de Baja Latencia**: Pulsaciones de teclas, clics y movimiento de mouse capturados eficientemente mediante variables atómicas sin impacto en CPU para heatmaps analíticos por hora.
-- **Monitoreo de Dispositivos USB y DLP Básico**:
-  - Detección instantánea de conexiones/desconexiones.
-  - Alertas de copia de archivos a USB (técnica MITRE T1052.001) analizando metadatos de tiempo en intervalos de 45 segundos.
-  - Deduplicación criptográfica mediante hashes SHA-256 para evitar alertas redundantes.
-- **Inventario de Software**: Escaneo detallado y periódico de aplicaciones instaladas en cada máquina.
-- **Historial de Redes WiFi**: Registro de cambios de conexión, incluyendo SSID, BSSID, intensidad de señal y estado.
-- **Módulo de Seguridad MITRE ATT&CK**: Integración opcional y no invasiva con `osquery` para la ejecución periódica e inteligente de consultas de seguridad (11 técnicas del framework ATT&CK) parametrizadas local o centralmente desde el servidor.
-- **Búsqueda y Filtrado de Flotas**: Gestión interactiva de dispositivos en el dashboard mediante MAC address, hostname, apodos personalizados o Device ID.
-
----
-
-## 🏛️ Arquitectura del Sistema
-
-```mermaid
-graph TD
-    subgraph Endpoint [Endpoint del Cliente]
-        A1[Agente Servicio - SYSTEM] -->|Monitoreo USB / Hardware| SQLite[(SQLite con WAL Cifrado)]
-        A2[Agente Usuario - Gráfico] -->|Actividad / Teclado / Foco| SQLite
-        SQLite -->|Sincronización AMQP| RMQ[RabbitMQ Broker]
-    end
-    subgraph Server [Backend Central]
-        RMQ -->|Colas de Mensajes| BC[Server Consumidor Axum]
-        BC -->|Escritura de Series Temporales| DB[(PostgreSQL + TimescaleDB)]
-    end
-    subgraph Frontend [Dashboard Web]
-        React[Dashboard React + TS] -->|API REST| BC
-    end
-```
-
-1. **Captura**: El agente en ejecución dual captura eventos en el endpoint de manera optimizada.
-2. **Cola**: Persiste offline de forma segura en SQLite si no hay red, y publica los datos en RabbitMQ (exchange topic `monitoring`) en tiempo real al conectarse.
-3. **Consumo**: El servidor Rust (Axum) consume las colas (`monitoring.activity`, `monitoring.heartbeat`, `monitoring.usb`, `monitoring.inventory`, `monitoring.wifi`, `monitoring.security`).
-4. **Persistencia**: Registra y organiza la telemetría en series temporales en PostgreSQL con la extensión TimescaleDB.
-5. **Visualización**: El Dashboard React consume la API REST del servidor para renderizar métricas, heatmaps e historiales de seguridad.
-
----
-
-## 📂 Estructura del Repositorio
+## Arquitectura
 
 ```text
-.
-├── agent/            # Cliente ligero de captura (Rust)
-│   ├── src/tasks/    # Tareas modulares de recolección (Ventanas, USB, Seguridad, etc.)
-│   └── Cargo.toml    # Configuración de dependencias independiente
-├── server/           # API y consumidor RabbitMQ (Rust)
-├── dashboard/        # Frontend interactivo en React + Vite + TS
-├── migrations/       # Migraciones SQL de TimescaleDB y esquemas
-├── Instaladores/     # Scripts modernos de instalación multiplataforma y código del agente standalone
-└── docs/             # Manuales de arquitectura, API y diagnósticos
+Computadora supervisada
+  Servicio nativo: recursos, inventario, conectividad y cola persistente
+  Sesión de usuario: aplicación enfocada, ventanas y contadores de entrada
+          │ IPC local cifrado y autenticado
+          ▼
+  Servicio → RabbitMQ → Servidor Rust → PostgreSQL / TimescaleDB
+                            ▲                    ▲
+                            │ API                │ compactación / retención
+                  Nginx + Dashboard         db-maintenance
 
+  Vista local «Mi equipo»: http://127.0.0.1:9876 (solo lectura)
 ```
 
----
-
-## 🛠️ Requisitos del Sistema
-
-- **Rust**: Versión 1.75+ (para compilar agentes y servidor)
-- **Node.js**: Versión 18+ y **npm** 9+ (para el dashboard)
-- **Docker & Docker Compose**: Para desplegar rápidamente la infraestructura local
-- **osqueryi** *(Opcional)*: Instalado en el host si se desea habilitar la auditoría MITRE ATT&CK (el instalador de Windows lo descarga automáticamente).
-
----
-
-## 🚀 Inicio Rápido (Entorno de Desarrollo)
-
-### 1) Levantar la Infraestructura Corporativa
-
-Inicia los servicios base desde la raíz del repositorio:
-```bash
-docker compose up -d
-```
-> [!NOTE]
-> Esto desplegará los siguientes servicios:
-> - **PostgreSQL/TimescaleDB**: `localhost:5432`
-> - **RabbitMQ AMQP Broker**: `localhost:5672` (Panel de administración en `http://localhost:15672` con credenciales `guest/guest`)
-> - **Redis Cache**: `localhost:6379`
-
-### 2) Compilar y Ejecutar el Servidor Backend
-
-```bash
-cd server
-cargo run
-```
-La API REST iniciará por defecto en `http://localhost:3000`. Puedes validar su estado usando:
-```bash
-curl http://localhost:3000/api/health
-```
-
-### 3) Compilar y Desplegar el Dashboard Web
-
-```bash
-cd dashboard
-npm install
-npm run dev
-```
-Accede al panel de control desde tu navegador web preferido en `http://localhost:5173`.
-
-### 4) Instalar y Ejecutar el Agente de Telemetría
-
-El agente cuenta con scripts de instalación robustos y automatizados según el sistema operativo (ubicados en `/Instaladores`), los cuales manejan dependencias, permisos, servicios en segundo plano y compatibilidad híbrida de forma desatendida o interactiva:
-
-- **Windows**: Ejecuta la consola como Administrador y lanza:
-  * Interactivo: `Instaladores\Windows\install-windows.bat`
-  * Silencioso / AnyDesk: `Instaladores\Windows\install-windows-silent.bat`
-  * *Usa una firma de tarea XML nativa para evitar alertas y falsos positivos de antivirus/EDRs.*
-
-- **Linux**: Ejecuta con privilegios de root:
-  * Interactivo: `sudo ./Instaladores/Linux/install-linux.sh`
-  * Silencioso / SSH: `sudo ./Instaladores/Linux/install-linux-silent.sh`
-  * *Configura dependencias, compila e instala de forma autónoma (standalone) sin necesitar la carpeta server.*
-
-- **macOS**: Ejecuta con privilegios de root:
-  * Interactivo: `sudo ./Instaladores/macOS/install-macos.sh`
-  * Silencioso / AnyDesk: `sudo ./Instaladores/macOS/install-macos-silent.sh`
-  * *Instala de forma autónoma el LaunchDaemon y LaunchAgent guiando e instruyendo sobre los permisos TCC de Privacidad de Apple.*
-
----
-
-## 📦 Compilación para Producción
-
-Si deseas generar los artefactos optimizados sin dependencias del entorno de desarrollo:
-
-### Servidor Backend
-```bash
-cd server
-cargo build --release
-```
-
-### Agente Ligero
-```bash
-cd agent
-cargo build --release
-```
-
-### Dashboard Web
-```bash
-cd dashboard
-npm run build
-```
-
----
-
-## 📡 Referencia de Endpoints API (Resumen)
-
-El servidor expone una API REST moderna para interactuar con los datos persistidos en TimescaleDB:
-
-- `GET /api/health` — Estado de conectividad de servicios e infraestructura.
-- `GET /api/devices` — Listado completo de endpoints registrados en el sistema.
-- `GET /api/devices/:id` — Telemetría en detalle de un dispositivo en específico.
-- `GET /api/logs` — Listado y búsqueda global de registros de actividad.
-- `GET /api/hourly` — Métricas de intensidad de entrada agrupadas por hora (Heatmaps).
-- `GET /api/overview` — Métricas resumidas de rendimiento y estado del parque informático.
-- `GET /api/usb` — Historial detallado de conexiones y almacenamiento USB detectado.
-- `GET /api/wifi` — Registro histórico de conexiones inalámbricas por dispositivo.
-- `GET /api/security` — Log de amenazas de seguridad y alertas MITRE ATT&CK registradas.
-- `GET /api/security/summary` — Distribución de eventos por nivel de severidad y técnicas MITRE.
-- `GET /api/security/:device_id` — Alertas de seguridad específicas de un endpoint.
-
-### Filtros avanzados en `/api/security`
-| Parámetro | Tipo | Descripción |
+| Componente | Responsabilidad | Ubicación |
 |---|---|---|
-| `device_id` | UUID | Identificador único de dispositivo |
-| `severity` | String | Criticidad del evento: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
-| `mitre_technique` | String | Código de técnica del framework (ej: `T1059.001`) |
-| `from` / `to` | ISO-8601 | Rango de fechas de búsqueda de eventos |
-| `hours` | Integer | Ventana de las últimas N horas de telemetría |
-| `limit` | Integer | Límite máximo de resultados devueltos (por defecto: 500) |
+| Agente Rust | Captura según contexto/permisos, identidad y caché offline cifrada | Equipo Windows o Linux |
+| RabbitMQ | Entrega de eventos y colas de errores/reintento | Servidor, Docker |
+| Servidor Rust/Axum | Ingestión, políticas, autenticación y API | Servidor, Docker |
+| PostgreSQL/TimescaleDB | Estado actual, eventos y resúmenes históricos | Servidor, volumen persistente |
+| Dashboard React/TypeScript | Consulta y administración mediante Nginx | Servidor, Docker |
+| Mantenimiento | Compactación y eliminación por lotes configurables | Servidor, Docker |
+| Redis | Incluido en Compose; uso funcional por confirmar | No tratar aún como requisito de la aplicación |
 
----
+El servicio no captura el escritorio desde la sesión de sistema. Esa función corresponde al componente de usuario enrolado. Los tiempos de varias personas/sesiones no representan horas de encendido de una máquina.
 
-## 🛡️ Detección de Amenazas con osquery y MITRE ATT&CK
+## Qué permite consultar
 
-El agente cuenta con un planificador inteligente de consultas para interactuar con `osqueryi` si este se encuentra presente en el sistema operativo.
+- Resumen del equipo: conexión, CPU, memoria, tiempo encendido, estado del agente y última actividad reportada.
+- Actividad por aplicación y título de ventana, búsqueda, filtro por hora, paginación y detalles desplegables.
+- Último reporte de aplicaciones abiertas, inventario y cambios, USB y conexiones WiFi.
+- Recursos actuales e históricos, disponibilidad de recolectores y diagnóstico por sesión.
+- Grupos, políticas globales/por equipo, versiones reportadas, alertas e investigaciones.
+- Tema oscuro predeterminado, con opciones Claro y Sistema y preferencia local persistente.
+- Vista local del equipo, sin administración de otras computadoras.
 
-### Cuadrícula de Consultas y Detecciones
+La última actividad es un reporte, no una transmisión del escritorio. Las muestras ausentes o antiguas deben distinguirse de un valor cero. La cobertura depende del sistema operativo, los permisos y la política de recolección.
 
-| Nombre de Consulta | Frecuencia | Técnica MITRE Mapeada | Criticidad |
-|---|---|---|---|
-| `powershell_encoded_commands` | 5 min | T1059.001 — PowerShell Encoding | **HIGH** |
-| `powershell_download_cradles` | 5 min | T1105 — Download Cradles | **HIGH** |
-| `suspicious_script_hosts` | 5 min | T1059.005 — Script Hosts | **MEDIUM** |
-| `unusual_listening_ports` | 10 min | T1021 — Remote Services | **MEDIUM** |
-| `executable_in_temp_paths` | 10 min | T1105 — Ingress Tool Transfer | **HIGH** |
-| `lolbins_with_remote_content` | 10 min | T1218 — LOLBins | **HIGH** |
-| `scheduled_tasks_hidden` | 20 min | T1053.005 — Scheduled Task | **HIGH** |
-| `autorun_registry_keys` | 20 min | T1547.001 — Registry Run Keys | **MEDIUM** |
-| `cmd_spawned_by_unusual_parent`| 20 min | T1059.003 — Command Shell | **MEDIUM** |
-| `unsigned_system_path_processes`| 30 min | T1036 — Masquerading | **MEDIUM** |
-| `startup_items_persistence` | 30 min | T1547.009 — Startup Items | **LOW** |
+## Plataformas y límites actuales
 
-### Configuración del Scheduler en el Agente
+| Destino | Estado |
+|---|---|
+| Windows x64 | Agente nativo instalado y flujo real comprobado en el piloto local; ciclo completo de recuperación/actualización todavía pendiente |
+| Ubuntu / Debian | Código y herramientas de empaquetado/ciclo de vida preparados; falta completar la matriz nativa de certificación |
+| Linux X11 | Implementación de captura; permisos, recuperación y escritorios deben verificarse en los destinos soportados |
+| Wayland | No se promete captura equivalente a X11; capacidades no disponibles deben indicarse explícitamente |
+| macOS | No forma parte de la entrega actual, aunque existan referencias/código heredados |
 
-Por defecto, el análisis de amenazas locales se encuentra **desactivado**. Para activarlo manualmente mediante variables de entorno en el host:
-```bash
-# Windows
-set AGENT_OSQUERY_SCHEDULER_SECONDS=30
+Pendientes relevantes: validar el despliegue de identidades por equipo en las plataformas objetivo, preparar despliegue productivo, firmas, backup/restore y validación multiplataforma. Los mapas de calor por coordenadas no están habilitados. La autoactualización remota heredada está deshabilitada.
 
-# Linux/macOS
-export AGENT_OSQUERY_SCHEDULER_SECONDS=30
+El alcance completo y los criterios de aceptación están en [TODO de producción](docs/TODO.md).
+
+## Estructura del repositorio
+
+```text
+agent/                    Agente nativo, tareas, IPC, caché y vista local
+server/                   API, consumidores y migraciones SQLx
+server/migrations/        Evolución versionada de la base
+dashboard/               Aplicación web y Nginx
+packaging/windows/        MSI y herramientas administrativas Windows
+packaging/linux/          DEB, systemd y herramientas Linux
+packaging/common/         Migración y mantenimiento de datos locales
+scripts/                  Mantenimiento de DB, releases y piloto local
+tests/                    Contratos, integración y escenarios de ciclo de vida
+docs/                     Plan, operación, arquitectura y evidencia
+.local-test/              Archivos privados del piloto, ignorados por Git
 ```
-- `0` o indefinido: Scheduler deshabilitado (valor predeterminado).
-- `30`: Tick del planificador cada 30s. Las consultas se ejecutan cuando les corresponde según su intervalo.
-- `60`: Tick del planificador cada 60s (modo menos agresivo).
 
-### Gestión de Políticas Centralizada
+## Ejecutar el piloto local
 
-Es posible definir perfiles de comportamiento y frecuencias globales de osquery para flotas de agentes directamente desde la API del servidor:
-```bash
-# Variables del Agente
-AGENT_SERVER_URL=http://tu-servidor:3000
-AGENT_AUTH_TOKEN=tu-token-seguro
+Requisitos: Docker Engine/Compose v2 con soporte para `!override` y construcción de imágenes Linux. En Windows, Docker Desktop debe estar en ejecución. Las versiones de Rust y dependencias se fijan en `rust-toolchain.toml`, Cargo.lock, Dockerfiles y el lockfile del dashboard.
+
+El perfil local usa un proyecto Docker independiente y puertos de loopback. Para una instalación nueva, crear `.local-test/.env` con estos campos y valores aleatorios propios:
+
+```dotenv
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=<contraseña única>
+JWT_SECRET=<secreto aleatorio>
+AGENT_AUTH_TOKEN=<secreto aleatorio del piloto>
+LOCAL_DB_PASSWORD=<secreto hexadecimal aleatorio>
+LOCAL_RABBIT_PASSWORD=<secreto hexadecimal aleatorio>
+AGENT_CONFIG_DISABLED_MONITORS=heatmap
 ```
 
-Endpoint de descarga de política del agente:
-`GET /api/agent/osquery-policy?device_id=<uuid>`
+Generar cada secreto por separado, por ejemplo con `python -c "import secrets; print(secrets.token_hex(32))"`. Reemplazar todos los marcadores, restringir permisos del archivo y no incorporarlo a Git. Para el piloto existente, conservar sus valores: cambiarlos sin rotación coordinada puede impedir el acceso a volúmenes ya inicializados.
 
-En el servidor, puedes ajustar las variables de entorno de control global:
-- `OSQUERY_POLICY_PROFILE`: Perfiles disponibles: `off` (desactivado), `slow` (tick cada 90s), `balanced` (tick cada 60s), `aggressive` (tick cada 30s).
-- `OSQUERY_POLICY_TICK_SECONDS`: Tiempo de tick manual en segundos.
+Desde la raíz del repositorio:
 
-> [!TIP]
-> Si el servidor se encuentra inalcanzable, el agente aplica una política de tolerancia fallback regresando automáticamente a la variable local `AGENT_OSQUERY_SCHEDULER_SECONDS`.
+```powershell
+docker compose --project-name monitorv32-local --env-file .local-test/.env -f docker-compose.yml -f docker-compose.local.yml up -d --build
+```
 
----
+| Acceso local | Dirección |
+|---|---|
+| Dashboard y API vía Nginx | http://127.0.0.1:18080 |
+| API directa del piloto | http://127.0.0.1:18000 |
+| RabbitMQ administración | http://127.0.0.1:15675 |
+| RabbitMQ AMQP | 127.0.0.1:5673 |
+| PostgreSQL | Interno a Docker: `postgres:5432`, sin puerto publicado |
+| Redis | 127.0.0.1:63790 |
 
-## 💾 Monitoreo de Dispositivos Extraíbles (DLP)
+Credenciales nuevas del dashboard en `.local-test/ACCESO-LOCAL.md`, archivo privado que no se distribuye. La cuenta bootstrap de este piloto local no tiene MFA: dejar vacío el código de autenticación. Las cuentas productivas con MFA siguen exigiendo el código. El paquete usado está en `.local-test/candidate-0.1.0/`; no redistribuirlo porque contiene configuración privada.
 
-El agente analiza los dispositivos USB acoplados cada **45 segundos**:
-- **Inspección de Escrituras**: Captura archivos que han sido agregados o modificados recientemente (en una ventana de los últimos 180s).
-- **Deduplicación**: Calculates y almacena hashes SHA-256 de las transferencias para evitar inundación de eventos idénticos en la base de datos central.
-- **Mitigación de E/S**: Lee los metadatos de almacenamiento y espacio libre; solo realiza escaneos recursivos detallados si detecta un cambio en el espacio libre del drive USB.
+Para consultar, detener o reanudar el piloto ya preparado:
 
-Las alertas se remiten de inmediato a la cola `monitoring.security` con severidad **HIGH** bajo el mapeo **MITRE T1052.001** (Exfiltración vía medio físico).
+```powershell
+./scripts/local-pilot.ps1 -Action status
+./scripts/local-pilot.ps1 -Action stop
+./scripts/local-pilot.ps1 -Action start
+```
 
----
+`start` no reconstruye imágenes; después de cambiar código, usar el comando Compose con `--build`. No usar `down -v` como procedimiento normal: elimina los volúmenes. Las migraciones SQLx se aplican al arrancar el servidor; respaldar antes de actualizar una instalación con datos.
 
-## 🛠️ Herramientas de Mantenimiento y Diagnóstico
+El Compose base contiene configuración de desarrollo y no debe exponerse directamente a una red de producción. El perfil local no configura HTTPS/AMQPS ni sustituye al futuro perfil productivo.
 
-El repositorio incluye herramientas avanzadas para la verificación de salud del entorno:
+## Perfil candidato de producción
 
-1. **`diagnostic.ps1`**: Script interactivo de diagnóstico para Windows. Ejecuta un checklist completo de conectividad, variables de entorno, estado de los servicios duales, osquery y base de datos local SQLite.
-2. **`verify_rabbitmq.ps1`**: Script para verificar el correcto funcionamiento del broker RabbitMQ, colas asociadas, intercambio topic y flujos de publicación del agente.
-3. **`limpiar.ps1`**: Script para depuración rápida de entornos de desarrollo locales en Windows (limpieza de cachés SQLite, logs viejos y reinicio de servicios).
+Existe un [overlay de producción en preparación](docs/PRODUCTION_DEPLOYMENT.md), separado del piloto: roles PostgreSQL separados, trabajo de migraciones independiente, servidor/dashboard sin root, HTTPS en loopback 18443 y AMQPS en loopback 25671. Usa secretos desde archivos y validación estricta al arrancar. Redis queda excluido por defecto. El generador requiere Linux, cuentas Argon2id y certificados válidos; ver la guía para nombres, CA y permisos.
 
----
+**No está listo para exposición real:** faltan certificados reales y su renovación operativa, aceptación multiplataforma y validación funcional completa del perfil, entre otros criterios del TODO. No aplicar el overlay sobre los volúmenes del piloto ni regenerar sus credenciales.
 
-## 📖 Documentación Adicional
+## Instalar el agente
 
-Para más detalles, consulta la documentación extendida en la raíz del repositorio:
-- [Guía de Arquitectura e Hilos](ARCHITECTURE.md) — Explicación profunda de la sesión dual del agente y flujos del consumidor de colas.
-- [API Reference](API_REFERENCE.md) — Documentación interactiva de todas las rutas REST del servidor.
-- [Changelog](CHANGELOG.md) — Historial de cambios y detalles de la versión **3.3.1**.
+El agente se ejecuta fuera de Docker, dentro de la computadora que se supervisa. Necesita la URL del servidor, acceso al broker y configuración de identidad/caché/sesión. Plantilla: [packaging/agent.env.example](packaging/agent.env.example). Para el candidato productivo, seguir [enrolamiento y custodia](docs/AGENT_IDENTITY.md) y usar `scripts/configure-agent-identity.py` sobre una instalación preparada; conserva UUID y caché y no reinicia el servicio.
+
+En el piloto Windows ya preparado:
+
+1. Extraer completamente el ZIP privado del instalador.
+2. Ejecutar `InstalarLocal.cmd` y aceptar la elevación administrativa.
+3. Esperar los primeros reportes y consultar el dashboard o `http://127.0.0.1:9876`.
+4. Usar los auxiliares `RepararLocal.cmd` y `DesinstalarLocal.cmd` del mismo paquete. La eliminación normal conserva los datos documentados.
+
+El ZIP del piloto contiene credenciales y un MSI sin firma de producción: no es un instalador genérico redistribuible. No ejecutar directamente el MSI omitiendo su coordinador. Las direcciones de loopback solo sirven cuando servidor y agente están en la misma computadora.
+
+Para generar nuevos paquetes y configurar otros equipos, seguir [distribución de paquetes](docs/PACKAGE_DISTRIBUTION.md), [cierre de implementación y límites](docs/P2_IMPLEMENTATION_CLOSURE.md) y [versionado](docs/VERSIONING.md). La distribución firmada y la transición 3.x → 0.1.x siguen pendientes de validación; no forzar el downgrade de MSI.
+
+## Desarrollo y comprobaciones focalizadas
+
+```powershell
+cargo check --workspace --locked
+cargo build --release -p activity-monitor-agent --locked
+npm ci --prefix dashboard
+npm run build --prefix dashboard
+node tests/desktop-contract.mjs
+```
+
+El agente informa la versión de `agent/Cargo.toml`. No cambiar solo el nombre del instalador ni empaquetar un binario antiguo como una versión nueva. Para MSI se requieren WiX y su extensión Util; para DEB, entorno Linux y herramientas de empaquetado. Consultar los scripts de `packaging/` y sus requisitos antes de construir.
+
+Comprobaciones del piloto preparado:
+
+```powershell
+python tests/local_pilot_smoke.py
+python tests/local_desktop_smoke.py
+```
+
+La primera prueba publica eventos sintéticos identificados y modifica los metadatos/política de su equipo de prueba. La segunda consulta datos reales de un agente ya instalado. Ambas usan exclusivamente el proyecto `monitorv32-local` y su configuración privada; no son una certificación productiva ni se ejecutan contra otro entorno por cambiar una URL.
+
+## Seguridad y datos
+
+Implementado en código: sesiones opacas revocables mediante cookies HttpOnly/Secure/SameSite en producción, protección CSRF, MFA TOTP obligatorio para administradores, límites de login/API, auditoría y cuentas individuales con Argon2id y roles comprobados en servidor, separación de acceso agente/administrador, caché AES-256-GCM, IPC local autenticado/cifrado y vista local de solo lectura con controles de origen.
+
+Identidad individual HTTP y RabbitMQ: enrolamiento de un solo uso, permisos de publicación por UUID, renovación automática, revocación con cierre de conexiones y credenciales locales cifradas. El dashboard permite administrar el acceso en Equipo → Diagnóstico. Producción rechaza tokens compartidos y transporte inseguro; desarrollo conserva compatibilidad. Ver [identidad del agente](docs/AGENT_IDENTITY.md).
+
+Limitaciones pendientes: certificados reales, operación de su renovación y aceptación del despliegue TLS, firma de releases, completar controles de privilegios del despliegue y validación integrada. El cifrado de la caché no protege automáticamente el tráfico de red ni la base central. Ver [plan de seguridad y producción](docs/TODO.md).
+
+Retención configurable: detalle de métricas 14 días y resúmenes 365 como valores de partida; no representan una política aprobada para cualquier organización. La eliminación histórica general permanece desactivada por defecto. Retención/compactación no equivale a backup. Revisar [retención](docs/DATA_RETENTION.md), [migraciones](docs/MIGRATIONS.md) y los criterios de restauración del TODO antes de habilitar borrado.
+
+## Documentación vigente y versiones
+
+- [TODO de producción](docs/TODO.md): prioridades, tareas y criterios de cierre.
+- [Progreso y evidencia](docs/REFACTOR_PROGRESS.md): registro histórico, con fecha y alcance.
+- [Validación P4](docs/P4_VALIDATION.md): resultados y pendientes de comprobación.
+- [Versionado](docs/VERSIONING.md): serie 0.x, transición y preparación de releases.
+- [CHANGELOG](CHANGELOG.md): cambios por versión, separados del historial heredado.
+- [UX del dashboard](docs/DASHBOARD_UX.md), [roles](docs/ACCESS_CONTROL.md) y [vista local](docs/LOCAL_VIEW.md).
+
+**Regla de mantenimiento:** actualizar este README en el mismo conjunto de cambios que modifique comportamiento, requisitos, instalación, configuración, versiones o limitaciones. Mantener TODO y CHANGELOG alineados. Una función preparada no se documenta como validada, ni una prueba local como certificación de producción.
+
+Los documentos antiguos pueden contener estados anteriores; prevalecen el plan vigente y la evidencia más reciente identificada. La primera versión estable del agente será 1.0.0 solo tras aprobar la salida a producción.
+
+### Acceso humano — bloque 3
+
+El candidato incluye la pantalla **Sesiones y acceso**, revocación propia/administrativa, recuperación MFA mediante `scripts/manage-accounts.py`, CSP y CSV protegido ante fórmulas. Producción requiere `MONITOR_PUBLIC_ORIGIN` con el origen HTTPS exacto. Las cuentas se administran en el anfitrión Linux; contraseñas y semillas no se gestionan desde el navegador. Procedimientos y límites: [ACCESS_CONTROL.md](docs/ACCESS_CONTROL.md). Migración nueva: `0015_human_sessions.sql`. Desplegar servidor, migración y dashboard coordinadamente; los JWT antiguos del navegador dejan de ser válidos en producción. El piloto limpio ya incluye esta migración; utiliza bootstrap local sin MFA, no el perfil de cuentas productivas.
+
+### Datos por sesión — bloque 4
+
+El resumen del equipo muestra contadores diarios UTC por persona y sesión, con desglose plegable y CSV para operador/administrador. Sus tiempos son horas-persona, no tiempo encendido. Los totales abarcan todas las páginas y solo incluyen contadores con captura disponible; sin muestras se muestra ausencia de datos.
+
+Las ventanas se presentan como **últimas ventanas reportadas**, con fecha, principal, sesión y vigencia. Una observación reciente tampoco confirma que sigan abiertas. Requiere migración `0016_running_apps_scope.sql` y actualización coordinada servidor/dashboard. El piloto limpio ya incluye las migraciones 0016 y 0017. El cierre del candidato incorpora también el resumen global, compactación por sesión (migración 0017) y snapshot vacío al cierre ordenado; ante caída abrupta se informa antigüedad. Ver alcance y evidencia en [BLOCK4_CLOSURE.md](docs/BLOCK4_CLOSURE.md).
+
+### Bloque 4 y piloto actual
+
+El candidato unifica contadores por persona en resumen global/equipo, histórico y CSV mediante la migración 0017. Los días de informes son UTC y los datos sin captura no son ceros. Compactación de sesiones, snapshots al cierre, filtros, políticas y comandos de diagnóstico tienen comprobaciones focalizadas. Alcance, exclusiones y evidencia: [BLOCK4_CLOSURE.md](docs/BLOCK4_CLOSURE.md).
+
+El piloto 0.1.0 ya está instalado desde cero. Por decisión del usuario se descartaron los datos anteriores; no se ensayó migración conservando datos desde 3.4.0. El MSI es privado y sin firma. Los comandos remotos del candidato se limitan a ping, status y run_diagnostic, con vencimiento; el agente nuevo necesita el servidor nuevo. Producción sigue sin aprobación.
+
+### Estado del piloto limpio — 2026-11-03
+
+Servidor y dashboard nuevos desplegados, 17 migraciones aplicadas y agente Windows 0.1.0 instalado. Recepción de recursos, actividad, ventanas y contadores por sesión, login local y CSV comprobados. Reinicio completo, desconexión prolongada y aceptación multiplataforma siguen pendientes; ver [progreso](docs/REFACTOR_PROGRESS.md).
+
+### Recuperación y publicación del código
+
+Piloto Windows 0.1.0: recuperación automática del servicio en 16 s tras caída; corte RabbitMQ de 75 s con 11 eventos pendientes que luego se entregaron, cola final cero e identidad conservada. No sustituye reinicio completo ni desconexión prolongada. La salud de sesiones se consolida cada cinco minutos, por lo que puede estar vacía en el primer reporte.
+
+Publicación autorizada en el repositorio existente: [alcance y credenciales históricas pendientes](docs/GITHUB_PUBLICATION.md). Se retiraron credenciales heredadas del código actual; su revocación/rotación sigue pendiente. Se conserva el historial por decisión del usuario. Esta publicación de código piloto no certifica producción.

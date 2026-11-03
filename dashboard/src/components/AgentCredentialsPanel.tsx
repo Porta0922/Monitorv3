@@ -1,0 +1,18 @@
+import {useEffect,useState} from 'react';
+import {apiClient,type AgentCredential} from '../api/client';
+export function AgentCredentialsPanel({deviceId}:{deviceId:string}) {
+ const [rows,setRows]=useState<AgentCredential[]>([]),[revision,setRevision]=useState(0);
+ const [enabled,setEnabled]=useState(false);
+ const [busy,setBusy]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
+ const [code,setCode]=useState<{code:string;expires_at:string}|null>(null),[confirm,setConfirm]=useState<string|null>(null);
+ useEffect(()=>{const controller=new AbortController();apiClient.getAgentCredentials(deviceId,controller.signal).then(data=>{setRows(data.credentials);setEnabled(data.broker_managed);}).catch(()=>{if(!controller.signal.aborted)setError('No se pudieron cargar las credenciales.');});return ()=>controller.abort();},[deviceId,revision]);
+ async function enroll(){setBusy(true);setError('');setCode(null);try{setCode(await apiClient.enrollAgent(deviceId));setMessage('El código anterior sin usar queda invalidado. Este código permite una sola inscripción.');}catch{setError('No se pudo generar el código.');}finally{setBusy(false);}}
+ async function revoke(id:string){setBusy(true);setError('');try{const pending=await apiClient.revokeAgentCredential(deviceId,id);setMessage(pending?'Credencial revocada. El cierre de conexiones del broker se reintentará automáticamente.':'Credencial revocada y usuario del broker eliminado.');setConfirm(null);setRevision(v=>v+1);}catch{setError('No se pudo confirmar la revocación. Actualiza el estado antes de repetir.');}finally{setBusy(false);}}
+ return <section className="card"><h2>Acceso del agente</h2><p>Credenciales individuales de este equipo. El agente renueva su acceso antes del vencimiento sin cambiar su identidad.</p>
+ <button className="button" disabled={busy||!enabled} onClick={()=>void enroll()}>Generar código de inscripción</button>{' '}<button className="button" disabled={busy} onClick={()=>setRevision(v=>v+1)}>Actualizar</button>
+ {!enabled&&<p className="notice">La inscripción de agentes no está habilitada en este servidor.</p>}
+ {code&&<div className="notice"><label>Código de un solo uso<textarea readOnly value={code.code} rows={2}/></label><p>Vence: {new Date(code.expires_at).toLocaleString()}. Entrégalo al administrador del equipo por un medio protegido. No se guarda en el navegador.</p><button className="button" onClick={()=>setCode(null)}>Ocultar código</button></div>}
+ {error&&<p role="alert" className="notice notice-error">{error}</p>}{message&&<p role="status" className="notice">{message}</p>}
+ <div className="table-wrap"><table><thead><tr><th>Credencial</th><th>Vencimiento</th><th>Estado</th><th>Acción</th></tr></thead><tbody>{rows.map(row=>{const active=!row.revoked_at&&Date.parse(row.expires_at)>Date.now();return <tr key={row.credential_id}><td><code>{row.credential_id.slice(0,8)}</code></td><td>{new Date(row.expires_at).toLocaleString()}</td><td>{row.revoked_at?'Revocada':active?(Date.parse(row.expires_at)-Date.now()<7*86400000?'Por renovar':'Activa'):'Vencida'}</td><td>{active&&(confirm===row.credential_id?<><span>¿Retirar este acceso?</span><button disabled={busy} onClick={()=>void revoke(row.credential_id)}>Confirmar revocación</button><button disabled={busy} onClick={()=>setConfirm(null)}>Cancelar</button></>:<button disabled={busy} onClick={()=>setConfirm(row.credential_id)}>Revocar</button>)}</td></tr>;})}</tbody></table></div>
+ {!rows.length&&<p>No hay credenciales individuales registradas.</p>}<p className="field-note">Si el equipo perdió su acceso o estuvo desconectado hasta vencer, revoca la credencial anterior y genera un nuevo código. Conserva su UUID y su clave de caché.</p></section>;
+}

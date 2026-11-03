@@ -1,9 +1,13 @@
-use std::io::Cursor;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::thread;
-use tiny_http::{Header, Response, Server, StatusCode};
+use hyper::{Body, Request, Response, StatusCode};
+use std::{convert::Infallible, time::Duration};
+use tokio::{net::TcpListener, task::JoinHandle};
 
+static LOCAL_RESOURCES: std::sync::LazyLock<std::sync::Mutex<serde_json::Value>> = std::sync::LazyLock::new(||std::sync::Mutex::new(serde_json::Value::Null));
+pub fn update_local_resources(metrics: serde_json::Value) {
+    if let Ok(mut value)=LOCAL_RESOURCES.lock() {*value=serde_json::json!({"observed_at":chrono::Utc::now(),"data":metrics});}
+}
 pub struct WebState {
     pub hostname: String,
     pub version: String,
@@ -12,6 +16,7 @@ pub struct WebState {
     pub events_today: Arc<AtomicU64>,
     pub cache_pending: Arc<AtomicU64>,
     pub auth_token: String,
+    pub local_status: std::sync::Mutex<serde_json::Value>,
 }
 
 impl WebState {
@@ -34,185 +39,103 @@ impl WebState {
             events_today: Arc::new(AtomicU64::new(0)),
             cache_pending: Arc::new(AtomicU64::new(0)),
             auth_token,
+            local_status: std::sync::Mutex::new(serde_json::Value::Null),
         }
     }
 }
 
-pub fn spawn_web_server(state: Arc<WebState>) {
-    let auth_token = state.auth_token.clone();
-    thread::spawn(move || {
-        let bind = std::env::var("WEB_BIND").unwrap_or_else(|_| "0.0.0.0:9876".to_string());
-        let server = match Server::http(&bind) {
-            Ok(s) => {
-                tracing::info!("Web UI started on http://{} (token: {})", &bind, &auth_token[..4]);
-                s
-            }
-            Err(e) => {
-                tracing::warn!("Failed to start Web UI on {}: {}", bind, e);
-                return;
-            }
+pub fn spawn_web_server(state: Arc<WebState>) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let bind = std::env::var("WEB_BIND").unwrap_or_else(|_| "127.0.0.1:9876".to_string());
+        let address=match bind.parse::<std::net::SocketAddr>() {
+            Ok(address) if address.ip().is_loopback()=>address,
+            _=>{tracing::error!("Local view requires a literal loopback WEB_BIND address");return;}
         };
-
-        for mut request in server.incoming_requests() {
-            let url = request.url().to_string();
-            let method = request.method().as_str().to_string();
-
-            // Check auth token on API endpoints
-            if url.starts_with("/api/") {
-                let url_has_token = url.contains(&format!("token={}", auth_token));
-                let header_has_token = request.headers().iter().any(|h| {
-                    let field_name = format!("{}", h.field);
-                    let field_lower = field_name.to_lowercase();
-                    if field_lower == "authorization" {
-                        let val = format!("{}", h.value);
-                        val == format!("Bearer {}", auth_token)
-                    } else {
-                        false
-                    }
-                });
-                if !url_has_token && !header_has_token {
-                    let _ = request.respond(
-                        Response::from_string(r#"{"error":"unauthorized"}"#)
-                            .with_status_code(StatusCode(401))
-                            .with_header(Header::from_bytes(b"Content-Type", b"application/json").unwrap())
-                    );
-                    continue;
+        match TcpListener::bind(address).await {
+            Ok(listener) => {
+                tracing::info!("Web UI started on http://{}", bind);
+                if let Err(error) = serve(listener, state).await {
+                    tracing::warn!(%error, "Web UI listener failed");
                 }
             }
-
-            match (&method[..], &url[..]) {
-                ("GET", "/") => {
-                    let _ = request.respond(index_html(&state));
-                }
-                ("GET", url) if url.starts_with("/api/status") => {
-                    let _ = request.respond(api_status(&state));
-                }
-                ("POST", url) if url.starts_with("/api/help") => {
-                    let mut body = String::new();
-                    let _ = request.as_reader().read_to_string(&mut body);
-                    let _ = request.respond(api_help_body(&state, &body));
-                }
-                ("POST", url) if url.starts_with("/api/uninstall") => {
-                    let _ = request.respond(api_uninstall());
-                }
-                _ => {
-                    let _ = request.respond(
-                        Response::from_string("404 Not Found")
-                            .with_status_code(StatusCode(404))
-                    );
-                }
-            };
+            Err(error) => tracing::warn!(%error, %bind, "Failed to start Web UI"),
         }
-    });
+    })
 }
 
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
+async fn serve(listener: TcpListener, state: Arc<WebState>) -> std::io::Result<()> {
+    // Dropping the supervisor-owned listener cancels every active HTTP connection,
+    // including clients that never finish sending headers or a request body.
+    let mut connections = tokio::task::JoinSet::new();
+    loop {
+        tokio::select! {
+            result = listener.accept(), if connections.len() < 32 => {
+                let (socket, _) = result?;
+                let state = state.clone();
+                connections.spawn(async move {
+                    let handler = hyper::service::service_fn(move |request| {
+                        let state = state.clone();
+                        async move { Ok::<_, Infallible>(handle_request(request, state).await) }
+                    });
+                    let connection = hyper::server::conn::Http::new()
+                        .http1_only(true).serve_connection(socket, handler);
+                    let _ = tokio::time::timeout(Duration::from_secs(30), connection).await;
+                });
+            }
+            _ = connections.join_next(), if !connections.is_empty() => {}
+        }
+    }
 }
 
-fn index_html(state: &WebState) -> Response<Cursor<Vec<u8>>> {
-    let connected = state.connected.load(Ordering::Relaxed);
-    let events = state.events_today.load(Ordering::Relaxed);
-    let pending = state.cache_pending.load(Ordering::Relaxed);
-    let status_icon = if connected { "\u{1f7e2}" } else { "\u{1f534}" };
-    let status_text = if connected { "Conectado" } else { "Desconectado" };
-    let device_short = if state.device_id.len() > 8 { &state.device_id[..8] } else { &state.device_id };
-
-    let hn = html_escape(&state.hostname);
-    let ver = html_escape(&state.version);
-    let did = html_escape(device_short);
-    let st = html_escape(status_text);
-
-    let html = format!(
-        r#"<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ActivityMonitor Agent</title>
-<style>
-*{{margin:0;padding:0;box-sizing:border-box}}
-body{{font-family:-apple-system,'Segoe UI',system-ui,sans-serif;background:#0d1117;color:#c9d1d9;display:flex;justify-content:center;align-items:center;min-height:100vh}}
-.card{{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px;max-width:480px;width:100%;margin:20px}}
-h1{{font-size:20px;margin-bottom:20px;color:#58a6ff}}
-.metric{{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #21262d}}
-.metric:last-child{{border-bottom:none}}
-.label{{color:#8b949e}}
-.value{{font-weight:600}}
-.status{{display:inline-flex;align-items:center;gap:6px}}
-h2{{font-size:16px;margin:24px 0 8px;color:#58a6ff}}
-textarea{{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:8px;min-height:80px;resize:vertical;margin-top:8px;font-family:inherit;font-size:14px}}
-button{{background:#238636;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;margin-top:8px;font-size:14px;font-weight:500}}
-button:hover{{background:#2ea043}}button:disabled{{opacity:.6;cursor:not-allowed}}
-#msg{{margin-top:8px;font-size:13px}}
-.footer{{margin-top:24px;padding-top:12px;border-top:1px solid #21262d;font-size:11px;color:#484f58;text-align:center}}
-</style>
-</head>
-<body>
-<div class="card">
-<h1>ActivityMonitor Agent</h1>
-<div class="metric"><span class="label">Estado</span><span class="value status">{si} {st}</span></div>
-<div class="metric"><span class="label">Hostname</span><span class="value">{hn}</span></div>
-<div class="metric"><span class="label">Versión</span><span class="value">{ver}</span></div>
-<div class="metric"><span class="label">Device ID</span><span class="value">{did}</span></div>
-<div class="metric"><span class="label">Eventos Hoy</span><span class="value">{ev}</span></div>
-<div class="metric"><span class="label">Cache Pendiente</span><span class="value">{cp}</span></div>
-<h2>Solicitar Ayuda</h2>
-<textarea id="helpMsg" placeholder="Describe tu problema..."></textarea>
-<button onclick="sendHelp()" id="sendBtn">Enviar</button>
-<div id="msg"></div>
-<div class="footer">ActivityMonitor Enterprise v{ver}</div>
-</div>
-<script>
-async function sendHelp(){{
-const msg=document.getElementById('helpMsg').value;
-if(!msg)return;
-const btn=document.getElementById('sendBtn');
-btn.disabled=true;
-try{{
-const res=await fetch('/api/help',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{message:msg}})}});
-const data=await res.json();
-document.getElementById('msg').textContent=data.success?'Enviado con éxito':'Error al enviar mensaje';
-document.getElementById('msg').style.color=data.success?'#3fb950':'#f85149';
-}}catch(e){{
-document.getElementById('msg').textContent='Error de conexión';
-document.getElementById('msg').style.color='#f85149';
-}}
-btn.disabled=false;
-}}
-</script>
-</body></html>"#,
-        si = status_icon,
-        st = st,
-        hn = hn,
-        ver = ver,
-        did = did,
-        ev = events,
-        cp = pending,
-    );
-
-    let ct = Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8")
-        .unwrap_or_else(|_| panic!("Invalid header"));
-    Response::from_string(html).with_header(ct)
+fn response(status: StatusCode, content_type: &str, body: impl Into<Body>) -> Response<Body> {
+    Response::builder().status(status).header("Content-Type", content_type)
+        .header("Cache-Control","no-store")
+        .header("X-Content-Type-Options","nosniff")
+        .header("Referrer-Policy","no-referrer")
+        .header("Content-Security-Policy","default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+        .body(body.into()).expect("Static response headers")
 }
 
-fn json_response(body: String) -> Response<Cursor<Vec<u8>>> {
-    let ct = Header::from_bytes(b"Content-Type", b"application/json; charset=utf-8")
-        .unwrap_or_else(|_| panic!("Invalid header"));
-    Response::new(
-        StatusCode(200),
-        vec![ct],
-        Cursor::new(body.into_bytes()),
-        None,
-        None,
-    )
+fn local_origin(request: &Request<Body>) -> bool {
+    let Some(host)=request.headers().get(hyper::header::HOST).and_then(|h|h.to_str().ok()) else {return false;};
+    let Ok(authority)=host.parse::<hyper::http::uri::Authority>() else {return false;};
+    let host_name=authority.host().trim_start_matches('[').trim_end_matches(']');
+    if host_name!="localhost" && !host_name.parse::<std::net::IpAddr>().is_ok_and(|ip|ip.is_loopback()) {return false;}
+    if request.headers().get("sec-fetch-site").and_then(|h|h.to_str().ok()).is_some_and(|s|!matches!(s,"same-origin"|"none")) {return false;}
+    if let Some(origin)=request.headers().get(hyper::header::ORIGIN) {
+        if origin.to_str().ok()!=Some(format!("http://{host}").as_str()) {return false;}
+    }
+    true
 }
 
-fn api_status(state: &WebState) -> Response<Cursor<Vec<u8>>> {
+async fn handle_request(request: Request<Body>, state: Arc<WebState>) -> Response<Body> {
+    if !local_origin(&request) {return response(StatusCode::FORBIDDEN,"text/plain","Local same-origin access required");}
+    if request.method()!=hyper::Method::GET {return response(StatusCode::METHOD_NOT_ALLOWED,"application/json",r#"{"error":"Read-only local view"}"#);}
+    match request.uri().path() {
+        "/"=>response(StatusCode::OK,"text/html; charset=utf-8",include_str!("../ui/index.html")),
+        "/app.css"=>response(StatusCode::OK,"text/css; charset=utf-8",include_str!("../ui/app.css")),
+        "/app.js"=>response(StatusCode::OK,"text/javascript; charset=utf-8",include_str!("../ui/app.js")),
+        "/api/local"=> {
+            let resources=LOCAL_RESOURCES.lock().map(|v|v.clone()).unwrap_or(serde_json::Value::Null);
+            let status=state.local_status.lock().map(|v|v.clone()).unwrap_or(serde_json::Value::Null);
+            json_response(serde_json::json!({"hostname":state.hostname,"version":state.version,
+                "queried_at":chrono::Utc::now(),"resources":resources,"agent":status,
+                "capabilities":crate::runtime::capabilities()}).to_string())
+        },
+        "/api/status"=> {
+            let authorized=request.headers().get(hyper::header::AUTHORIZATION).and_then(|v|v.to_str().ok())
+                .is_some_and(|v|v==format!("Bearer {}",state.auth_token));
+            if authorized {api_status(&state)} else {response(StatusCode::UNAUTHORIZED,"application/json",r#"{"error":"unauthorized"}"#)}
+        },
+        _=>response(StatusCode::NOT_FOUND,"text/plain","Not found"),
+    }
+}
+
+fn json_response(body: String) -> Response<Body> {
+    response(StatusCode::OK, "application/json; charset=utf-8", body)
+}
+
+fn api_status(state: &WebState) -> Response<Body> {
     let connected = state.connected.load(Ordering::Relaxed);
     let events = state.events_today.load(Ordering::Relaxed);
     let pending = state.cache_pending.load(Ordering::Relaxed);
@@ -221,7 +144,7 @@ fn api_status(state: &WebState) -> Response<Cursor<Vec<u8>>> {
         "connected": connected,
         "hostname": state.hostname,
         "version": state.version,
-        "events_today": events,
+        "events_since_start": events,
         "cache_pending": pending,
     })
     .to_string();
@@ -229,30 +152,46 @@ fn api_status(state: &WebState) -> Response<Cursor<Vec<u8>>> {
     json_response(json)
 }
 
-fn api_help_body(_state: &WebState, body: &str) -> Response<Cursor<Vec<u8>>> {
-    let parsed: serde_json::Value = serde_json::from_str(body).unwrap_or(serde_json::Value::Null);
-    let message = parsed["message"].as_str().unwrap_or("");
+#[cfg(test)]
+mod web_lifecycle_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    fn state() -> Arc<WebState> {
+        let mut state = WebState::new("test".into(), "test".into(), "test".into());
+        state.auth_token = "test-token".into();
+        Arc::new(state)
+    }
 
-    let success = if !message.is_empty() {
-        tracing::info!("Help request from user: {}", message);
-        true
-    } else {
-        false
-    };
+    #[tokio::test]
+    async fn shutdown_closes_listener_and_incomplete_request() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(serve(listener, state()));
+        let mut socket = tokio::net::TcpStream::connect(address).await.unwrap();
+        // First prove this connection is accepted and kept alive.
+        socket.write_all(b"GET /api/status HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer test-token\r\n\r\n").await.unwrap();
+        let mut bytes = [0; 4096];
+        let count = tokio::time::timeout(Duration::from_secs(2), socket.read(&mut bytes)).await.unwrap().unwrap();
+        assert!(String::from_utf8_lossy(&bytes[..count]).contains("200 OK"));
+        socket.write_all(b"POST /api/help HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer test-token\r\nContent-Length: 1000\r\n\r\n{").await.unwrap();
+        tokio::task::yield_now().await;
+        server.abort(); let _ = server.await;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop { match socket.read(&mut bytes).await { Ok(0) | Err(_) => break, _ => {} } }
+        }).await.expect("Active connection must close on shutdown");
+        let _rebound = TcpListener::bind(address).await.expect("Listener must release port");
+    }
 
-    let json = format!(r#"{{"success":{}}}"#, if success { "true" } else { "false" });
-    json_response(json)
-}
-
-fn api_uninstall() -> Response<Cursor<Vec<u8>>> {
-    match crate::uninstall::spawn_uninstall() {
-        Ok(_) => {
-            tracing::warn!("Uninstall requested from local Web UI. Launching self-uninstall.");
-            json_response(r#"{"success":true,"message":"Uninstall launched"}"#.to_string())
+    #[tokio::test]
+    async fn authorization_is_exact_and_body_is_bounded() {
+        for uri in ["/api/status?x=token=test-token", "/api/status?token=test-token-extra"] {
+            let request = Request::builder().uri(uri).body(Body::empty()).unwrap();
+            assert_eq!(handle_request(request, state()).await.status(), StatusCode::UNAUTHORIZED);
         }
-        Err(e) => json_response(
-            serde_json::json!({ "success": false, "message": format!("Failed to launch uninstall: {}", e) })
-                .to_string(),
-        ),
+        let request = Request::builder().uri("/api/status?token=test-token").body(Body::empty()).unwrap();
+        assert_eq!(handle_request(request, state()).await.status(), StatusCode::OK);
+        let request = Request::builder().method("POST").uri("/api/help")
+            .header("Authorization", "Bearer test-token").body(Body::from(vec![b'a'; 16385])).unwrap();
+        assert_eq!(handle_request(request, state()).await.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 }

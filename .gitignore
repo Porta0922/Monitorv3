@@ -1,11 +1,22 @@
 # Rust
 /target
-Cargo.lock
 
 # Ejecutables y archivos de depuración
 *.exe
 *.pdb
 *.dll
+*.msi
+*.msix
+*.deb
+*.pfx
+*.p12
+*.key
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+**/node_modules/
 
 # Temp
 query
@@ -19,3 +30,24 @@ query
 target/
 
 github_token.txt
+build-validation.log
+infrastructure-validation.log
+test-build-validation.log
+migration-validation.log
+
+p0-*.log
+dependency-update.log
+dashboard-audit.json
+dashboard-outdated.json
+dashboard-update.log
+dashboard-build.log
+**/__pycache__/
+p1-*.log
+
+.tools/
+
+.local-test/
+
+.wix/
+
+.production/

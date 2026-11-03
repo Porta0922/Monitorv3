@@ -1,0 +1,1 @@
+try{var t=localStorage.getItem('monitor-theme');document.documentElement.dataset.theme=t!=='light'&&(t!=='system'||matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';}catch{document.documentElement.dataset.theme='dark';}

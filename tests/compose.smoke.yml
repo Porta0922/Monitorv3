@@ -1,0 +1,24 @@
+# Merge with docker-compose.yml; only disposable test resources use these ports.
+services:
+  postgres:
+    ports: !override
+      - "127.0.0.1:15432:5432"
+  rabbitmq:
+    ports: !override
+      - "127.0.0.1:15673:5672"
+      - "127.0.0.1:15674:15672"
+  redis:
+    ports: !override
+      - "127.0.0.1:16379:6379"
+  server:
+    environment:
+      MONITOR_ENV: development
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: admin
+      JWT_SECRET: disposable-smoke-secret-not-for-production
+      AGENT_AUTH_TOKEN: disposable-smoke-agent-not-for-production
+    ports: !override
+      - "127.0.0.1:13000:3000"
+  dashboard:
+    ports: !override
+      - "127.0.0.1:15173:80"

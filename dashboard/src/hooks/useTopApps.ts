@@ -19,8 +19,8 @@ export function useTopApps() {
         const result = await apiClient.getTopApps();
         setApps(result);
         setError(null);
-      } catch (err: any) {
-        setError(err.message || 'Failed to load top apps');
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Failed to load top apps');
         console.error('Error loading top apps:', err);
       } finally {
         setIsLoading(false);

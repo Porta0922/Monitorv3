@@ -22,6 +22,10 @@ pub struct RunningAppItem {
     pub exe_path: Option<String>,
     pub exe_hash: Option<String>,
     pub updated_at: DateTime<Utc>,
+    pub principal: Option<String>,
+    pub session_id: Option<Uuid>,
+    pub source: String,
+    pub stale: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

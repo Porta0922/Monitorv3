@@ -119,7 +119,7 @@ impl UsbMonitor {
         let output = cmd.output().map_err(|e| e.to_string())?;
 
         if !output.status.success() {
-            return Ok(devices);
+            return Err(format!("USB enumeration command failed: {}",output.status));
         }
 
         let output_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -222,6 +222,7 @@ impl UsbMonitor {
         let mut devices = Vec::new();
         let usb_path = Path::new("/sys/bus/usb/devices");
 
+        if !usb_path.exists() {return Err("USB sysfs source is unavailable".into());}
         if usb_path.exists() {
             for entry in fs::read_dir(usb_path).map_err(|e| e.to_string())? {
                 let entry = entry.map_err(|e| e.to_string())?;

@@ -43,11 +43,11 @@ pub async fn get_inventory(pool: &PgPool, device_id: Option<&str>) -> Result<Vec
     }
 
 pub async fn get_running_apps(pool: &PgPool, device_id: Uuid) -> Result<Vec<RunningAppItem>, sqlx::Error> {
-        let rows = sqlx::query_as::<_, (Uuid, Uuid, String, Option<String>, i32, Option<String>, Option<String>, DateTime<Utc>)>(
-            "SELECT id, device_id, app_name, primary_title, window_count, exe_path, exe_hash, updated_at
-             FROM running_apps_current
+        let rows = sqlx::query_as::<_, (Uuid, Uuid, String, Option<String>, i32, Option<String>, Option<String>, DateTime<Utc>, Option<String>, Option<Uuid>, String, bool)>(
+            "SELECT id, device_id, app_name, primary_title, window_count, exe_path, exe_hash, updated_at, principal, session_id, source, stale
+             FROM desktop_running_apps
              WHERE device_id = $1
-             ORDER BY window_count DESC, updated_at DESC, app_name ASC"
+             ORDER BY stale ASC, updated_at DESC, window_count DESC, app_name ASC, id"
         )
         .bind(device_id)
         .fetch_all(pool)
@@ -55,7 +55,7 @@ pub async fn get_running_apps(pool: &PgPool, device_id: Uuid) -> Result<Vec<Runn
 
         Ok(rows
             .into_iter()
-            .map(|(id, device_id, app_name, primary_title, window_count, exe_path, exe_hash, updated_at)| RunningAppItem {
+            .map(|(id, device_id, app_name, primary_title, window_count, exe_path, exe_hash, updated_at, principal, session_id, source, stale)| RunningAppItem {
                 id,
                 device_id,
                 app_name,
@@ -63,17 +63,17 @@ pub async fn get_running_apps(pool: &PgPool, device_id: Uuid) -> Result<Vec<Runn
                 window_count,
                 exe_path,
                 exe_hash,
-                updated_at,
+                updated_at, principal, session_id, source, stale,
             })
             .collect())
     }
 
 pub async fn get_top_apps(pool: &PgPool, days: i64) -> Result<Vec<TopApp>, sqlx::Error> {
         let apps = sqlx::query_as::<_, (String, i64)>(
-            "SELECT app_name, COALESCE(SUM(duration_seconds), 0)::BIGINT as total_duration FROM activity_logs 
-             WHERE timestamp >= NOW() - INTERVAL '1 day' * $1 
-             GROUP BY app_name 
-             ORDER BY total_duration DESC 
+            "SELECT app_name, COALESCE(SUM(duration_seconds), 0)::BIGINT as total_duration FROM desktop_activity
+             WHERE timestamp >= NOW() - INTERVAL '1 day' * $1
+             GROUP BY app_name
+             ORDER BY total_duration DESC
              LIMIT 6"
         )
         .bind(days)

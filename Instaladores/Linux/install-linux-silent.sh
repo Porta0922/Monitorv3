@@ -38,8 +38,8 @@ ENV_FILE="$CONFIG_DIR/.env"
 # Master Credentials (Preconfiguracion para despliegues masivos)
 AGENT_AUTH_TOKEN="change-me-in-production"
 AGENT_OFFLINE_CACHE_KEY="replace-with-32-byte-cache-key!!"
-AGENT_SERVER_URL="http://10.30.0.123:3000"
-RABBITMQ_URL="amqp://eclub:eCLUB123@10.30.0.123:5672/%2f"
+AGENT_SERVER_URL="http://monitor.example.invalid:3000"
+RABBITMQ_URL="amqp://CHANGE_USER:CHANGE_PASSWORD@rabbitmq.example.invalid:5672/%2f"
 
 echo "[*] Iniciando instalacion silenciosa de ActivityMonitor..."
 

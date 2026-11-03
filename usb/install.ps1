@@ -54,8 +54,8 @@ $ConfigLoaded = $false
 # ---- Load configuration ----
 $AuthToken = "change-me-in-production"
 $OfflineCacheKey = "replace-with-32-byte-cache-key"
-$ServerUrl = "http://10.30.0.123:3000"
-$RabbitMqUrl = "amqp://eclub:eCLUB123@10.30.0.123:5672/%2f"
+$ServerUrl = "http://monitor.example.invalid:3000"
+$RabbitMqUrl = "amqp://CHANGE_USER:CHANGE_PASSWORD@rabbitmq.example.invalid:5672/%2f"
 $GitHubToken = ""
 
 if (Test-Path $ConfigSource) {

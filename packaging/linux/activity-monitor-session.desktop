@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Monitor — Sesión de oficina
+Exec=/opt/activity-monitor/maintenance/start-enrolled-session.sh
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+Terminal=false

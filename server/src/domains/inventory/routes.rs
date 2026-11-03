@@ -1,4 +1,4 @@
-use axum::{Router, extract::{State, Path, Query}, routing::get, Json, response::IntoResponse};
+use axum::{Router, extract::{State, Path, Query}, routing::get, response::IntoResponse};
 use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -7,6 +7,8 @@ use crate::domains::shared::DateLimitQuery;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
+        .route("/current/:device_id", get(super::current::current))
+        .route("/changes/:device_id", get(super::current::changes))
         .route("/apps", get(list_apps))
         .route("/apps/:device_id", get(list_apps_for_device))
         .route("/running_apps/:device_id", get(list_running_apps))
@@ -29,11 +31,11 @@ async fn list_apps(
                     "last_detected": it.timestamp.to_rfc3339()
                 })
             }).collect();
-            Json(json!({ "apps": apps_json }))
+            crate::domains::shared::data_response(json!({ "apps": apps_json })).into_response()
         }
         Err(e) => {
             tracing::error!("Failed to fetch inventory: {}", e);
-            Json(json!({ "apps": [] }))
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, crate::domains::shared::data_response(json!({ "error": "Window reports unavailable" }))).into_response()
         }
     }
 }
@@ -55,11 +57,11 @@ async fn list_apps_for_device(
                     "last_detected": it.timestamp.to_rfc3339()
                 })
             }).collect();
-            Json(json!({ "apps": apps_json }))
+            crate::domains::shared::data_response(json!({ "apps": apps_json })).into_response()
         }
         Err(e) => {
             tracing::error!("Failed to fetch inventory for device: {}", e);
-            Json(json!({ "apps": [] }))
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, crate::domains::shared::data_response(json!({ "error": "Window reports unavailable" }))).into_response()
         }
     }
 }
@@ -79,14 +81,16 @@ async fn list_running_apps(
                     "window_count": a.window_count,
                     "exe_path": a.exe_path,
                     "exe_hash": a.exe_hash,
-                    "updated_at": a.updated_at.to_rfc3339()
+                    "updated_at": a.updated_at.to_rfc3339(),
+                    "principal": a.principal, "session_id": a.session_id,
+                    "source": a.source, "stale": a.stale
                 })
             }).collect();
-            Json(json!({ "apps": apps_json }))
+            crate::domains::shared::data_response(json!({ "apps": apps_json })).into_response()
         }
         Err(e) => {
             tracing::error!("Failed to fetch running apps: {}", e);
-            Json(json!({ "apps": [] }))
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, crate::domains::shared::data_response(json!({ "error": "Window reports unavailable" }))).into_response()
         }
     }
 }

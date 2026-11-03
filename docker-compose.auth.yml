@@ -1,0 +1,11 @@
+# Optional named administrative accounts. Mount the parent directory so atomic
+# file replacement is visible inside the container without recreating it.
+services:
+  server:
+    environment:
+      AUTH_USERS_FILE: /run/monitor-auth/users.json
+    volumes:
+      - type: bind
+        source: ${AUTH_USERS_DIRECTORY:?Set AUTH_USERS_DIRECTORY to the administrator-owned account directory}
+        target: /run/monitor-auth
+        read_only: true

@@ -107,14 +107,14 @@ echo "[4/8] Configurando archivo .env..."
 if [ ! -f "$ENV_FILE" ]; then
     echo "Configurando entorno inicial:"
     read -p "  Token de autenticacion (Enter para usar 'change-me-in-production'): " input_token
-    read -p "  URL del Servidor (Enter para usar 'http://10.30.0.123:3000'): " input_server
+    read -p "  URL del Servidor (Enter para usar 'http://monitor.example.invalid:3000'): " input_server
     read -p "  URL de RabbitMQ (Enter para usar default): " input_rabbitmq
     
     cat > "$ENV_FILE" << EOL
 AGENT_AUTH_TOKEN=${input_token:-change-me-in-production}
 AGENT_OFFLINE_CACHE_KEY=replace-with-32-byte-cache-key!!
-AGENT_SERVER_URL=${input_server:-http://10.30.0.123:3000}
-RABBITMQ_URL=${input_rabbitmq:-amqp://eclub:eCLUB123@10.30.0.123:5672/%2f}
+AGENT_SERVER_URL=${input_server:-http://monitor.example.invalid:3000}
+RABBITMQ_URL=${input_rabbitmq:-amqp://CHANGE_USER:CHANGE_PASSWORD@rabbitmq.example.invalid:5672/%2f}
 EOL
     echo "[+] Archivo .env creado."
 else

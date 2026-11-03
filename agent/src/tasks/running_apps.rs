@@ -13,23 +13,11 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
 
     tokio::spawn(async move {
         let mut monitor = MonitoringLoop::new();
-        let mut last_fingerprint = String::new();
-
         loop {
             live_sleep(&context, TaskInterval::RunningApps).await;
-
             let apps = monitor.capture_open_apps();
-            let fingerprint = apps
-                .iter()
-                .map(|app| format!("{}|{}|{}", app.app_name, app.window_count, app.primary_title))
-                .collect::<Vec<_>>()
-                .join("||");
-
-            if fingerprint == last_fingerprint {
-                continue;
-            }
-            last_fingerprint = fingerprint;
-
+            // Repeat snapshots even when unchanged so freshness is observable,
+            // including the first empty desktop and recovery after failed delivery.
             let running_apps_payload = context.build_event_envelope(
                 "running_apps",
                 1,

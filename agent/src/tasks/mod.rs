@@ -13,6 +13,7 @@ pub mod running_apps;
 pub mod inventory;
 pub mod heatmap;
 pub mod resource_logger;
+pub mod session_input;
 pub mod security_osquery;
 pub mod support;
 
@@ -68,36 +69,55 @@ impl TaskContext {
             "boot_id": boot_id,
             "schema_version": schema_version,
             "event_type": event_type,
+            "source_role": if crate::runtime::is_session() { "session" } else if crate::is_running_in_session_0() { "service" } else { "interactive" },
             "device_id": self.device_id,
             "hostname": self.hostname,
             "mac_address": self.mac_address,
             "version": env!("CARGO_PKG_VERSION"),
             "timestamp": Utc::now().to_rfc3339(),
-            "auth_token": self.auth_token,
             "payload": payload,
         })
     }
 
-    pub async fn publish_or_cache(&self, routing_event_type: &str, payload: serde_json::Value) {
-        let publisher_snapshot = { self.publisher.read().await.clone() };
-
-        if let Some(pub_) = publisher_snapshot {
-            let publish_error = match pub_.publish_event(routing_event_type, payload.clone()).await {
-                Ok(_) => None,
-                Err(err) => Some(err.to_string()),
-            };
-
-            if let Some(err_msg) = publish_error {
-                tracing::warn!("Publish failed for {}. Caching event: {}", routing_event_type, err_msg);
-                let _ = self.cache.save_event(routing_event_type, &payload).await;
+    pub async fn publish_or_cache(&self, routing_event_type: &str, payload: serde_json::Value) -> bool {
+        // Recheck policy at the write boundary; a collector may have been in flight when paused.
+        let config = self.config_manager.get().await;
+        let monitor = match routing_event_type {
+            "activity" => Some("window_activity"), "running_apps" => Some("running_apps"),
+            "input_heatmaps" => Some("heatmap"), "inventory" => Some("inventory"),
+            "usb" => Some("usb_detector"), "wifi" => Some("wifi_history"),
+            "heartbeat" if payload["event_type"] == "input_summary" =>
+                Some(if crate::runtime::is_session() { "session_input" } else { "resource_logger" }),
+            "heartbeat" => Some("heartbeat"), _ => None,
+        };
+        if monitor.is_some_and(|name| !config.is_monitor_enabled(name))
+            || (routing_event_type == "security" && config.monitoring_paused) { return false; }
+        // Persist before attempting any transport. A failed write is observable and never acknowledged.
+        let cache_id = match self.cache.save_event(routing_event_type, &payload).await {
+            Ok(id) => id,
+            Err(error) => {
+                tracing::error!(%error, route = routing_event_type, "Event could not be queued; disk requires attention");
+                return false;
             }
-        } else {
-            let _ = self.cache.save_event(routing_event_type, &payload).await;
+        };
+        if !crate::runtime::is_session() {
+            let publisher_snapshot = { self.publisher.read().await.clone() };
+            if let Some(publisher) = publisher_snapshot {
+                match publisher.publish_event(routing_event_type, payload).await {
+                    Ok(()) => {
+                        if let Err(error) = self.cache.mark_synced(&[cache_id]).await {
+                            tracing::error!(%error, "Cannot persist publish confirmation; event may be retried");
+                        }
+                    }
+                    Err(error) => tracing::warn!(%error, "Publish failed; event remains queued"),
+                }
+            }
         }
 
         if let Some(counter) = &self.events_counter {
             counter.fetch_add(1, Ordering::Relaxed);
         }
+        true
     }
 }
 
@@ -142,6 +162,12 @@ impl TaskInterval {
 /// Sleeps for the task's configured interval, re-reading the live config on
 /// every cycle so policy changes take effect without restarting the agent.
 pub async fn live_sleep(context: &TaskContext, interval: TaskInterval) {
-    let config = context.config_manager.get().await;
-    tokio::time::sleep(std::time::Duration::from_secs(interval.secs(&config))).await;
+    let mut changes = context.config_manager.subscribe();
+    loop {
+        let config = changes.borrow_and_update().clone();
+        tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_secs(interval.secs(&config))) => return,
+            changed = changes.changed() => { if changed.is_err() { return; } },
+        }
+    }
 }

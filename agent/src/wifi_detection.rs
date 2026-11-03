@@ -86,7 +86,7 @@ fn current_wifi_snapshot() -> Result<Option<WifiSnapshot>, Box<dyn std::error::E
 
     if !output.status.success() {
         tracing::warn!("netsh wlan show interfaces failed (exit code: {}). Is a WiFi adapter available?", output.status.code().unwrap_or(-1));
-        return Ok(None);
+        return Err(std::io::Error::other(format!("WiFi command failed: {}",output.status)).into());
     }
 
     let text = String::from_utf8_lossy(&output.stdout);
@@ -155,18 +155,19 @@ fn current_wifi_snapshot() -> Result<Option<WifiSnapshot>, Box<dyn std::error::E
 #[cfg(target_os = "linux")]
 fn current_wifi_snapshot() -> Result<Option<WifiSnapshot>, Box<dyn std::error::Error + Send + Sync>> {
     let output = match Command::new("/usr/bin/nmcli")
+        .env("LC_ALL","C")
         .args(["-t", "-f", "active,ssid,bssid,signal,device", "dev", "wifi"])
         .output() {
             Ok(out) => out,
             Err(e) => {
                 tracing::warn!("Failed to execute nmcli: {}", e);
-                return Ok(None);
+                return Err(e.into());
             }
         };
 
     if !output.status.success() {
         tracing::warn!("nmcli exited with error: {:?}", output.status);
-        return Ok(None);
+        return Err(std::io::Error::other(format!("WiFi command failed: {}",output.status)).into());
     }
 
     let text = String::from_utf8_lossy(&output.stdout);
@@ -174,10 +175,12 @@ fn current_wifi_snapshot() -> Result<Option<WifiSnapshot>, Box<dyn std::error::E
 
     for line in text.lines() {
         if line.starts_with("yes:") {
-            let parts: Vec<&str> = line.split(':').collect();
+            let mut parts=Vec::<String>::new();let mut field=String::new();let mut escaped=false;
+            for c in line.chars() {if escaped {field.push(c);escaped=false;} else if c=='\\' {escaped=true;} else if c==':' {parts.push(std::mem::take(&mut field));} else {field.push(c);}}
+            parts.push(field);
             if parts.len() >= 5 {
                 let ssid = if parts[1].is_empty() { None } else { Some(parts[1].to_string()) };
-                let bssid = if parts[2].is_empty() { None } else { Some(parts[2].replace("\\", ":").to_string()) };
+                let bssid = if parts[2].is_empty() { None } else { Some(parts[2].to_string()) };
                 let signal = parts[3].parse::<i32>().ok();
                 let interface = parts[4].to_string();
 
@@ -212,7 +215,7 @@ fn current_wifi_snapshot() -> Result<Option<WifiSnapshot>, Box<dyn std::error::E
 
     if !output.status.success() {
         tracing::warn!("airport command exited with error: {:?}", output.status);
-        return Ok(None);
+        return Err(std::io::Error::other(format!("WiFi command failed: {}",output.status)).into());
     }
 
     let text = String::from_utf8_lossy(&output.stdout);

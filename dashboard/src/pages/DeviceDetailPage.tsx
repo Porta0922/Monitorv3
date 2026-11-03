@@ -1,27 +1,19 @@
-import React, { Fragment, useEffect, useMemo, useState } from 'react';
+import {SessionActivityPanel} from '../components/metrics/SessionActivityPanel';
+import {AgentCredentialsPanel} from '../components/AgentCredentialsPanel';
+import {DeviceOverview} from '../components/DeviceOverview';
+import {DeviceActivityExplorer} from '../components/DeviceActivityExplorer';
+import type {HourGroup} from '../api/desktop';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import { AppShell } from '../components/AppShell';
+import { InventoryStatePanel } from '../components/InventoryStatePanel';
+import { DeviceTelemetryPanel } from '../components/metrics/DeviceTelemetryPanel';
+import { DailyMetricsPanel } from '../components/metrics/DailyMetricsPanel';
 import type { AppInfo, Device, RunningAppInfo, USBEvent, WifiEvent, NodeResourceMetric } from '../types';
 
-type TabKey = 'activity' | 'inventory' | 'usb' | 'wifi';
+type TabKey = 'overview' | 'activity' | 'inventory' | 'usb' | 'wifi' | 'resources' | 'diagnostic';
 type WifiStateFilter = 'all' | 'connected' | 'disconnected';
-
-interface HistoryItem {
-  app: string;
-  title: string;
-  seconds: number;
-  duration: string;
-  intervals: number;
-  is_idle: boolean;
-}
-
-interface HourlyItem {
-  hour: number;
-  label: string;
-  active_seconds: number;
-  idle_seconds: number;
-}
 
 interface HourlyProgramItem {
   app: string;
@@ -66,43 +58,47 @@ export function DeviceDetailPage() {
   const navigate = useNavigate();
 
   const [device, setDevice] = useState<Device | null>(null);
-  const [history, setHistory] = useState<HistoryItem[]>([]);
   const [hourlyPrograms, setHourlyPrograms] = useState<HourlyProgramsGroup[]>([]);
-  const [expandedHourlyPrograms, setExpandedHourlyPrograms] = useState<Record<string, boolean>>({});
-  const [hourly, setHourly] = useState<HourlyItem[]>([]);
   const [resourceMetrics, setResourceMetrics] = useState<NodeResourceMetric[]>([]);
 
   const [inventory, setInventory] = useState<AppInfo[]>([]);
   const [runningApps, setRunningApps] = useState<RunningAppInfo[]>([]);
   const [usbEvents, setUsbEvents] = useState<USBEvent[]>([]);
   const [wifiEvents, setWifiEvents] = useState<WifiEvent[]>([]);
-  const [tab, setTab] = useState<TabKey>('activity');
+  const [tab, setTab] = useState<TabKey>('overview');
   const [wifiStateFilter, setWifiStateFilter] = useState<WifiStateFilter>('all');
   const [isLoading, setIsLoading] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
+  const [revision, setRevision] = useState(0);
   const [error, setError] = useState('');
 
-  const dateToday = useMemo(() => new Date().toISOString().slice(0, 10), []);
-  const [selectedDate, setSelectedDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const dateToday = useMemo(() => new Date().toISOString().slice(0,10), []);
+  const [selectedDate, setSelectedDate] = useState<string>(() => new Date().toISOString().slice(0,10));
 
   useEffect(() => {
     if (!deviceId) return;
 
+    let alive = true;
     const load = async () => {
       setIsLoading(true);
+      setDevice(null);
+      setHourlyPrograms([]);
+      setResourceMetrics([]); setInventory([]); setRunningApps([]); setUsbEvents([]); setWifiEvents([]);
       setError('');
 
       try {
         const [devices, apps, openApps, usb, wifi, resources] = await Promise.all([
           apiClient.getDevices(),
-          apiClient.getApps(deviceId).catch(() => []),
-          apiClient.getRunningApps(deviceId).catch(() => []),
-          apiClient.getUsbHistory(deviceId, 250, selectedDate).catch(() => []),
-          apiClient.getWifiHistory(deviceId, 250, selectedDate).catch(() => []),
-          apiClient.getDeviceResources(deviceId, selectedDate, 2880).catch(() => []),
+          apiClient.getApps(deviceId),
+          apiClient.getRunningApps(deviceId),
+          apiClient.getUsbHistory(deviceId, 250, selectedDate),
+          apiClient.getWifiHistory(deviceId, 250, selectedDate),
+          apiClient.getDeviceResources(deviceId, selectedDate, 2880),
         ]);
 
+        if (!alive) return;
         const selected = devices.find((d) => d.device_id === deviceId) || null;
+        if (!selected) throw new Error('El equipo no existe o ya no está disponible.');
         setDevice(selected);
         setInventory(apps);
         setRunningApps(openApps);
@@ -110,42 +106,20 @@ export function DeviceDetailPage() {
         setWifiEvents(wifi);
         setResourceMetrics(resources);
 
-        const [historyData, hourlyData] = await Promise.all([
-          apiClient.getHistory(deviceId, selectedDate).catch(() => []),
-          apiClient.getHourly(deviceId, selectedDate).catch(() => []),
-        ]);
+        const hourlyProgramsData = await apiClient.getHistoryHourlyPrograms(deviceId, selectedDate);
 
-        const hourlyProgramsData = await apiClient.getHistoryHourlyPrograms(deviceId, selectedDate).catch(() => []);
-
-        setHistory(historyData as HistoryItem[]);
+        if (!alive) return;
         setHourlyPrograms(hourlyProgramsData as HourlyProgramsGroup[]);
-        setHourly(hourlyData as HourlyItem[]);
-      } catch (err: any) {
-        setError(err?.message || 'No fue posible cargar la consola de dispositivo.');
+      } catch (err: unknown) {
+        if (alive) setError(err instanceof Error ? err.message : 'No se pudo consultar el detalle. Vuelve a seleccionar el día para reintentar.');
       } finally {
-        setIsLoading(false);
+        if (alive) setIsLoading(false);
       }
     };
 
-    load();
-  }, [deviceId, selectedDate]);
-
-  const tabStats = useMemo(
-    () => ({
-      activity: history.length,
-      inventory: runningApps.length,
-      usb: usbEvents.length,
-      wifi: wifiEvents.length,
-    }),
-    [history.length, runningApps.length, usbEvents.length, wifiEvents.length]
-  );
-
-  const formatDuration = (seconds?: number) => {
-    const safeSeconds = Math.max(0, seconds || 0);
-    const minutes = Math.floor(safeSeconds / 60);
-    const remSeconds = safeSeconds % 60;
-    return `${minutes}m ${remSeconds}s`;
-  };
+    void load();
+    return () => { alive = false; };
+  }, [deviceId, selectedDate, revision]);
 
   const formatTopProcessCpu = (value?: number) => {
     return Math.round(Math.min(100, Math.max(0, value || 0)));
@@ -183,18 +157,9 @@ export function DeviceDetailPage() {
   const tabClass = (key: TabKey) =>
     `rounded-full border px-4 py-2 text-xs font-semibold tracking-wide transition-all ${
       tab === key
-        ? 'border-[#00d9ff] bg-[#00d9ff]/15 text-[#00d9ff]'
-        : 'border-[#223462] bg-[#111a35] text-[#8ea0cf] hover:border-[#00d9ff]/50 hover:text-[#dce6ff]'
+        ? 'border-[var(--palette-dfe7e3)] bg-[var(--palette-17715a)]/15 text-[var(--palette-17715a)]'
+        : 'border-[var(--palette-dfe7e3)] bg-[var(--palette-f5f7f6)] text-[var(--palette-53685c)] hover:border-[var(--palette-dfe7e3)]/50 hover:text-[var(--palette-53685c)]'
     }`;
-
-  const maxHourlyValue = Math.max(1, ...hourly.map((item: HourlyItem) => item.active_seconds + item.idle_seconds));
- 
-  const toggleHourlyProgram = (key: string) => {
-    setExpandedHourlyPrograms((prev: Record<string, boolean>) => ({
-      ...prev,
-      [key]: !prev[key],
-    }));
-  };
 
   const resourcePeak = useMemo(() => {
     if (resourceMetrics.length === 0) {
@@ -376,101 +341,50 @@ export function DeviceDetailPage() {
   return (
     <AppShell
       currentPage="dashboard"
-      title={device ? `Consola de Dispositivo: ${device.nickname || device.hostname}` : 'Consola de Dispositivo'}
-      subtitle={deviceId || 'Sin dispositivo'}
+      contentClassName="device-detail"
+      title={device ? device.nickname || device.hostname : 'Detalle del equipo'}
+      subtitle="Recursos, actividad y conexiones del equipo seleccionado."
       actions={
         <button
           onClick={() => navigate('/dashboard')}
-          className="rounded-full border border-[#00d9ff]/50 bg-[#00d9ff]/10 px-4 py-2 text-xs font-semibold tracking-wide text-[#00d9ff] hover:border-[#00d9ff] hover:bg-[#00d9ff]/20"
+          className="rounded-full border border-[var(--palette-dfe7e3)]/50 bg-[var(--palette-17715a)]/10 px-4 py-2 text-xs font-semibold tracking-wide text-[var(--palette-17715a)] hover:border-[var(--palette-dfe7e3)] hover:bg-[var(--palette-17715a)]/20"
         >
-          Volver a AME
+          Volver a los equipos
         </button>
       }
     >
-      {device && (
-        <section className="rounded-2xl border border-[#1b2b56] bg-[linear-gradient(160deg,#0f1d43,#0b1329)] p-5 shadow-[0_12px_26px_rgba(0,0,0,0.32)]">
-          <div className="grid grid-cols-9 gap-4 text-sm">
-            <div className="col-span-2">
-              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Hostname</p>
-              <p className="mt-1 font-display text-base text-[#e4e6eb]">{device.hostname}</p>
-            </div>
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Estado</p>
-              <p className={`mt-1 font-mono text-sm ${device.online ? 'text-[#00ff88]' : 'text-red-400'}`}>
-                {device.online ? 'ONLINE' : 'OFFLINE'}
-              </p>
-            </div>
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Activo hoy</p>
-              <p className="mt-1 font-mono text-sm text-[#00d9ff]">{formatDuration(device.active_time_today_seconds)}</p>
-            </div>
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Inactivo hoy</p>
-              <p className="mt-1 font-mono text-sm text-[#ff9f1a]">{formatDuration(device.idle_time_today_seconds)}</p>
-            </div>
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Teclas hoy</p>
-              <p className="mt-1 font-mono text-sm text-[#00ff88]">{(device.keys_today || 0).toLocaleString()}</p>
-            </div>
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Mouse mov hoy</p>
-              <p className="mt-1 font-mono text-sm text-[#00d9ff]">{(device.mouse_moves_today || 0).toLocaleString()}</p>
-            </div>
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Clicks hoy</p>
-              <p className="mt-1 font-mono text-sm text-[#ffd54a]">{(device.mouse_clicks_today || 0).toLocaleString()}</p>
-            </div>
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">MAC</p>
-              <p className="mt-1 font-mono text-sm text-[#a7b5dc]">{device.mac_address || 'N/A'}</p>
-            </div>
-          </div>
-        </section>
-      )}
+      {device && <div className="device-identity"><span className={device.online?'device-online':'device-offline'}>{device.online?'Conectado':'Sin conexión'}</span><strong>{device.hostname}</strong><span className="muted">Última señal: {new Date(device.last_seen).toLocaleString()}</span><details><summary>Identificación</summary><p>Identificador: {device.device_id}</p><p>MAC: {device.mac_address||'Sin informar'}</p></details><button className="button button-small" disabled={isLoading} onClick={()=>setRevision(v=>v+1)}>{isLoading?'Actualizando…':'Actualizar'}</button></div>}
 
-      <section className="flex items-center justify-between gap-3">
-        <div className="flex gap-2">
-          <button className={tabClass('activity')} onClick={() => setTab('activity')}>
-            Actividad ({tabStats.activity})
-          </button>
-          <button className={tabClass('inventory')} onClick={() => setTab('inventory')}>
-              Apps abiertas ({tabStats.inventory})
-          </button>
-          <button className={tabClass('usb')} onClick={() => setTab('usb')}>
-            USB ({tabStats.usb})
-          </button>
-          <button className={tabClass('wifi')} onClick={() => setTab('wifi')}>
-            WiFi ({tabStats.wifi})
-          </button>
-        </div>
+      <section className="device-navigation">
+        <nav className="device-tabs" aria-label="Secciones del equipo">{([['overview','Resumen'],['activity','Actividad'],['inventory','Aplicaciones'],['resources','Recursos'],['usb','USB'],['wifi','WiFi'],['diagnostic','Diagnóstico']] as [TabKey,string][]).map(([key,label])=><button key={key} className={tabClass(key)} aria-current={tab===key?'page':undefined} onClick={()=>setTab(key)}>{label}</button>)}</nav>
 
-        {(tab === 'activity' || tab === 'usb' || tab === 'wifi') && (
+        {(tab === 'overview' || tab === 'activity' || tab === 'resources' || tab === 'usb' || tab === 'wifi') && (
           <div className="flex items-center gap-2">
-            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Fecha</span>
+            <label htmlFor="device-date" className="muted">Fecha de consulta (UTC)</label>
             <input
-              type="date"
+              type="date" id="device-date"
               value={selectedDate}
               max={dateToday}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSelectedDate(e.target.value || dateToday)}
-              className="rounded-full border border-[#223462] bg-[#111a35] px-3 py-1.5 font-mono text-[11px] text-[#dce6ff] cursor-pointer"
+              className="rounded-full border border-[var(--palette-dfe7e3)] bg-[var(--palette-f5f7f6)] px-3 py-1.5 font-sans text-[12px] text-[var(--palette-53685c)] cursor-pointer"
             />
             <button
               onClick={handleExportCsv}
               disabled={isExporting}
-              className="rounded-full border border-[#00ff88]/40 bg-[#00ff88]/10 px-3 py-1.5 font-mono text-[11px] text-[#00ff88] hover:border-[#00ff88] disabled:opacity-60"
+              className="rounded-full border border-[var(--palette-dfe7e3)]/40 bg-[var(--palette-31764d)]/10 px-3 py-1.5 font-sans text-[12px] text-[var(--palette-31764d)] hover:border-[var(--palette-dfe7e3)] disabled:opacity-60"
             >
-              {isExporting ? 'Exportando...' : 'Export CSV'}
+              {isExporting ? 'Exportando…' : 'Exportar actividad'}
             </button>
           </div>
         )}
 
         {tab === 'wifi' && (
           <div className="flex items-center gap-2">
-            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Estado</span>
+            <span className="font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">Estado</span>
             <select
               value={wifiStateFilter}
               onChange={(event: React.ChangeEvent<HTMLSelectElement>) => setWifiStateFilter(event.target.value as WifiStateFilter)}
-              className="rounded-full border border-[#223462] bg-[#111a35] px-3 py-1.5 text-[11px] text-[#dce6ff]"
+              className="rounded-full border border-[var(--palette-dfe7e3)] bg-[var(--palette-f5f7f6)] px-3 py-1.5 text-[12px] text-[var(--palette-53685c)]"
             >
               <option value="all">Todos</option>
               <option value="connected">Conectado</option>
@@ -480,148 +394,54 @@ export function DeviceDetailPage() {
         )}
       </section>
 
-      {tab === 'activity' && !isLoading && (
-        <section className="rounded-2xl border border-[#1b2b56] bg-[linear-gradient(160deg,#0f1d43,#0b1329)] p-4 shadow-[0_12px_26px_rgba(0,0,0,0.32)]">
-          <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.18em] text-[#8ea0cf]">Actividad por Hora</p>
-          <div className="flex h-32 items-end gap-1 overflow-hidden rounded-xl border border-[#20315a] bg-[#0a122a] p-2">
-            {hourly.map((item: HourlyItem) => {
-              const total = item.active_seconds + item.idle_seconds;
-              const activePct = total > 0 ? Math.round((item.active_seconds / maxHourlyValue) * 100) : 0;
-              const idlePct = total > 0 ? Math.round((item.idle_seconds / maxHourlyValue) * 100) : 0;
-
-              return (
-                <div key={item.hour} className="flex min-w-[22px] flex-1 flex-col items-center justify-end gap-1">
-                  <div className="relative flex h-20 w-3 flex-col justify-end overflow-hidden rounded-full bg-[#1b2a4f]">
-                    <div className="w-full bg-[#ff9f1a]" style={{ height: `${idlePct}%` }} />
-                    <div className="w-full bg-[#00d9ff]" style={{ height: `${activePct}%` }} />
-                  </div>
-                  <span className="font-mono text-[9px] text-[#7c90c1]">{item.hour}</span>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
-      {tab === 'activity' && !isLoading && resourceMetrics.length > 0 && (
-        <section className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-[#1b2b56] bg-[#0b1329] px-4 py-2.5">
-          <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-[#5a6a90]">Recursos hoy</span>
-          <span className="flex items-center gap-1.5 rounded-full border border-[#ff5f7a]/30 bg-[#ff5f7a]/10 px-2.5 py-1">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#ff5f7a]" />
-            <span className="font-mono text-[11px] text-[#ffd8df]">CPU pico {Math.min(100, Math.round(resourcePeak?.cpu_percent || 0))}%</span>
+      {tab === 'resources' && !error && !isLoading && resourceMetrics.length > 0 && (
+        <section className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-[var(--palette-dfe7e3)] bg-[var(--palette-f5f7f6)] px-4 py-2.5">
+          <span className="font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">Recursos: {selectedDate}</span>
+          <span className="flex items-center gap-1.5 rounded-full border border-[var(--palette-dfe7e3)]/30 bg-[var(--palette-b2433d)]/10 px-2.5 py-1">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--palette-b2433d)]" />
+            <span className="font-sans text-[12px] text-[var(--palette-53685c)]">CPU pico {Math.min(100, Math.round(Math.max(...resourceMetrics.map(metric => metric.cpu_percent))))}%</span>
           </span>
-          <span className="flex items-center gap-1.5 rounded-full border border-[#00d9ff]/30 bg-[#00d9ff]/10 px-2.5 py-1">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#00d9ff]" />
-            <span className="font-mono text-[11px] text-[#d3f6ff]">RAM pico {Math.min(100, Math.round(resourcePeak?.memory_percent || 0))}%</span>
+          <span className="flex items-center gap-1.5 rounded-full border border-[var(--palette-dfe7e3)]/30 bg-[var(--palette-17715a)]/10 px-2.5 py-1">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--palette-17715a)]" />
+            <span className="font-sans text-[12px] text-[var(--palette-53685c)]">RAM pico {Math.min(100, Math.round(Math.max(...resourceMetrics.map(metric => metric.memory_percent))))}%</span>
           </span>
           {resourcePeak?.top_process_name && (
-            <span className="flex items-center gap-1.5 rounded-full border border-[#223462] bg-[#0a122a] px-2.5 py-1">
-              <span className="font-mono text-[10px] text-[#5a6a90]">▸</span>
-              <span className="font-mono text-[11px] text-[#8ea0cf]">{resourcePeak.top_process_name}</span>
-              <span className="font-mono text-[10px] text-[#5a6a90]">
+            <span className="flex items-center gap-1.5 rounded-full border border-[var(--palette-dfe7e3)] bg-[var(--palette-f5f7f6)] px-2.5 py-1">
+              <span className="font-sans text-[12px] text-[var(--palette-53685c)]">▸</span>
+              <span className="font-sans text-[12px] text-[var(--palette-53685c)]">{resourcePeak.top_process_name}</span>
+              <span className="font-sans text-[12px] text-[var(--palette-53685c)]">
                 {formatTopProcessCpu(resourcePeak.top_process_cpu_percent)}% cpu · {formatTopProcessMemoryMb(resourcePeak.top_process_memory_mb)} MB
               </span>
             </span>
           )}
-          <span className="ml-auto font-mono text-[10px] text-[#3a4e78]">{resourceMetrics.length} muestras</span>
+          <span className="ml-auto font-sans text-[12px] text-[var(--palette-53685c)]">{resourceMetrics.length} muestras</span>
         </section>
       )}
 
-      {error && <section className="rounded-xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm text-red-300">{error}</section>}
+      {deviceId && tab === 'inventory' && <InventoryStatePanel key={deviceId} deviceId={deviceId} />}
+      {deviceId && tab === 'diagnostic' && <><DeviceTelemetryPanel key={deviceId} deviceId={deviceId} />{apiClient.getRole()==='admin' && <AgentCredentialsPanel key={`credentials-${deviceId}`} deviceId={deviceId}/>}</>}
+      {deviceId && tab === 'overview' && !isLoading && !error && <DeviceOverview key={deviceId} deviceId={deviceId} groups={hourlyPrograms as HourGroup[]} onActivity={()=>setTab('activity')} onResources={()=>setTab('resources')} onDiagnostic={()=>setTab('diagnostic')}/>}
+      {deviceId && tab === 'overview' && !isLoading && !error && <SessionActivityPanel key={`${deviceId}-${selectedDate}`} deviceId={deviceId} initialDay={selectedDate} compact/>}
+      {deviceId && tab === 'resources' && <DeviceTelemetryPanel key={deviceId} deviceId={deviceId} resourcesOnly />}
+      {tab === 'activity' && !isLoading && !error && <DeviceActivityExplorer key={`${deviceId}-${selectedDate}`} groups={hourlyPrograms as HourGroup[]}/>}
 
-      {isLoading ? (
-        <section className="rounded-2xl border border-[#1b2b56] bg-[#0b1329] px-6 py-10 text-center text-[#a0a5b2]">Cargando telemetria...</section>
-      ) : (
-        <section className="overflow-hidden rounded-2xl border border-[#1b2b56] bg-[linear-gradient(160deg,#0f1d43,#0b1329)] shadow-[0_12px_26px_rgba(0,0,0,0.32)]">
-          {tab === 'activity' && (
-            <div className="overflow-x-auto">
-              {hourlyPrograms.length === 0 ? (
-                <div className="py-8 text-center text-[#8fa0c9]">No hay actividad para esta fecha.</div>
-              ) : (
-                <div className="space-y-3 p-3">
-                  {hourlyPrograms.map((group: HourlyProgramsGroup) => (
-                    <section key={group.hour} className="rounded-xl border border-[#21325d] bg-[#0a122a]">
-                      <header className="flex items-center justify-between border-b border-[#1b2a4f] px-4 py-2">
-                        <h3 className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#8ea0cf]">{group.label}</h3>
-                        <span className="font-mono text-[10px] text-[#7c90c1]">{group.programs.length} apps</span>
-                      </header>
 
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr>
-                              <th>Aplicacion</th>
-                              <th>Duracion</th>
-                              <th>Intervalos</th>
-                              <th>Estado</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {group.programs.map((program: HourlyProgramItem, idx: number) => (
-                              <Fragment key={`${group.hour}-${program.app}-${idx}`}>
-                                <tr>
-                                  <td className="max-w-[420px] truncate font-mono text-[12px] text-[#dce6ff]" title={program.app}>
-                                    <div className="flex items-center gap-2">
-                                      <span className="truncate">{shortAppName(program.app)}</span>
-                                      {!!program.windows?.length && (
-                                        <button
-                                          onClick={() => toggleHourlyProgram(`${group.hour}-${program.app}-${idx}`)}
-                                          className="rounded-full border border-[#223462] bg-[#111a35] px-2 py-[2px] font-mono text-[9px] text-[#8ea0cf] hover:border-[#00d9ff]/50 hover:text-[#dce6ff]"
-                                        >
-                                          {expandedHourlyPrograms[`${group.hour}-${program.app}-${idx}`]
-                                            ? 'Ocultar ventanas'
-                                            : `Ver ventanas (${program.window_count ?? program.windows?.length ?? 0})`}
-                                        </button>
-                                      )}
-                                    </div>
-                                  </td>
-                                  <td className="whitespace-nowrap font-mono text-[11px] text-[#00ff88]">{program.duration}</td>
-                                  <td className="whitespace-nowrap font-mono text-[11px] text-[#9eb0dc]">{program.intervals}</td>
-                                  <td>
-                                    <span className={`inline-flex rounded-full px-2.5 py-1 font-mono text-[10px] ${program.is_idle ? 'border border-[#ff9f1a]/40 bg-[#ff9f1a]/10 text-[#ff9f1a]' : 'border border-[#00d9ff]/40 bg-[#00d9ff]/10 text-[#00d9ff]'}`}>
-                                      {program.is_idle ? 'IDLE' : 'ACTIVE'}
-                                    </span>
-                                  </td>
-                                </tr>
-                                {expandedHourlyPrograms[`${group.hour}-${program.app}-${idx}`] && !!program.windows?.length && (
-                                  <tr>
-                                    <td colSpan={4} className="bg-[#0b1734] px-4 py-2">
-                                      <div className="space-y-1.5">
-                                        {program.windows.map((windowItem: { title: string; duration: string; intervals: number }, windowIdx: number) => (
-                                          <div
-                                            key={`${group.hour}-${program.app}-${idx}-${windowIdx}`}
-                                            className="flex items-center justify-between rounded-md border border-[#1f2d53] bg-[#0a122a] px-3 py-1.5"
-                                          >
-                                            <span className="truncate font-mono text-[11px] text-[#cdd9f8]" title={windowItem.title}>
-                                              {windowItem.title}
-                                            </span>
-                                            <span className="ml-3 whitespace-nowrap font-mono text-[10px] text-[#8ea0cf]">
-                                              {windowItem.duration} · {windowItem.intervals} intervalos
-                                            </span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </td>
-                                  </tr>
-                                )}
-                              </Fragment>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </section>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+      {tab === 'resources' && !error && !isLoading && deviceId && (
+        <DailyMetricsPanel deviceId={deviceId} endDate={selectedDate} />
+      )}
 
+      {error && <section className="notice notice-error" role="alert">{error} <button className="text-button" onClick={() => setRevision(v => v + 1)}>Reintentar</button></section>}
+
+      {error ? null : isLoading ? (
+        <section className="rounded-2xl border border-[var(--palette-dfe7e3)] bg-[var(--palette-f5f7f6)] px-6 py-10 text-center text-[var(--palette-53685c)]">Consultando datos del equipo…</section>
+      ) : ['inventory','usb','wifi'].includes(tab) ? (
+        <section className="overflow-hidden rounded-2xl border border-[var(--palette-dfe7e3)] bg-[var(--surface)] shadow-sm">
           {tab === 'inventory' && (
             <div className="space-y-6">
               <section className="space-y-3">
                 <div>
-                  <h3 className="text-sm font-semibold text-[#dce6ff]">Aplicaciones abiertas</h3>
-                  <p className="text-xs text-[#8fa0c9]">Lista actual de ventanas visibles del usuario. El panel en vivo sigue mostrando solo la ventana enfocada en este momento.</p>
+                  <h3 className="text-sm font-semibold text-[var(--palette-53685c)]">Últimas ventanas reportadas</h3>
+                  <p className="text-xs text-[var(--palette-53685c)]">Reportes por sesión de escritorio. Incluso un reporte reciente no confirma que la ventana siga abierta. Los de más de tres minutos se marcan como antiguos.</p>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -630,21 +450,23 @@ export function DeviceDetailPage() {
                         <th>Aplicacion</th>
                         <th>Ventanas</th>
                         <th>Ventana principal</th>
+                        <th>Sesión y reporte</th>
                         <th>Ruta</th>
                       </tr>
                     </thead>
                     <tbody>
                       {runningApps.length === 0 ? (
                         <tr>
-                          <td colSpan={4} className="py-8 text-center text-[#8fa0c9]">Sin snapshot de apps abiertas para este equipo.</td>
+                          <td colSpan={5} className="py-8 text-center text-[var(--palette-53685c)]">No hay ventanas reportadas. Esto no permite distinguir entre ausencia de ventanas y falta de captura.</td>
                         </tr>
                       ) : (
                         runningApps.map((app: RunningAppInfo) => (
                           <tr key={app.id}>
-                            <td className="max-w-[260px] truncate text-[12px] text-[#dce6ff]" title={app.app_name}>{shortAppName(app.app_name)}</td>
-                            <td className="whitespace-nowrap font-mono text-[11px] text-[#00d9ff]">{app.window_count}</td>
-                            <td className="max-w-[420px] truncate text-[12px] text-[#9eb0dc]" title={app.primary_title || 'Sin titulo'}>{app.primary_title || 'Sin titulo'}</td>
-                            <td className="max-w-[360px] truncate font-mono text-[11px] text-[#91a3d2]" title={app.exe_path || ''}>{app.exe_path || 'No disponible'}</td>
+                            <td className="max-w-[260px] truncate text-[12px] text-[var(--palette-53685c)]" title={app.app_name}>{shortAppName(app.app_name)}</td>
+                            <td className="whitespace-nowrap font-sans text-[12px] text-[var(--palette-17715a)]">{app.window_count}</td>
+                            <td className="max-w-[420px] truncate text-[12px] text-[var(--palette-53685c)]" title={app.primary_title || 'Sin titulo'}>{app.primary_title || 'Sin titulo'}</td>
+                            <td className="text-xs"><div>{app.stale === false ? 'Reporte reciente' : app.stale === true ? 'Reporte antiguo' : 'Vigencia sin confirmar'}</div><time dateTime={app.updated_at}>{new Date(app.updated_at).toLocaleString()}</time><div title={app.principal || undefined}>{app.principal || 'Sin atribución de usuario'}</div><div title={app.session_id || undefined}>{app.session_id ? `Sesión ${app.session_id.slice(0, 8)}` : 'Origen heredado'}</div></td>
+                            <td className="max-w-[360px] truncate font-sans text-[12px] text-[var(--palette-53685c)]" title={app.exe_path || ''}>{app.exe_path || 'No disponible'}</td>
                           </tr>
                         ))
                       )}
@@ -655,8 +477,8 @@ export function DeviceDetailPage() {
 
               <section className="space-y-3">
                 <div>
-                  <h3 className="text-sm font-semibold text-[#dce6ff]">Inventario detectado</h3>
-                  <p className="text-xs text-[#8fa0c9]">Listado historico de software detectado en el equipo.</p>
+                  <h3 className="text-sm font-semibold text-[var(--palette-53685c)]">Detecciones heredadas (no confirman instalación actual)</h3>
+                  <p className="text-xs text-[var(--palette-53685c)]">Listado historico de software detectado en el equipo.</p>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -671,19 +493,19 @@ export function DeviceDetailPage() {
                     <tbody>
                       {inventory.length === 0 ? (
                         <tr>
-                          <td colSpan={4} className="py-8 text-center text-[#8fa0c9]">Sin datos de inventario para este equipo.</td>
+                          <td colSpan={4} className="py-8 text-center text-[var(--palette-53685c)]">Sin datos de inventario para este equipo.</td>
                         </tr>
                       ) : (
                         inventory.map((app: AppInfo, idx: number) => (
                           <tr key={`${app.app_name}-${idx}`}>
-                            <td className="max-w-[360px] truncate text-[12px] text-[#dce6ff]" title={app.app_name}>{app.app_name}</td>
-                            <td className="text-[12px] text-[#9eb0dc]">{app.version || 'Unknown'}</td>
+                            <td className="max-w-[360px] truncate text-[12px] text-[var(--palette-53685c)]" title={app.app_name}>{app.app_name}</td>
+                            <td className="text-[12px] text-[var(--palette-53685c)]">{app.version || 'Unknown'}</td>
                             <td>
-                              <span className={`inline-flex rounded-full px-2.5 py-1 font-mono text-[10px] ${app.verified ? 'border border-[#00ff88]/40 bg-[#00ff88]/10 text-[#00ff88]' : 'border border-red-500/40 bg-red-500/10 text-red-300'}`}>
+                              <span className={`inline-flex rounded-full px-2.5 py-1 font-sans text-[12px] ${app.verified ? 'border border-[var(--palette-dfe7e3)]/40 bg-[var(--palette-31764d)]/10 text-[var(--palette-31764d)]' : 'border border-red-500/40 bg-red-500/10 text-red-700'}`}>
                                 {app.verified ? 'VERIFIED' : 'UNVERIFIED'}
                               </span>
                             </td>
-                            <td className="max-w-[440px] truncate font-mono text-[11px] text-[#91a3d2]" title={app.exe_hash}>{app.exe_hash}</td>
+                            <td className="max-w-[440px] truncate font-sans text-[12px] text-[var(--palette-53685c)]" title={app.exe_hash}>{app.exe_hash}</td>
                           </tr>
                         ))
                       )}
@@ -710,20 +532,20 @@ export function DeviceDetailPage() {
                 <tbody>
                   {usbSummaryRows.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-[#8fa0c9]">Sin eventos USB para este equipo.</td>
+                      <td colSpan={6} className="py-8 text-center text-[var(--palette-53685c)]">Sin eventos USB para este equipo.</td>
                     </tr>
                   ) : (
                     usbSummaryRows.map((event: UsbSummaryRow) => (
                       <tr key={event.key}>
-                        <td className="whitespace-nowrap font-mono text-[11px] text-[#8ea0cf]">
+                        <td className="whitespace-nowrap font-sans text-[12px] text-[var(--palette-53685c)]">
                           {event.pair_id.split('#').pop()}
                         </td>
-                        <td className="whitespace-nowrap font-mono text-[11px] text-[#9eb0dc]">{new Date(event.timestamp).toLocaleString()}</td>
-                        <td className="max-w-[380px] truncate text-[12px] text-[#dce6ff]" title={event.device_name}>{event.device_name}</td>
-                        <td className="max-w-[340px] truncate font-mono text-[11px] text-[#91a3d2]" title={event.serial_number}>{event.serial_number || 'N/A'}</td>
-                        <td className="max-w-[420px] truncate font-mono text-[11px] text-[#91a3d2]" title={event.hardware_id}>{event.hardware_id || 'N/A'}</td>
+                        <td className="whitespace-nowrap font-sans text-[12px] text-[var(--palette-53685c)]">{new Date(event.timestamp).toLocaleString()}</td>
+                        <td className="max-w-[380px] truncate text-[12px] text-[var(--palette-53685c)]" title={event.device_name}>{event.device_name}</td>
+                        <td className="max-w-[340px] truncate font-sans text-[12px] text-[var(--palette-53685c)]" title={event.serial_number}>{event.serial_number || 'N/A'}</td>
+                        <td className="max-w-[420px] truncate font-sans text-[12px] text-[var(--palette-53685c)]" title={event.hardware_id}>{event.hardware_id || 'N/A'}</td>
                         <td>
-                          <span className={`inline-flex rounded-full px-2.5 py-1 font-mono text-[10px] ${event.action === 'IN' ? 'border border-[#00ff88]/40 bg-[#00ff88]/10 text-[#00ff88]' : 'border border-red-500/40 bg-red-500/10 text-red-300'}`}>
+                          <span className={`inline-flex rounded-full px-2.5 py-1 font-sans text-[12px] ${event.action === 'IN' ? 'border border-[var(--palette-dfe7e3)]/40 bg-[var(--palette-31764d)]/10 text-[var(--palette-31764d)]' : 'border border-red-500/40 bg-red-500/10 text-red-700'}`}>
                             {event.action === 'IN' ? 'CONNECTED' : 'DISCONNECTED'}
                           </span>
                         </td>
@@ -737,45 +559,45 @@ export function DeviceDetailPage() {
 
           {tab === 'wifi' && (
             <div className="space-y-3">
-              <div className="grid grid-cols-5 gap-3 rounded-xl border border-[#20315a] bg-[#0a122a] px-4 py-3">
+              <div className="grid grid-cols-5 gap-3 rounded-xl border border-[var(--palette-dfe7e3)] bg-[var(--palette-f5f7f6)] px-4 py-3">
                 <div className="col-span-2">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Red actual</p>
-                  <p className="mt-1 truncate font-display text-base text-[#e4e6eb]" title={currentWifiEvent?.ssid || 'Sin conexion'}>
+                  <p className="font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">Red actual</p>
+                  <p className="mt-1 truncate font-display text-base text-[var(--palette-53685c)]" title={currentWifiEvent?.ssid || 'Sin conexion'}>
                     {currentWifiEvent?.ssid || 'Sin conexion'}
                   </p>
                 </div>
                 <div>
-                  <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Estado</p>
-                  <p className={`mt-1 font-mono text-sm ${currentWifiEvent?.state === 'connected' ? 'text-[#00ff88]' : 'text-[#ff9f1a]'}`}>
+                  <p className="font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">Estado</p>
+                  <p className={`mt-1 font-sans text-sm ${currentWifiEvent?.state === 'connected' ? 'text-[var(--palette-31764d)]' : 'text-[var(--palette-97621b)]'}`}>
                     {(currentWifiEvent?.state || 'unknown').toUpperCase()}
                   </p>
                 </div>
                 <div>
-                  <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Senal</p>
-                  <p className="mt-1 font-mono text-sm text-[#00d9ff]">{currentWifiEvent?.signal_percent !== undefined ? `${currentWifiEvent.signal_percent}%` : 'N/A'}</p>
+                  <p className="font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">Senal</p>
+                  <p className="mt-1 font-sans text-sm text-[var(--palette-17715a)]">{currentWifiEvent?.signal_percent !== undefined ? `${currentWifiEvent.signal_percent}%` : 'N/A'}</p>
                 </div>
                 <div>
-                  <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Ultimo cambio</p>
-                  <p className="mt-1 truncate font-mono text-[11px] text-[#a7b5dc]" title={currentWifiEvent?.timestamp}>
+                  <p className="font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">Ultimo cambio</p>
+                  <p className="mt-1 truncate font-sans text-[12px] text-[var(--palette-53685c)]" title={currentWifiEvent?.timestamp}>
                     {currentWifiEvent ? new Date(currentWifiEvent.timestamp).toLocaleString() : 'N/A'}
                   </p>
                 </div>
               </div>
 
-              <div className="rounded-xl border border-[#20315a] bg-[#0a122a] px-4 py-3">
+              <div className="rounded-xl border border-[var(--palette-dfe7e3)] bg-[var(--palette-f5f7f6)] px-4 py-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Top redes por tiempo conectado</p>
-                  <span className="font-mono text-[10px] text-[#8ea0cf]">{wifiTotalsBySsid.length} SSID</span>
+                  <p className="font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">Top redes por tiempo conectado</p>
+                  <span className="font-sans text-[12px] text-[var(--palette-53685c)]">{wifiTotalsBySsid.length} SSID</span>
                 </div>
 
                 {wifiTotalsBySsid.length === 0 ? (
-                  <p className="font-mono text-[11px] text-[#8fa0c9]">Sin tiempo conectado acumulado para el filtro actual.</p>
+                  <p className="font-sans text-[12px] text-[var(--palette-53685c)]">Sin tiempo conectado acumulado para el filtro actual.</p>
                 ) : (
                   <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                     {wifiTotalsBySsid.map((item: { ssid: string; seconds: number }) => (
-                      <div key={item.ssid} className="flex items-center justify-between rounded-lg border border-[#243665] bg-[#0d1733] px-3 py-2">
-                        <p className="max-w-[70%] truncate font-mono text-[11px] text-[#dce6ff]" title={item.ssid}>{item.ssid}</p>
-                        <p className="font-mono text-[11px] text-[#00ff88]">{formatLongDuration(item.seconds)}</p>
+                      <div key={item.ssid} className="flex items-center justify-between rounded-lg border border-[var(--palette-dfe7e3)] bg-[var(--palette-f5f7f6)] px-3 py-2">
+                        <p className="max-w-[70%] truncate font-sans text-[12px] text-[var(--palette-53685c)]" title={item.ssid}>{item.ssid}</p>
+                        <p className="font-sans text-[12px] text-[var(--palette-31764d)]">{formatLongDuration(item.seconds)}</p>
                       </div>
                     ))}
                   </div>
@@ -798,22 +620,22 @@ export function DeviceDetailPage() {
                   <tbody>
                     {filteredWifiEvents.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="py-8 text-center text-[#8fa0c9]">Sin historial WiFi para el filtro seleccionado.</td>
+                        <td colSpan={7} className="py-8 text-center text-[var(--palette-53685c)]">Sin historial WiFi para el filtro seleccionado.</td>
                       </tr>
                     ) : (
                       filteredWifiEvents.map((event: WifiEventWithDuration, idx: number) => (
                         <tr key={`${event.timestamp}-${idx}`}>
-                          <td className="whitespace-nowrap font-mono text-[11px] text-[#9eb0dc]">{new Date(event.timestamp).toLocaleString()}</td>
-                          <td className="max-w-[280px] truncate text-[12px] text-[#dce6ff]" title={event.ssid}>{event.ssid || 'N/A'}</td>
-                          <td className="max-w-[280px] truncate font-mono text-[11px] text-[#91a3d2]" title={event.bssid}>{event.bssid || 'N/A'}</td>
-                          <td className="whitespace-nowrap font-mono text-[11px] text-[#00d9ff]">{event.signal_percent !== undefined ? `${event.signal_percent}%` : 'N/A'}</td>
-                          <td className="whitespace-nowrap font-mono text-[11px] text-[#00ff88]">{event.state === 'connected' ? formatLongDuration(event.connected_duration_seconds) : '--'}</td>
+                          <td className="whitespace-nowrap font-sans text-[12px] text-[var(--palette-53685c)]">{new Date(event.timestamp).toLocaleString()}</td>
+                          <td className="max-w-[280px] truncate text-[12px] text-[var(--palette-53685c)]" title={event.ssid}>{event.ssid || 'N/A'}</td>
+                          <td className="max-w-[280px] truncate font-sans text-[12px] text-[var(--palette-53685c)]" title={event.bssid}>{event.bssid || 'N/A'}</td>
+                          <td className="whitespace-nowrap font-sans text-[12px] text-[var(--palette-17715a)]">{event.signal_percent !== undefined ? `${event.signal_percent}%` : 'N/A'}</td>
+                          <td className="whitespace-nowrap font-sans text-[12px] text-[var(--palette-31764d)]">{event.state === 'connected' ? formatLongDuration(event.connected_duration_seconds) : '--'}</td>
                           <td>
-                            <span className={`inline-flex rounded-full px-2.5 py-1 font-mono text-[10px] ${event.state === 'connected' ? 'border border-[#00ff88]/40 bg-[#00ff88]/10 text-[#00ff88]' : 'border border-[#ff9f1a]/40 bg-[#ff9f1a]/10 text-[#ff9f1a]'}`}>
+                            <span className={`inline-flex rounded-full px-2.5 py-1 font-sans text-[12px] ${event.state === 'connected' ? 'border border-[var(--palette-dfe7e3)]/40 bg-[var(--palette-31764d)]/10 text-[var(--palette-31764d)]' : 'border border-[var(--palette-dfe7e3)]/40 bg-[var(--palette-97621b)]/10 text-[var(--palette-97621b)]'}`}>
                               {event.state.toUpperCase()}
                             </span>
                           </td>
-                          <td className="max-w-[220px] truncate font-mono text-[11px] text-[#91a3d2]" title={event.interface_name}>{event.interface_name}</td>
+                          <td className="max-w-[220px] truncate font-sans text-[12px] text-[var(--palette-53685c)]" title={event.interface_name}>{event.interface_name}</td>
                         </tr>
                       ))
                     )}
@@ -823,7 +645,7 @@ export function DeviceDetailPage() {
             </div>
           )}
         </section>
-      )}
+      ) : null}
     </AppShell>
   );
 }

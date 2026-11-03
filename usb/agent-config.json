@@ -1,18 +1,18 @@
-﻿{
-    "version":  "3.3.5",
-    "agent":  {
-                   "offlineCacheKey":  "replace-with-32-byte-cache-key",
-                   "authToken":  "change-me-in-production",
-                   "githubToken":  "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"
-               },
-    "server":  {
-                   "url":  "http://10.30.0.123:3000"
-               },
-    "rabbitmq":  {
-                     "url":  "amqp://eclub:eCLUB123@10.30.0.123:5672/%2f"
-                 },
-    "apiVersion":  "v1",
-    "osquery":  {
-                    "policyProfile":  "default"
-                }
+{
+  "version": "3.3.5",
+  "agent": {
+    "offlineCacheKey": "",
+    "authToken": "",
+    "githubToken": ""
+  },
+  "server": {
+    "url": "http://127.0.0.1:18080"
+  },
+  "rabbitmq": {
+    "url": ""
+  },
+  "apiVersion": "v1",
+  "osquery": {
+    "policyProfile": "default"
+  }
 }

@@ -5,27 +5,7 @@ use std::fs;
 use std::path::Path;
 
 fn get_data_dir() -> String {
-    if cfg!(windows) {
-        r"C:\ProgramData\ActivityMonitor".to_string()
-    } else {
-        #[cfg(not(windows))]
-        {
-            let is_root = unsafe { libc::getuid() == 0 };
-            if is_root {
-                "/var/lib/activity-monitor".to_string()
-            } else {
-                if let Ok(home) = std::env::var("HOME") {
-                    format!("{}/.local/share/activity-monitor", home)
-                } else {
-                    "/tmp/activity-monitor".to_string()
-                }
-            }
-        }
-        #[cfg(windows)]
-        {
-            r"C:\ProgramData\ActivityMonitor".to_string()
-        }
-    }
+    crate::runtime::data_dir().to_string_lossy().into_owned()
 }
 
 fn get_device_id_file() -> String {
@@ -134,9 +114,8 @@ pub fn load_or_create_device_identity() -> Result<DeviceIdentity, Box<dyn std::e
     // Try to load existing identity
     if config_path.exists() {
         let content = fs::read_to_string(config_path)?;
-        if let Ok(identity) = serde_json::from_str::<DeviceIdentity>(&content) {
-            return Ok(identity);
-        }
+        // Never silently replace a corrupt identity with a different device.
+        return Ok(serde_json::from_str::<DeviceIdentity>(&content)?);
     }
     
     // Create new identity
@@ -156,11 +135,10 @@ pub fn load_or_create_device_identity() -> Result<DeviceIdentity, Box<dyn std::e
     
     // Save for future use
     if let Some(parent) = config_path.parent() {
-        fs::create_dir_all(parent).ok();
+        fs::create_dir_all(parent)?;
     }
     
-    let json = serde_json::to_string_pretty(&identity)?;
-    fs::write(config_path, json).ok();
+    crate::persistent_file::write_json(config_path, &identity)?;
     
     Ok(identity)
 }
@@ -171,7 +149,7 @@ pub fn set_device_nickname(nickname: &str) -> Result<(), Box<dyn std::error::Err
     let nickname_path = Path::new(&nickname_path_str);
     
     if let Some(parent) = nickname_path.parent() {
-        fs::create_dir_all(parent).ok();
+        fs::create_dir_all(parent)?;
     }
     
     fs::write(nickname_path, nickname)?;

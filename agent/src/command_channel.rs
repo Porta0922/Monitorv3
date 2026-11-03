@@ -11,6 +11,7 @@ pub async fn process_command(
     supervisor: &TaskSupervisor,
     config_manager: &ConfigManager,
 ) -> serde_json::Value {
+    if !matches!(command,"ping"|"status"|"run_diagnostic") {return serde_json::json!({"status":"error","message":"Remote action disabled; use administrative lifecycle tools"});}
     match command {
         "ping" => {
             serde_json::json!({
@@ -42,30 +43,6 @@ pub async fn process_command(
                 "version": env!("CARGO_PKG_VERSION"),
             })
         }
-        "flush_cache" => {
-            let count = context.cache.get_unsynced_event_count().await.unwrap_or(0);
-            let _ = context.cache.clear_unsynced_events().await;
-            serde_json::json!({
-                "status": "ok",
-                "cleared_events": count,
-            })
-        }
-        "reconnect" => {
-            let rabbitmq_url = std::env::var("RABBITMQ_URL")
-                .unwrap_or_else(|_| "amqp://guest:guest@localhost:5672/%2F".to_string());
-            let connect_result = crate::rabbitmq_publisher::RabbitMQPublisher::connect(&rabbitmq_url).await;
-            match connect_result {
-                Ok(new_publisher) => {
-                    let mut pub_state = context.publisher.write().await;
-                    *pub_state = Some(Arc::new(new_publisher));
-                    serde_json::json!({ "status": "ok", "message": "Reconnected to RabbitMQ" })
-                }
-                Err(e) => {
-                    let err_msg = e.to_string();
-                    serde_json::json!({ "status": "error", "message": err_msg })
-                }
-            }
-        }
         "run_diagnostic" => {
             let handles = supervisor.handles();
             let config = config_manager.get().await;
@@ -91,25 +68,6 @@ pub async fn process_command(
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })
         }
-        "force_update" => {
-            match crate::updater::apply_update().await {
-                crate::updater::ApplyUpdateResult::Updated { version } => {
-                    serde_json::json!({ "status": "ok", "message": format!("Update v{} applied", version) })
-                }
-                crate::updater::ApplyUpdateResult::UpToDate => {
-                    serde_json::json!({ "status": "ok", "message": "already up to date" })
-                }
-                crate::updater::ApplyUpdateResult::Failed(e) => {
-                    serde_json::json!({ "status": "error", "message": e })
-                }
-            }
-        }
-        "uninstall" => {
-            match crate::uninstall::spawn_uninstall() {
-                Ok(_) => serde_json::json!({ "status": "ok", "message": "Uninstall script launched (self-elevating). Agent will be removed shortly." }),
-                Err(e) => serde_json::json!({ "status": "error", "message": format!("Failed to launch uninstall: {}", e) }),
-            }
-        }
         _ => {
             serde_json::json!({
                 "status": "error",
@@ -123,7 +81,7 @@ pub fn spawn_command_channel(
     context: Arc<TaskContext>,
     supervisor: Arc<TaskSupervisor>,
     config_manager: Arc<ConfigManager>,
-) {
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(20));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -136,9 +94,7 @@ pub fn spawn_command_channel(
                 Err(_) => continue,
             };
 
-            let client = match reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
-                .build()
+            let client = match crate::network_identity::client()
             {
                 Ok(c) => c,
                 Err(_) => continue,
@@ -147,7 +103,7 @@ pub fn spawn_command_channel(
             let request = client
                 .get(format!("{}/api/agent/commands", server_url))
                 .query(&[("device_id", &context.device_id)])
-                .header("x-agent-token", &context.auth_token);
+                .header("x-agent-token", crate::network_identity::token(&context.auth_token));
 
             let response = match request.send().await {
                 Ok(r) if r.status().is_success() => r,
@@ -164,6 +120,7 @@ pub fn spawn_command_channel(
             }
 
             for cmd in envelope.commands.unwrap_or_default() {
+                if cmd.expires_at.as_deref().and_then(|v|chrono::DateTime::parse_from_rfc3339(v).ok()).is_none_or(|expiry|expiry<=chrono::Utc::now()) {continue;}
                 tracing::info!("[CommandChannel] Received command: {} (id={})", cmd.command, cmd.id);
                 let result = process_command(
                     &cmd.command,
@@ -174,9 +131,7 @@ pub fn spawn_command_channel(
                 )
                 .await;
 
-                let ack_client = match reqwest::Client::builder()
-                    .timeout(Duration::from_secs(5))
-                    .build()
+                let ack_client = match crate::network_identity::client()
                 {
                     Ok(c) => c,
                     Err(_) => break,
@@ -187,15 +142,15 @@ pub fn spawn_command_channel(
                     .post(&ack_url)
                     .json(&serde_json::json!({
                         "device_id": context.device_id,
-                        "status": "ok",
+                        "status": if result["status"]=="error" || result["status"]=="disabled" {"failed"} else {"ok"},
                         "result": result,
                     }))
-                    .header("x-agent-token", &context.auth_token)
+                    .header("x-agent-token", crate::network_identity::token(&context.auth_token))
                     .send()
                     .await;
             }
         }
-    });
+    })
 }
 
 #[derive(serde::Deserialize)]
@@ -206,6 +161,7 @@ struct CommandsEnvelope {
 
 #[derive(serde::Deserialize)]
 struct CommandItem {
+    expires_at: Option<String>,
     id: String,
     command: String,
     payload: Option<serde_json::Value>,

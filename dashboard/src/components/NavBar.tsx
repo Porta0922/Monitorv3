@@ -8,8 +8,8 @@ interface NavBarProps {
 export function NavBar({ currentPage }: NavBarProps) {
   const navigate = useNavigate();
 
-  const handleLogout = () => {
-    apiClient.logout();
+  const handleLogout = async () => {
+    try { await apiClient.logout(); } catch { return; }
     navigate('/login');
   };
 
@@ -33,7 +33,7 @@ export function NavBar({ currentPage }: NavBarProps) {
 
   return (
     <div style={{
-      backgroundColor: '#0066cc',
+      backgroundColor: 'var(--palette-0066cc)',
       color: 'white',
       padding: '1rem 1.5rem',
       display: 'flex',
@@ -42,7 +42,7 @@ export function NavBar({ currentPage }: NavBarProps) {
       boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
     }}>
       <h1 style={{ margin: 0, fontSize: '1.3rem' }}>🎯 ActivityMonitor</h1>
-      
+
       <div style={navStyle}>
         <button
           onClick={() => navigate('/dashboard')}

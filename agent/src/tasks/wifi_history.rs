@@ -2,16 +2,9 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use chrono::Utc;
 use crate::wifi_detection::WifiMonitor;
-use crate::is_running_in_session_0;
 use super::{TaskContext, TaskInterval, live_sleep};
 
 pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
-    let is_session_0 = is_running_in_session_0();
-    if cfg!(windows) && is_session_0 {
-        tracing::info!("Skipping WiFi monitoring task (handled by user agent)");
-        return tokio::spawn(std::future::pending::<()>());
-    }
-
     tokio::spawn(async move {
         let mut wifi_monitor = WifiMonitor::new();
         // Force an immediate state broadcast so any server that just started
@@ -28,6 +21,7 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
 
             match wifi_monitor.scan_and_detect_change().await {
                 Ok(Some(snapshot)) => {
+                    crate::capture_diagnostics::record("wifi_history", "capture_ok", None);
                     let wifi_payload = context.build_event_envelope(
                         "wifi",
                         1,
@@ -43,8 +37,9 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
 
                     context.publish_or_cache("wifi", wifi_payload).await;
                 }
-                Ok(None) => {}
+                Ok(None) => { crate::capture_diagnostics::record("wifi_history", "no_observation", None); }
                 Err(e) => {
+                    crate::capture_diagnostics::record("wifi_history", "capture_error", Some(&e.to_string()));
                     tracing::warn!("WiFi scan error: {}", e);
                 }
             }

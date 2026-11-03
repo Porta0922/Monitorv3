@@ -1,5 +1,6 @@
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
+    pub agent_auth_token: String,
     pub online_threshold_seconds: i64,
     pub live_threshold_seconds: i64,
     pub stale_threshold_seconds: i64,
@@ -16,6 +17,7 @@ pub struct RuntimeConfig {
 impl RuntimeConfig {
     pub fn from_env() -> Self {
         Self {
+            agent_auth_token: std::env::var("AGENT_AUTH_TOKEN").unwrap_or_default(),
             online_threshold_seconds: env_i64("ONLINE_THRESHOLD_SECONDS", 300),
             live_threshold_seconds: env_i64("LIVE_THRESHOLD_SECONDS", 180),
             stale_threshold_seconds: env_i64("STALE_THRESHOLD_SECONDS", 120),

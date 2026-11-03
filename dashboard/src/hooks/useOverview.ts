@@ -3,12 +3,12 @@ import { apiClient } from '../api/client';
 
 export interface OverviewData {
   devices_today: number;
-  active_time: number;
-  idle_time: number;
-  idle_pct: string;
-  keys_today: number;
-  mouse_moves_today: number;
-  mouse_clicks_today: number;
+  active_time: number | null;
+  idle_time: number | null;
+  idle_pct: number | null;
+  keys_today: number | null;
+  mouse_moves_today: number | null;
+  mouse_clicks_today: number | null;
 }
 
 export function useOverview() {
@@ -23,8 +23,8 @@ export function useOverview() {
         const result = await apiClient.getOverview();
         setData(result);
         setError(null);
-      } catch (err: any) {
-        setError(err.message || 'Failed to load overview');
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Failed to load overview');
         console.error('Error loading overview:', err);
       } finally {
         setIsLoading(false);

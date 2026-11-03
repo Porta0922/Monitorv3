@@ -1,86 +1,14 @@
-import { useState, useEffect } from 'react';
-import { apiClient } from '../api/client';
+import { useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
-import type { AppInfo } from '../types';
-
+import { InventoryStatePanel } from '../components/InventoryStatePanel';
+import { apiClient } from '../api/client';
+import type { Device } from '../types';
 export function InventoryPage() {
-  const [apps, setApps] = useState<AppInfo[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    loadSoftwareInventory();
-  }, []);
-
-  const loadSoftwareInventory = async () => {
-    try {
-      setIsLoading(true);
-      const data = await apiClient.getApps();
-      setApps(data);
-    } catch (err) {
-      console.error('Error loading software inventory:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  return (
-    <AppShell
-      currentPage="inventory"
-      title="Inventario de Software"
-      subtitle="Aplicaciones instaladas y validacion de binarios"
-      actions={
-        <button
-          onClick={loadSoftwareInventory}
-          className="rounded-lg border border-[#00d9ff]/40 bg-[#00d9ff]/10 px-4 py-2 text-sm font-medium text-[#00d9ff] hover:border-[#00d9ff] hover:bg-[#00d9ff]/20"
-        >
-          Actualizar
-        </button>
-      }
-    >
-      <section className="overflow-hidden rounded-xl border border-[#1e2339] bg-gradient-to-br from-[#131829] to-[#0a0e27] shadow-2xl">
-        <div className="border-b border-[#1e2339] bg-[#0a0e27] px-6 py-4">
-          <h2 className="text-lg font-semibold text-[#e4e6eb]">Aplicaciones detectadas ({apps.length})</h2>
-        </div>
-
-        {isLoading ? (
-          <div className="px-6 py-10 text-center text-[#a0a5b2]">Cargando inventario...</div>
-        ) : apps.length === 0 ? (
-          <div className="px-6 py-10 text-center text-[#a0a5b2]">No hay inventario disponible.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-[#1e2339] bg-[#0a0e27]">
-                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Aplicacion</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Version</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Estado</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-[#00d9ff]">Hash SHA-256</th>
-                </tr>
-              </thead>
-              <tbody>
-                {apps.slice(0, 120).map((app, idx) => (
-                  <tr key={`${app.app_name}-${idx}`} className="border-b border-[#1e2339] hover:bg-[#131829]">
-                    <td className="px-6 py-3 font-medium text-[#e4e6eb]">{app.app_name}</td>
-                    <td className="px-6 py-3 text-[#a0a5b2]">{app.version || 'Desconocida'}</td>
-                    <td className="px-6 py-3">
-                      <span
-                        className={`rounded-full border px-3 py-1 text-xs font-semibold ${
-                          app.verified
-                            ? 'border-[#00ff88]/50 bg-[#00ff88]/10 text-[#00ff88]'
-                            : 'border-red-400/50 bg-red-500/10 text-red-400'
-                        }`}
-                      >
-                        {app.verified ? 'Verificada' : 'No verificada'}
-                      </span>
-                    </td>
-                    <td className="max-w-[380px] truncate px-6 py-3 font-mono text-xs text-[#a0a5b2]">{app.exe_hash}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-    </AppShell>
-  );
+  const [devices,setDevices]=useState<Device[]>([]); const [selected,setSelected]=useState('');
+  const [loading,setLoading]=useState(true); const [error,setError]=useState(false); const [revision,setRevision]=useState(0);
+  useEffect(()=>{let alive=true;apiClient.getDevices().then(items=>{if(alive){setDevices(items);setSelected(previous=>items.some(d=>d.device_id===previous)?previous:items[0]?.device_id??'');}}).catch(()=>{if(alive)setError(true);}).finally(()=>{if(alive)setLoading(false);});return()=>{alive=false;};},[revision]);
+  return <AppShell currentPage="inventory" title="Inventario de software" subtitle="Estado confirmado por fuente y cambios registrados por equipo.">
+    {error ? <p role="alert" className="notice notice-warning">No se pudieron cargar los equipos. <button className="button" onClick={()=>{setLoading(true);setError(false);setRevision(v=>v+1);}}>Reintentar</button></p> : loading ? <p role="status">Consultando equipos…</p> : !devices.length ? <p>No hay equipos registrados.</p> : <label>Equipo <select value={selected} onChange={e=>setSelected(e.target.value)}>{devices.map(d=><option key={d.device_id} value={d.device_id}>{d.nickname||d.hostname||d.device_id}</option>)}</select></label>}
+    {!error && selected && <InventoryStatePanel key={selected} deviceId={selected} />}
+  </AppShell>;
 }

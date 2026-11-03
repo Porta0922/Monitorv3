@@ -1,7 +1,9 @@
+import {SessionPage} from './pages/SessionPage';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LoginPage } from './pages/LoginPage';
+import { AdministrationPage } from './pages/AdministrationPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ActivityPage } from './pages/ActivityPage';
 import { InventoryPage } from './pages/InventoryPage';
@@ -17,8 +19,8 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#0a0e27] text-[#00d9ff]">
-        <div className="cyber-card rounded-xl px-8 py-5 font-display text-lg">Syncing Nexus...</div>
+      <div className="flex min-h-screen items-center justify-center bg-[var(--palette-f5f7f6)] text-[var(--palette-17715a)]">
+        <div className="rounded-xl border border-[var(--palette-dfe7e3)] bg-[var(--surface)] px-8 py-5 text-lg">Cargando tu espacio de trabajo…</div>
       </div>
     );
   }
@@ -31,7 +33,9 @@ function App() {
     <ErrorBoundary>
     <BrowserRouter>
       <Routes>
+        <Route path="/session" element={<PrivateRoute><SessionPage/></PrivateRoute>}/>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/administration" element={<PrivateRoute><AdministrationPage /></PrivateRoute>} />
         <Route
           path="/dashboard"
           element={
@@ -104,6 +108,7 @@ function App() {
             </PrivateRoute>
           }
         />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
         <Route path="/" element={<Navigate to="/dashboard" />} />
       </Routes>
     </BrowserRouter>

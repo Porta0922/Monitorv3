@@ -47,7 +47,7 @@ pub fn spawn_reconnector(context: Arc<TaskContext>, rabbitmq_url: String) -> tok
                 continue;
             }
 
-            let reconnect_result = crate::rabbitmq_publisher::RabbitMQPublisher::connect(&rabbitmq_url)
+            let reconnect_result = crate::rabbitmq_publisher::RabbitMQPublisher::connect(&crate::network_identity::rabbit_url(&rabbitmq_url))
                 .await
                 .map(Arc::new)
                 .map_err(|e| e.to_string());

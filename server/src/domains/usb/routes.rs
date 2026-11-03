@@ -1,4 +1,4 @@
-use axum::{extract::{Query, State, Path}, response::IntoResponse, routing::get, Json, Router};
+use axum::{extract::{Query, State, Path}, response::IntoResponse, routing::get, Router};
 use serde_json::json;
 use std::sync::Arc;
 use crate::api::AppState;
@@ -17,6 +17,7 @@ async fn list_usb_events(
 ) -> impl IntoResponse {
     let date = parse_iso_date(query.date.as_deref());
     let tz_offset = query.tz_offset_minutes.unwrap_or(0);
+    if (query.date.is_some() && date.is_none()) || !(-840..=840).contains(&tz_offset){return crate::domains::shared::data_response(json!({"success":false,"error":"invalid date or UTC offset"}));}
 
     match state.db.get_usb_events(None, query.limit, date, tz_offset).await {
         Ok(events) => {
@@ -35,14 +36,14 @@ async fn list_usb_events(
                 })
                 .collect();
 
-            Json(json!({
+            crate::domains::shared::data_response(json!({
                 "success": true,
                 "events": events_json
             }))
         }
         Err(e) => {
             tracing::error!("Failed to fetch usb events: {}", e);
-            Json(json!({
+            crate::domains::shared::data_response(json!({
                 "success": false,
                 "error": "Failed to fetch usb events",
                 "events": []
@@ -58,6 +59,7 @@ async fn list_device_usb_events(
 ) -> impl IntoResponse {
     let date = parse_iso_date(query.date.as_deref());
     let tz_offset = query.tz_offset_minutes.unwrap_or(0);
+    if (query.date.is_some() && date.is_none()) || !(-840..=840).contains(&tz_offset){return crate::domains::shared::data_response(json!({"success":false,"error":"invalid date or UTC offset"}));}
 
     match state.db.get_usb_events(Some(device_id), query.limit, date, tz_offset).await {
         Ok(events) => {
@@ -75,14 +77,14 @@ async fn list_device_usb_events(
                 })
                 .collect();
 
-            Json(json!({
+            crate::domains::shared::data_response(json!({
                 "success": true,
                 "events": events_json
             }))
         }
         Err(e) => {
             tracing::error!("Failed to fetch usb events for device: {}", e);
-            Json(json!({
+            crate::domains::shared::data_response(json!({
                 "success": false,
                 "error": "Failed to fetch usb events for device",
                 "events": []

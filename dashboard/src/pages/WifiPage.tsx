@@ -1,49 +1,20 @@
-import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { AppShell } from '../components/AppShell';
+import { CollectionTable } from '../components/CollectionTable';
+import { Icon } from '../components/Icon';
+import { useCollection } from '../hooks/useCollection';
 import { apiClient } from '../api/client';
-import type { WifiEvent } from '../types';
-
+const load = () => apiClient.getWifiHistory(undefined, 200);
 export function WifiPage() {
-  const [events, setEvents] = useState<WifiEvent[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    apiClient.getWifiHistory(undefined, 200)
-      .then(setEvents)
-      .catch(() => setEvents([]))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <div style={{ padding: 24 }}>Cargando...</div>;
-
-  return (
-    <div style={{ padding: 24 }}>
-      <h1 style={{ fontSize: 24, fontWeight: 600, marginBottom: 16 }}>Historial WiFi</h1>
-      {events.length === 0 ? (
-        <p style={{ color: '#6b7280' }}>No hay eventos WiFi registrados.</p>
-      ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-              <th style={{ textAlign: 'left', padding: 8 }}>Fecha</th>
-              <th style={{ textAlign: 'left', padding: 8 }}>Dispositivo</th>
-              <th style={{ textAlign: 'left', padding: 8 }}>SSID</th>
-              <th style={{ textAlign: 'left', padding: 8 }}>Estado</th>
-              <th style={{ textAlign: 'left', padding: 8 }}>Senal</th>
-            </tr>
-          </thead>
-          <tbody>
-            {events.map((e, i) => (
-              <tr key={i} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                <td style={{ padding: 8 }}>{new Date(e.timestamp).toLocaleString()}</td>
-                <td style={{ padding: 8 }}>{e.device_id.slice(0, 8)}</td>
-                <td style={{ padding: 8 }}>{e.ssid || '-'}</td>
-                <td style={{ padding: 8 }}>{e.state}</td>
-                <td style={{ padding: 8 }}>{e.signal_percent != null ? `${e.signal_percent}%` : '-'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
-  );
+  const data = useCollection(load);
+  return <AppShell currentPage="wifi" title="Redes WiFi" subtitle="Historial de conectividad inalámbrica reportado por los agentes." actions={<button className="button" disabled={data.loading} onClick={data.refresh}><Icon name="refresh" />Actualizar</button>}>
+    <CollectionTable {...data} title="Eventos de conectividad" note="Hasta 200 eventos de la consulta. La señal y el estado corresponden a la fecha del evento, no a una medición en vivo." searchText={event => `${event.device_id} ${event.ssid ?? ''} ${event.interface_name} ${event.state}`} columns={[
+      { label: 'Fecha local', render: event => new Date(event.timestamp).toLocaleString() },
+      { label: 'Equipo', render: event => <Link to={`/devices/${event.device_id}`} title={event.device_id}>{event.device_id.slice(0,8)}…</Link> },
+      { label: 'Red', render: event => <strong>{event.ssid || 'SSID no informado'}</strong> },
+      { label: 'Interfaz', render: event => event.interface_name || 'No informada' },
+      { label: 'Estado reportado', render: event => event.state || 'No informado' },
+      { label: 'Señal', render: event => event.signal_percent == null ? 'No disponible' : `${event.signal_percent}%` },
+    ]} />
+  </AppShell>;
 }

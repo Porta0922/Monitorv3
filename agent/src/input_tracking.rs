@@ -130,6 +130,16 @@ impl InputTracker {
         None
     }
 
+    /// Do not include input accumulated while a session collector was disabled.
+    pub async fn discard_current_period(&self) {
+        let mut heatmap = self.heatmap.lock().await;
+        heatmap.timestamp = Utc::now();
+        heatmap.grid_data.clear();
+        heatmap.stats = InputStats::default();
+        drop(heatmap);
+        *self.last_upload.lock().await = Utc::now();
+    }
+
     /// Get current statistics without uploading
     pub async fn get_stats(&self) -> InputStats {
         let heatmap = self.heatmap.lock().await;

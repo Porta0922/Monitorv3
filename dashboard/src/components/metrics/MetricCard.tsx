@@ -21,11 +21,11 @@ export function MetricCard({
   trend,
 }: MetricCardProps) {
   const colorMap: Record<string, { border: string; accent: string; value: string }> = {
-    cyan:   { border: 'border-[#00d9ff]/30', accent: 'text-[#8ea0cf]', value: 'text-[#00d9ff]' },
-    green:  { border: 'border-[#00ff88]/30', accent: 'text-[#8ea0cf]', value: 'text-[#00ff88]' },
-    orange: { border: 'border-[#ff9f1a]/30', accent: 'text-[#8ea0cf]', value: 'text-[#ff9f1a]' },
-    red:    { border: 'border-[#ff5f7a]/30', accent: 'text-[#8ea0cf]', value: 'text-[#ff8ea0]' },
-    yellow: { border: 'border-[#ffd54a]/30', accent: 'text-[#8ea0cf]', value: 'text-[#ffd54a]' },
+    cyan:   { border: 'border-[var(--palette-dfe7e3)]/30', accent: 'text-[var(--palette-53685c)]', value: 'text-[var(--palette-17715a)]' },
+    green:  { border: 'border-[var(--palette-dfe7e3)]/30', accent: 'text-[var(--palette-53685c)]', value: 'text-[var(--palette-31764d)]' },
+    orange: { border: 'border-[var(--palette-dfe7e3)]/30', accent: 'text-[var(--palette-53685c)]', value: 'text-[var(--palette-97621b)]' },
+    red:    { border: 'border-[var(--palette-dfe7e3)]/30', accent: 'text-[var(--palette-53685c)]', value: 'text-[var(--palette-53685c)]' },
+    yellow: { border: 'border-[var(--palette-dfe7e3)]/30', accent: 'text-[var(--palette-53685c)]', value: 'text-[var(--palette-926a1b)]' },
   };
 
   const styles = colorMap[color] ?? colorMap['cyan'];
@@ -34,20 +34,20 @@ export function MetricCard({
   const isPositive = trendChange >= 0;
 
   return (
-    <article className={`rounded-2xl border ${styles.border} bg-[linear-gradient(160deg,#0f1d43,#0b1329)] px-4 py-3 shadow-[0_10px_22px_rgba(0,0,0,0.35)]`}>
-      <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#8ea0cf]">{title}</p>
+    <article className={`rounded-2xl border ${styles.border} bg-[var(--surface)] px-4 py-3 shadow-sm`}>
+      <p className="font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">{title}</p>
       <div className="mt-2 flex items-baseline gap-1.5">
         <span className={`font-display text-[22px] font-bold leading-none ${styles.value}`}>
           {value.toLocaleString()}
         </span>
-        <span className="font-mono text-[10px] text-[#5a6a90]">{unit}</span>
+        <span className="font-sans text-[12px] text-[var(--palette-53685c)]">{unit}</span>
       </div>
       {trend ? (
         <div className="mt-1.5 flex items-center gap-1">
-          <span className={`font-mono text-[10px] ${isPositive ? 'text-[#00ff88]' : 'text-[#ff5f7a]'}`}>
+          <span className={`font-sans text-[12px] ${isPositive ? 'text-[var(--palette-31764d)]' : 'text-[var(--palette-b2433d)]'}`}>
             {isPositive ? '↑' : '↓'} {Math.abs(trendPercent)}%
           </span>
-          <span className="font-mono text-[10px] text-[#5a6a90]">vs ayer</span>
+          <span className="font-sans text-[12px] text-[var(--palette-53685c)]">vs ayer</span>
         </div>
       ) : (
         <div className="mt-1.5 h-[18px]" />

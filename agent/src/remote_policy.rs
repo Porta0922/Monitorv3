@@ -6,7 +6,7 @@ use crate::tasks::TaskContext;
 pub fn spawn_remote_policy_consumer(
     context: Arc<TaskContext>,
     config_manager: Arc<ConfigManager>,
-) {
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(300));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -19,9 +19,7 @@ pub fn spawn_remote_policy_consumer(
                 Err(_) => continue,
             };
 
-            let client = match reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
-                .build()
+            let client = match crate::network_identity::client()
             {
                 Ok(c) => c,
                 Err(_) => continue,
@@ -30,7 +28,7 @@ pub fn spawn_remote_policy_consumer(
             let request = client
                 .get(format!("{}/api/agent/policy", server_url))
                 .query(&[("device_id", &context.device_id)])
-                .header("x-agent-token", &context.auth_token);
+                .header("x-agent-token", crate::network_identity::token(&context.auth_token));
 
             let response = match request.send().await {
                 Ok(r) if r.status().is_success() => r,
@@ -44,12 +42,15 @@ pub fn spawn_remote_policy_consumer(
 
             if envelope.success {
                 if let Some(policy) = envelope.policy {
-                    config_manager.apply_policy(policy).await;
-                    tracing::info!("[RemotePolicy] Policy updated from server (v{})", config_manager.version());
+                    let threshold = policy.idle_threshold_seconds;
+                    match config_manager.apply_policy(policy).await {
+                        Ok(()) => context.keystroke_tracker.set_idle_threshold(threshold),
+                        Err(error) => tracing::error!(%error, "Remote policy rejected; previous configuration retained"),
+                    }
                 }
             }
         }
-    });
+    })
 }
 
 #[derive(serde::Deserialize)]

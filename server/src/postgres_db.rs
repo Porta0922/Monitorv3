@@ -62,459 +62,41 @@ impl Database {
     /// Create connection pool to PostgreSQL
     pub async fn connect(database_url: &str) -> Result<Self, sqlx::Error> {
         let pool = PgPoolOptions::new()
+            .after_connect(|connection,_|Box::pin(async move {sqlx::query("SET TIME ZONE 'UTC'").execute(connection).await?;Ok(())}))
             .max_connections(5)
             .connect(database_url)
             .await?;
 
         // Run migrations
-        Self::init_schema(&pool).await?;
+        if std::env::var("MONITOR_ENV").as_deref()==Ok("production") {
+            // Application credentials cannot run migrations. Verify every embedded
+            // version and checksum before accepting traffic.
+            for migration in sqlx::migrate!("./migrations").iter() {
+                let applied=sqlx::query_as::<_,(bool,Vec<u8>)>("SELECT success,checksum FROM _sqlx_migrations WHERE version=$1")
+                    .bind(migration.version).fetch_optional(&pool).await?;
+                if !applied.is_some_and(|(success,checksum)|success && checksum.as_slice()==migration.checksum.as_ref()) {
+                    return Err(sqlx::Error::Protocol("Schema missing or checksum differs; run the migration job".into()));
+                }
+            }
+        } else { Self::init_schema(&pool).await?; }
 
         Ok(Self { pool })
     }
 
-    /// Initialize database schema if not exists
-    async fn init_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
-        // Create devices table
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS devices (
-                device_id UUID PRIMARY KEY,
-                hostname VARCHAR(255) NOT NULL,
-                nickname VARCHAR(255),
-                mac_address VARCHAR(17),
-                version VARCHAR(64),
-                last_seen TIMESTAMPTZ NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            "#,
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS running_apps_current (
-                id UUID PRIMARY KEY,
-                device_id UUID NOT NULL REFERENCES devices(device_id),
-                app_name VARCHAR(255) NOT NULL,
-                primary_title TEXT,
-                window_count INTEGER NOT NULL DEFAULT 1,
-                exe_path TEXT,
-                exe_hash VARCHAR(255),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            "#,
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_running_apps_current_device_updated_at ON running_apps_current(device_id, updated_at DESC)"
-        )
-        .execute(pool)
-        .await?;
-
-        // Reconcile older device table versions with the current schema.
-        sqlx::query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS nickname VARCHAR(255)")
-            .execute(pool)
-            .await?;
-        sqlx::query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS mac_address VARCHAR(17)")
-            .execute(pool)
-            .await?;
-        sqlx::query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-            .execute(pool)
-            .await?;
-        sqlx::query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-            .execute(pool)
-            .await?;
-        sqlx::query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-            .execute(pool)
-            .await?;
-        sqlx::query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS version VARCHAR(64)")
-            .execute(pool)
-            .await?;
-
-        // Create agent_commands table
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS agent_commands (
-                id UUID PRIMARY KEY,
-                device_id UUID NOT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
-                command VARCHAR(64) NOT NULL,
-                payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-                status VARCHAR(32) NOT NULL DEFAULT 'pending',
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                delivered_at TIMESTAMPTZ,
-                acked_at TIMESTAMPTZ,
-                result JSONB
-            )
-            "#,
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_agent_commands_pending ON agent_commands(device_id, status)"
-        )
-        .execute(pool)
-        .await?;
-
-        // Create activity_logs table
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS activity_logs (
-                id UUID PRIMARY KEY,
-                device_id UUID NOT NULL REFERENCES devices(device_id),
-                app_name VARCHAR(255) NOT NULL,
-                window_title TEXT,
-                duration_seconds BIGINT NOT NULL,
-                timestamp TIMESTAMPTZ NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            "#,
-        )
-        .execute(pool)
-        .await?;
-
-        // Backward compatibility: legacy schemas created by SQL migrations may not have id/created_at.
-        // Keep this reconciliation idempotent so existing installs are fixed on startup.
-        sqlx::query("CREATE EXTENSION IF NOT EXISTS pgcrypto")
-            .execute(pool)
-            .await?;
-        sqlx::query("ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS id UUID")
-            .execute(pool)
-            .await?;
-        sqlx::query("UPDATE activity_logs SET id = gen_random_uuid() WHERE id IS NULL")
-            .execute(pool)
-            .await?;
-
-        // Create inventory table
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS inventory (
-                id UUID PRIMARY KEY,
-                device_id UUID NOT NULL REFERENCES devices(device_id),
-                app_name VARCHAR(255) NOT NULL,
-                version VARCHAR(255),
-                exe_hash VARCHAR(255),
-                timestamp TIMESTAMPTZ NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            "#,
-        )
-        .execute(pool)
-        .await?;
-
-        // Reconcile older installs where device_id was VARCHAR in activity_logs/inventory.
-        sqlx::query("ALTER TABLE activity_logs DROP CONSTRAINT IF EXISTS activity_logs_device_id_fkey")
-            .execute(pool)
-            .await?;
-        sqlx::query("ALTER TABLE activity_logs ALTER COLUMN device_id TYPE UUID USING device_id::uuid")
-            .execute(pool)
-            .await?;
-        sqlx::query("ALTER TABLE activity_logs ADD CONSTRAINT activity_logs_device_id_fkey FOREIGN KEY (device_id) REFERENCES devices(device_id)")
-            .execute(pool)
-            .await?;
-
-        sqlx::query("ALTER TABLE inventory DROP CONSTRAINT IF EXISTS inventory_device_id_fkey")
-            .execute(pool)
-            .await?;
-        sqlx::query("ALTER TABLE inventory ALTER COLUMN device_id TYPE UUID USING device_id::uuid")
-            .execute(pool)
-            .await?;
-        sqlx::query("ALTER TABLE inventory ADD CONSTRAINT inventory_device_id_fkey FOREIGN KEY (device_id) REFERENCES devices(device_id)")
-            .execute(pool)
-            .await?;
-
-        // Create USB events table
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS usb_events (
-                id UUID PRIMARY KEY,
-                device_id UUID NOT NULL REFERENCES devices(device_id),
-                action VARCHAR(10) NOT NULL,
-                hardware_id VARCHAR(255) NOT NULL,
-                device_name VARCHAR(255) NOT NULL,
-                serial_number VARCHAR(255),
-                volume_label VARCHAR(255),
-                timestamp TIMESTAMPTZ NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            "#,
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_usb_events_device_timestamp ON usb_events(device_id, timestamp DESC)"
-        )
-        .execute(pool)
-        .await?;
-
-        // Create WiFi events table
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS wifi_events (
-                id UUID PRIMARY KEY,
-                device_id UUID NOT NULL REFERENCES devices(device_id),
-                interface_name VARCHAR(255) NOT NULL,
-                state VARCHAR(32) NOT NULL,
-                ssid VARCHAR(255),
-                bssid VARCHAR(64),
-                signal_percent INTEGER,
-                timestamp TIMESTAMPTZ NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            "#,
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_wifi_events_device_timestamp ON wifi_events(device_id, timestamp DESC)"
-        )
-        .execute(pool)
-        .await?;
-
-        // Create input activity metrics table (minute-level active/idle summaries)
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS input_activity_metrics (
-                id UUID PRIMARY KEY,
-                device_id UUID NOT NULL REFERENCES devices(device_id),
-                timestamp TIMESTAMPTZ NOT NULL,
-                active_seconds BIGINT NOT NULL DEFAULT 0,
-                idle_seconds BIGINT NOT NULL DEFAULT 0,
-                keys_count BIGINT NOT NULL DEFAULT 0,
-                mouse_moves_count BIGINT NOT NULL DEFAULT 0,
-                clicks_count BIGINT NOT NULL DEFAULT 0,
-                status VARCHAR(16) NOT NULL DEFAULT 'active',
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            "#,
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_input_activity_metrics_device_timestamp ON input_activity_metrics(device_id, timestamp DESC)"
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query("ALTER TABLE input_activity_metrics ADD COLUMN IF NOT EXISTS keys_count BIGINT NOT NULL DEFAULT 0")
-            .execute(pool)
-            .await?;
-        sqlx::query("ALTER TABLE input_activity_metrics ADD COLUMN IF NOT EXISTS mouse_moves_count BIGINT NOT NULL DEFAULT 0")
-            .execute(pool)
-            .await?;
-        sqlx::query("ALTER TABLE input_activity_metrics ADD COLUMN IF NOT EXISTS clicks_count BIGINT NOT NULL DEFAULT 0")
-            .execute(pool)
-            .await?;
-
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS node_resource_metrics (
-                id BIGSERIAL PRIMARY KEY,
-                device_id UUID NOT NULL REFERENCES devices(device_id),
-                timestamp TIMESTAMPTZ NOT NULL,
-                cpu_percent DOUBLE PRECISION NOT NULL DEFAULT 0,
-                memory_used_mb DOUBLE PRECISION NOT NULL DEFAULT 0,
-                memory_percent DOUBLE PRECISION NOT NULL DEFAULT 0,
-                top_process_name TEXT,
-                top_process_cpu_percent DOUBLE PRECISION,
-                top_process_memory_mb DOUBLE PRECISION,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            "#,
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_node_resource_metrics_device_timestamp ON node_resource_metrics(device_id, timestamp DESC)"
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_node_resource_metrics_timestamp ON node_resource_metrics(timestamp DESC)"
-        )
-        .execute(pool)
-        .await?;
-
-        // Create processed events table for idempotency (dedupe retries)
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS processed_events (
-                event_id VARCHAR(64) PRIMARY KEY,
-                device_id VARCHAR(255) NOT NULL,
-                event_type VARCHAR(64) NOT NULL,
-                sequence BIGINT,
-                boot_id VARCHAR(64),
-                received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            "#,
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_processed_events_device_received_at ON processed_events(device_id, received_at DESC)"
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS audit_events (
-                id BIGSERIAL PRIMARY KEY,
-                actor VARCHAR(255) NOT NULL,
-                action VARCHAR(128) NOT NULL,
-                target VARCHAR(255) NOT NULL,
-                details TEXT,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            "#,
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_audit_events_created_at ON audit_events(created_at DESC)"
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS security_alerts (
-                id BIGSERIAL PRIMARY KEY,
-                device_id UUID NOT NULL REFERENCES devices(device_id),
-                alert_type VARCHAR(64) NOT NULL,
-                app_name VARCHAR(255) NOT NULL DEFAULT '',
-                exe_hash VARCHAR(255) NOT NULL DEFAULT '',
-                description TEXT NOT NULL,
-                severity VARCHAR(16) NOT NULL,
-                resolved BOOLEAN NOT NULL DEFAULT FALSE,
-                resolution_notes TEXT,
-                timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            "#,
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_security_alerts_device_created ON security_alerts(device_id, created_at DESC)"
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_security_alerts_resolved ON security_alerts(resolved, created_at DESC)"
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_security_alerts_severity ON security_alerts(severity, created_at DESC)"
-        )
-        .execute(pool)
-        .await?;
-
-        // Backward compatibility for older security_alerts schemas.
-        sqlx::query("ALTER TABLE security_alerts ADD COLUMN IF NOT EXISTS resolution_notes TEXT")
-            .execute(pool)
-            .await?;
-        sqlx::query("ALTER TABLE security_alerts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-            .execute(pool)
-            .await?;
-        sqlx::query("ALTER TABLE security_alerts ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ")
-            .execute(pool)
-            .await?;
-
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS process_termination_attempts (
-                id BIGSERIAL PRIMARY KEY,
-                device_id UUID NOT NULL REFERENCES devices(device_id),
-                method VARCHAR(128) NOT NULL,
-                attempted_by VARCHAR(255),
-                blocked BOOLEAN NOT NULL DEFAULT TRUE,
-                auto_restarted BOOLEAN NOT NULL DEFAULT TRUE,
-                timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            "#,
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_process_termination_attempts_device_ts ON process_termination_attempts(device_id, timestamp DESC)"
-        )
-        .execute(pool)
-        .await?;
-
-        // security_events table
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS security_events (
-                id                BIGSERIAL PRIMARY KEY,
-                timestamp         TIMESTAMPTZ NOT NULL,
-                device_id         UUID        NOT NULL REFERENCES devices(device_id),
-                query_name        TEXT        NOT NULL,
-                query_pack        TEXT,
-                mitre_technique   VARCHAR(20),
-                severity          VARCHAR(20) NOT NULL,
-                raw_data          JSONB       NOT NULL DEFAULT '{}',
-                event_fingerprint VARCHAR(128),
-                created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            "#,
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_security_events_device_ts ON security_events(device_id, timestamp DESC)"
-        ).execute(pool).await?;
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_security_events_timestamp ON security_events(timestamp DESC)"
-        ).execute(pool).await?;
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_security_events_severity ON security_events(severity)"
-        ).execute(pool).await?;
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_security_events_technique ON security_events(mitre_technique)"
-        ).execute(pool).await?;
-        sqlx::query(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_security_events_fingerprint ON security_events(event_fingerprint) WHERE event_fingerprint IS NOT NULL"
-        ).execute(pool).await?;
-
-        // Convert tables to TimescaleDB hypertables for time-series optimization
-        let hypertable_queries = [
-            "SELECT create_hypertable('activity_logs', 'timestamp', if_not_exists => TRUE)",
-            "SELECT create_hypertable('security_events', 'timestamp', if_not_exists => TRUE)",
-            "SELECT create_hypertable('security_alerts', 'created_at', if_not_exists => TRUE)",
-            "SELECT create_hypertable('usb_events', 'timestamp', if_not_exists => TRUE)",
-            "SELECT create_hypertable('wifi_events', 'timestamp', if_not_exists => TRUE)",
-            "SELECT create_hypertable('node_resource_metrics', 'timestamp', if_not_exists => TRUE)",
-            "SELECT create_hypertable('input_summaries', 'timestamp', if_not_exists => TRUE)",
-            "SELECT create_hypertable('audit_events', 'timestamp', if_not_exists => TRUE)",
-        ];
-
-        for query in &hypertable_queries {
-            if let Err(e) = sqlx::query(query).execute(pool).await {
-                tracing::warn!("TimescaleDB hypertable conversion skipped: {}", e);
-            }
-        }
-
+    pub async fn migrate_production(database_url:&str)->Result<(),sqlx::Error> {
+        let pool=PgPoolOptions::new().max_connections(1).connect(database_url).await?;
+        Self::init_schema(&pool).await?;
+        sqlx::raw_sql(include_str!("../../scripts/production/grants.sql")).execute(&pool).await?;
+        pool.close().await;
         Ok(())
+    }
+
+    /// Apply embedded, checksummed migrations under SQLx's database lock.
+    async fn init_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
+        sqlx::migrate!("./migrations")
+            .run(pool)
+            .await
+            .map_err(|error| sqlx::Error::Migrate(Box::new(error)))
     }
 
     pub async fn register_processed_event(
@@ -525,22 +107,10 @@ impl Database {
         sequence: Option<i64>,
         boot_id: Option<&str>,
     ) -> Result<bool, sqlx::Error> {
-        let result = sqlx::query(
-            r#"
-            INSERT INTO processed_events (event_id, device_id, event_type, sequence, boot_id)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (event_id) DO NOTHING
-            "#,
-        )
-        .bind(event_id)
-        .bind(device_id)
-        .bind(event_type)
-        .bind(sequence)
-        .bind(boot_id)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(result.rows_affected() > 0)
+        let mut writer = crate::telemetry_writer::TelemetryWriter::begin(&self.pool).await?;
+        let result = writer.register_processed_event(event_id, device_id, event_type, sequence, boot_id).await?;
+        writer.commit().await?;
+        Ok(result)
     }
 
     pub async fn ping(&self) -> Result<(), sqlx::Error> {
@@ -558,50 +128,24 @@ impl Database {
         window_title: String,
         duration_seconds: i64,
     ) -> Result<ActivityLog, sqlx::Error> {
-        let id = Uuid::new_v4();
-        let timestamp = Utc::now();
-        let device_uuid = Uuid::parse_str(&device_id)
-            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
-
-        sqlx::query(
-            r#"
-            INSERT INTO activity_logs (id, device_id, app_name, window_title, duration_seconds, timestamp)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            "#,
-        )
-        .bind(id)
-        .bind(device_uuid)
-        .bind(&app_name)
-        .bind(&window_title)
-        .bind(duration_seconds)
-        .bind(timestamp)
-        .execute(&self.pool)
-        .await?;
-
-        tracing::info!("📝 Saved activity log: {} | {} | {} seconds", device_id, app_name, duration_seconds);
-
-        Ok(ActivityLog {
-            id,
-            device_id: device_uuid,
-            app_name,
-            window_title,
-            duration_seconds,
-            timestamp,
-        })
+        let mut writer = crate::telemetry_writer::TelemetryWriter::begin(&self.pool).await?;
+        let result = writer.insert_activity_log(device_id, app_name, window_title, duration_seconds).await?;
+        writer.commit().await?;
+        Ok(result)
     }
 
     #[allow(dead_code)]
     pub async fn get_activity_logs(&self, device_id: Option<Uuid>) -> Result<Vec<ActivityLog>, sqlx::Error> {
         let logs = if let Some(did) = device_id {
             sqlx::query_as::<_, (Uuid, Uuid, String, String, i64, DateTime<Utc>)>(
-                "SELECT id, device_id, app_name, window_title, duration_seconds, timestamp FROM activity_logs WHERE device_id = $1 ORDER BY timestamp DESC"
+                "SELECT id, device_id, app_name, window_title, duration_seconds, timestamp FROM desktop_activity WHERE device_id = $1 ORDER BY timestamp DESC"
             )
             .bind(did)
             .fetch_all(&self.pool)
             .await?
         } else {
             sqlx::query_as::<_, (Uuid, Uuid, String, String, i64, DateTime<Utc>)>(
-                "SELECT id, device_id, app_name, window_title, duration_seconds, timestamp FROM activity_logs ORDER BY timestamp DESC"
+                "SELECT id, device_id, app_name, window_title, duration_seconds, timestamp FROM desktop_activity ORDER BY timestamp DESC"
             )
             .fetch_all(&self.pool)
             .await?
@@ -628,7 +172,7 @@ impl Database {
         limit: Option<i64>,
     ) -> Result<Vec<ActivityLog>, sqlx::Error> {
         let mut query_builder = QueryBuilder::<Postgres>::new(
-            "SELECT id, device_id, app_name, window_title, duration_seconds, timestamp FROM activity_logs"
+            "SELECT id, device_id, app_name, window_title, duration_seconds, timestamp FROM desktop_activity"
         );
 
         let mut has_where = false;
@@ -689,7 +233,7 @@ impl Database {
     ) -> Result<Vec<(String, String, i64, i64)>, sqlx::Error> {
         sqlx::query_as::<_, (String, String, i64, i64)>(
             "SELECT app_name, window_title, COALESCE(SUM(duration_seconds), 0)::BIGINT, COUNT(*)::BIGINT
-             FROM activity_logs
+             FROM desktop_activity
              WHERE device_id = $1 AND DATE(timestamp + ($3 * INTERVAL '1 minute')) = $2
              GROUP BY app_name, window_title
              ORDER BY 3 DESC"
@@ -713,7 +257,7 @@ impl Database {
                     COALESCE(window_title, ''),
                     COALESCE(SUM(duration_seconds), 0)::BIGINT,
                     COUNT(*)::BIGINT
-             FROM activity_logs
+             FROM desktop_activity
              WHERE device_id = $1
                AND DATE(timestamp + ($3 * INTERVAL '1 minute')) = $2
                GROUP BY 1, 2, 3
@@ -736,7 +280,7 @@ impl Database {
             "SELECT EXTRACT(HOUR FROM (timestamp + ($3 * INTERVAL '1 minute')))::INT,
                     COALESCE(SUM(CASE WHEN LOWER(app_name) LIKE '%idle%' OR LOWER(window_title) LIKE '%idle%' THEN 0 ELSE duration_seconds END), 0)::BIGINT,
                     COALESCE(SUM(CASE WHEN LOWER(app_name) LIKE '%idle%' OR LOWER(window_title) LIKE '%idle%' THEN duration_seconds ELSE 0 END), 0)::BIGINT
-             FROM activity_logs
+             FROM desktop_activity
              WHERE device_id = $1 AND DATE(timestamp + ($3 * INTERVAL '1 minute')) = $2
              GROUP BY 1
              ORDER BY 1"
@@ -757,7 +301,7 @@ impl Database {
         if let Some(did) = device_id {
             sqlx::query_scalar::<_, NaiveDate>(
                 "SELECT DISTINCT DATE(timestamp + ($2 * INTERVAL '1 minute'))
-                 FROM activity_logs
+                 FROM desktop_activity
                  WHERE device_id = $1
                  ORDER BY 1 DESC
                  LIMIT $3"
@@ -770,7 +314,7 @@ impl Database {
         } else {
             sqlx::query_scalar::<_, NaiveDate>(
                 "SELECT DISTINCT DATE(timestamp + ($1 * INTERVAL '1 minute'))
-                 FROM activity_logs
+                 FROM desktop_activity
                  ORDER BY 1 DESC
                  LIMIT $2"
             )
@@ -787,10 +331,10 @@ impl Database {
     ) -> Result<Vec<(Uuid, i64, i64)>, sqlx::Error> {
         sqlx::query_as::<_, (Uuid, i64, i64)>(
             "SELECT device_id,
-                    COALESCE(SUM(active_seconds), 0)::BIGINT,
-                    COALESCE(SUM(idle_seconds), 0)::BIGINT
-             FROM input_activity_metrics
-             WHERE timestamp >= $1
+                    COALESCE(SUM(active_person_seconds), 0)::BIGINT,
+                    COALESCE(SUM(idle_person_seconds), 0)::BIGINT
+             FROM session_activity_combined
+             WHERE day >= ($1::timestamptz AT TIME ZONE 'UTC')::date AND available_samples>0
              GROUP BY device_id
              ORDER BY 2 DESC"
         )
@@ -809,7 +353,7 @@ impl Database {
         let rows = if let Some(did) = device_id {
             sqlx::query_as::<_, (Uuid, Uuid, String, String, i64, DateTime<Utc>)>(
                 "SELECT id, device_id, app_name, window_title, duration_seconds, timestamp
-                 FROM activity_logs
+                 FROM desktop_activity
                  WHERE device_id = $1 AND DATE(timestamp + ($4 * INTERVAL '1 minute')) BETWEEN $2 AND $3
                  ORDER BY timestamp DESC"
             )
@@ -822,7 +366,7 @@ impl Database {
         } else {
             sqlx::query_as::<_, (Uuid, Uuid, String, String, i64, DateTime<Utc>)>(
                 "SELECT id, device_id, app_name, window_title, duration_seconds, timestamp
-                 FROM activity_logs
+                 FROM desktop_activity
                  WHERE DATE(timestamp + ($3 * INTERVAL '1 minute')) BETWEEN $1 AND $2
                  ORDER BY timestamp DESC"
             )
@@ -915,33 +459,10 @@ impl Database {
         description: &str,
         severity: &str,
     ) -> Result<SecurityAlert, sqlx::Error> {
-        let row = sqlx::query_as::<_, (i64, Uuid, String, String, String, String, String, bool, DateTime<Utc>)>(
-            r#"
-            INSERT INTO security_alerts (device_id, alert_type, app_name, exe_hash, description, severity, resolved)
-            VALUES ($1, $2, $3, $4, $5, $6, FALSE)
-            RETURNING id::BIGINT, device_id, alert_type, app_name, exe_hash, description, severity, resolved, created_at
-            "#,
-        )
-        .bind(device_id)
-        .bind(alert_type)
-        .bind(app_name.unwrap_or(""))
-        .bind(exe_hash.unwrap_or(""))
-        .bind(description)
-        .bind(severity)
-        .fetch_one(&self.pool)
-        .await?;
-
-        Ok(SecurityAlert {
-            id: row.0,
-            device_id: row.1,
-            alert_type: row.2,
-            app_name: row.3,
-            exe_hash: row.4,
-            description: row.5,
-            severity: row.6,
-            resolved: row.7,
-            created_at: row.8,
-        })
+        let mut writer = crate::telemetry_writer::TelemetryWriter::begin(&self.pool).await?;
+        let result = writer.insert_security_alert(device_id, alert_type, app_name, exe_hash, description, severity).await?;
+        writer.commit().await?;
+        Ok(result)
     }
 
     pub async fn get_security_alerts(
@@ -1016,7 +537,7 @@ impl Database {
                 resolution_notes = COALESCE($2, resolution_notes),
                 resolved_at = NOW(),
                 updated_at = NOW()
-            WHERE id = $1
+            WHERE id = $1 AND resolved IS FALSE
             RETURNING id::BIGINT, device_id, alert_type, app_name, exe_hash, description, severity, resolved, created_at
             "#,
         )
@@ -1047,29 +568,10 @@ impl Database {
         auto_restarted: bool,
         timestamp: Option<DateTime<Utc>>,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            r#"
-            INSERT INTO process_termination_attempts (
-                device_id,
-                method,
-                attempted_by,
-                blocked,
-                auto_restarted,
-                timestamp
-            )
-            VALUES ($1, $2, $3, $4, $5, COALESCE($6, NOW()))
-            "#,
-        )
-        .bind(device_id)
-        .bind(method)
-        .bind(attempted_by)
-        .bind(blocked)
-        .bind(auto_restarted)
-        .bind(timestamp)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
+        let mut writer = crate::telemetry_writer::TelemetryWriter::begin(&self.pool).await?;
+        let result = writer.insert_process_termination_attempt(device_id, method, attempted_by, blocked, auto_restarted, timestamp).await?;
+        writer.commit().await?;
+        Ok(result)
     }
 
     pub async fn get_operational_metrics(
@@ -1099,21 +601,21 @@ impl Database {
         .max(0);
 
         let activities_last_hour = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*)::BIGINT FROM activity_logs WHERE timestamp >= NOW() - INTERVAL '1 hour'"
+            "SELECT COUNT(*)::BIGINT FROM desktop_activity WHERE timestamp >= NOW() - INTERVAL '1 hour'"
         )
         .fetch_one(&self.pool)
         .await?
         .max(0);
 
         let input_rows_today = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*)::BIGINT FROM input_activity_metrics WHERE timestamp >= date_trunc('day', NOW())"
+            "SELECT COALESCE(sum(available_samples+unavailable_samples+unknown_samples),0)::bigint FROM session_activity_combined WHERE day=(now() AT TIME ZONE 'UTC')::date"
         )
         .fetch_one(&self.pool)
         .await?
         .max(0);
 
         let newest_activity_age_seconds = sqlx::query_scalar::<_, i64>(
-            "SELECT COALESCE(EXTRACT(EPOCH FROM (NOW() - MAX(timestamp)))::BIGINT, 0) FROM activity_logs"
+            "SELECT COALESCE(EXTRACT(EPOCH FROM (NOW() - MAX(timestamp)))::BIGINT, 0) FROM desktop_activity"
         )
         .fetch_one(&self.pool)
         .await?
@@ -1140,7 +642,7 @@ impl Database {
              FROM devices d
              LEFT JOIN LATERAL (
                  SELECT app_name, window_title, duration_seconds, timestamp
-                 FROM activity_logs
+                 FROM desktop_activity
                  WHERE device_id = d.device_id
                  ORDER BY timestamp DESC
                  LIMIT 1
@@ -1173,39 +675,10 @@ impl Database {
         top_process_cpu_percent: Option<f64>,
         top_process_memory_mb: Option<f64>,
     ) -> Result<(), sqlx::Error> {
-        let device_uuid = Uuid::parse_str(&device_id)
-            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
-
-        sqlx::query(
-            r#"
-            INSERT INTO node_resource_metrics (
-                device_id,
-                timestamp,
-                cpu_percent,
-                memory_used_mb,
-                memory_percent,
-                top_process_name,
-                top_process_cpu_percent,
-                top_process_memory_mb
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            "#,
-        )
-        .bind(device_uuid)
-        .bind(timestamp)
-        .bind(cpu_percent.max(0.0))
-        .bind(memory_used_mb.max(0.0))
-        .bind(memory_percent.clamp(0.0, 100.0))
-        .bind(top_process_name)
-        .bind(top_process_cpu_percent.map(|v| v.clamp(0.0, 100.0)))
-        .bind(top_process_memory_mb.map(|v| {
-            // Backward compatibility: older agent builds sent KB-as-MB values.
-            if v > 8192.0 { (v / 1024.0).max(0.0) } else { v.max(0.0) }
-        }))
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
+        let mut writer = crate::telemetry_writer::TelemetryWriter::begin(&self.pool).await?;
+        let result = writer.insert_node_resource_metric(device_id, timestamp, cpu_percent, memory_used_mb, memory_percent, top_process_name, top_process_cpu_percent, top_process_memory_mb).await?;
+        writer.commit().await?;
+        Ok(result)
     }
 
     pub async fn get_device_resource_metrics_for_date(
@@ -1374,68 +847,10 @@ impl Database {
         version: String,
         exe_hash: String,
     ) -> Result<InventoryItem, sqlx::Error> {
-        let timestamp = Utc::now();
-        let device_uuid = Uuid::parse_str(&device_id)
-            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
-
-        let insert_result = sqlx::query(
-            r#"
-            INSERT INTO inventory (id, device_id, app_name, version, exe_hash, timestamp)
-            SELECT $1, $2, $3, $4, $5, $6
-            WHERE NOT EXISTS (
-                SELECT 1
-                FROM inventory
-                WHERE device_id = $2
-                  AND app_name = $3
-                  AND COALESCE(version, '') = COALESCE($4, '')
-                  AND COALESCE(exe_hash, '') = COALESCE($5, '')
-            )
-            "#,
-        )
-        .bind(Uuid::new_v4())
-        .bind(device_uuid)
-        .bind(&app_name)
-        .bind(&version)
-        .bind(&exe_hash)
-        .bind(timestamp)
-        .execute(&self.pool)
-        .await?;
-
-        let row = sqlx::query_as::<_, (String, String, String, String, String, DateTime<Utc>)>(
-            r#"
-            SELECT id::text, device_id::text, app_name, COALESCE(version, ''), COALESCE(exe_hash, ''), timestamp
-            FROM inventory
-            WHERE device_id = $1
-              AND app_name = $2
-              AND COALESCE(version, '') = COALESCE($3, '')
-              AND COALESCE(exe_hash, '') = COALESCE($4, '')
-            ORDER BY timestamp DESC
-            LIMIT 1
-            "#,
-        )
-        .bind(device_uuid)
-        .bind(&app_name)
-        .bind(&version)
-        .bind(&exe_hash)
-        .fetch_one(&self.pool)
-        .await?;
-
-        if insert_result.rows_affected() > 0 {
-            tracing::info!("📦 Saved inventory: {} | {} v{}", device_id, app_name, version);
-        } else {
-            tracing::debug!("📦 Skipped duplicate inventory item: {} | {} v{}", device_id, app_name, version);
-        }
-
-        let (id, device_id, app_name, version, exe_hash, timestamp) = row;
-
-        Ok(InventoryItem {
-            id,
-            device_id,
-            app_name,
-            version,
-            exe_hash,
-            timestamp,
-        })
+        let mut writer = crate::telemetry_writer::TelemetryWriter::begin(&self.pool).await?;
+        let result = writer.insert_inventory(device_id, app_name, version, exe_hash).await?;
+        writer.commit().await?;
+        Ok(result)
     }
 
     pub async fn get_inventory(&self, device_id: Option<&str>) -> Result<Vec<InventoryItem>, sqlx::Error> {
@@ -1482,64 +897,14 @@ impl Database {
         device_id: String,
         apps: Vec<(String, String, i32, Option<String>, Option<String>)>,
     ) -> Result<(), sqlx::Error> {
-        let device_uuid = Uuid::parse_str(&device_id)
-            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
-
-        let mut tx = self.pool.begin().await?;
-
-        sqlx::query("DELETE FROM running_apps_current WHERE device_id = $1")
-            .bind(device_uuid)
-            .execute(&mut *tx)
-            .await?;
-
-        let updated_at = Utc::now();
-        for (app_name, primary_title, window_count, exe_path, exe_hash) in apps {
-            sqlx::query(
-                r#"
-                INSERT INTO running_apps_current (id, device_id, app_name, primary_title, window_count, exe_path, exe_hash, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                "#,
-            )
-            .bind(Uuid::new_v4())
-            .bind(device_uuid)
-            .bind(app_name)
-            .bind(primary_title)
-            .bind(window_count.max(1))
-            .bind(exe_path)
-            .bind(exe_hash)
-            .bind(updated_at)
-            .execute(&mut *tx)
-            .await?;
-        }
-
-        tx.commit().await?;
-        Ok(())
+        let mut writer = crate::telemetry_writer::TelemetryWriter::begin(&self.pool).await?;
+        let result = writer.replace_running_apps_snapshot(device_id, apps).await?;
+        writer.commit().await?;
+        Ok(result)
     }
 
     pub async fn get_running_apps(&self, device_id: Uuid) -> Result<Vec<RunningAppItem>, sqlx::Error> {
-        let rows = sqlx::query_as::<_, (Uuid, Uuid, String, Option<String>, i32, Option<String>, Option<String>, DateTime<Utc>)>(
-            "SELECT id, device_id, app_name, primary_title, window_count, exe_path, exe_hash, updated_at
-             FROM running_apps_current
-             WHERE device_id = $1
-             ORDER BY window_count DESC, updated_at DESC, app_name ASC"
-        )
-        .bind(device_id)
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(rows
-            .into_iter()
-            .map(|(id, device_id, app_name, primary_title, window_count, exe_path, exe_hash, updated_at)| RunningAppItem {
-                id,
-                device_id,
-                app_name,
-                primary_title: primary_title.unwrap_or_default(),
-                window_count,
-                exe_path,
-                exe_hash,
-                updated_at,
-            })
-            .collect())
+        crate::domains::inventory::repository::get_running_apps(&self.pool, device_id).await
     }
 
     pub async fn insert_usb_event(
@@ -1551,38 +916,10 @@ impl Database {
         serial_number: Option<String>,
         volume_label: Option<String>,
     ) -> Result<UsbEvent, sqlx::Error> {
-        let id = Uuid::new_v4();
-        let timestamp = Utc::now();
-        let device_uuid = Uuid::parse_str(&device_id)
-            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
-
-        sqlx::query(
-            r#"
-            INSERT INTO usb_events (id, device_id, action, hardware_id, device_name, serial_number, volume_label, timestamp)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            "#,
-        )
-        .bind(id)
-        .bind(device_uuid)
-        .bind(&action)
-        .bind(&hardware_id)
-        .bind(&device_name)
-        .bind(&serial_number)
-        .bind(&volume_label)
-        .bind(timestamp)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(UsbEvent {
-            id,
-            device_id: device_uuid,
-            action,
-            hardware_id,
-            device_name,
-            serial_number: serial_number.unwrap_or_default(),
-            volume_label,
-            timestamp,
-        })
+        let mut writer = crate::telemetry_writer::TelemetryWriter::begin(&self.pool).await?;
+        let result = writer.insert_usb_event(device_id, action, hardware_id, device_name, serial_number, volume_label, Utc::now()).await?;
+        writer.commit().await?;
+        Ok(result)
     }
 
     pub async fn get_usb_events(
@@ -1633,37 +970,10 @@ impl Database {
         signal_percent: Option<i32>,
         timestamp: DateTime<Utc>,
     ) -> Result<WifiEvent, sqlx::Error> {
-        let id = Uuid::new_v4();
-        let device_uuid = Uuid::parse_str(&device_id)
-            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
-
-        sqlx::query(
-            r#"
-            INSERT INTO wifi_events (id, device_id, interface_name, state, ssid, bssid, signal_percent, timestamp)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            "#,
-        )
-        .bind(id)
-        .bind(device_uuid)
-        .bind(&interface_name)
-        .bind(&state)
-        .bind(&ssid)
-        .bind(&bssid)
-        .bind(signal_percent)
-        .bind(timestamp)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(WifiEvent {
-            id,
-            device_id: device_uuid,
-            interface_name,
-            state,
-            ssid,
-            bssid,
-            signal_percent,
-            timestamp,
-        })
+        let mut writer = crate::telemetry_writer::TelemetryWriter::begin(&self.pool).await?;
+        let result = writer.insert_wifi_event(device_id, interface_name, state, ssid, bssid, signal_percent, timestamp).await?;
+        writer.commit().await?;
+        Ok(result)
     }
 
     pub async fn get_wifi_events(
@@ -1716,105 +1026,10 @@ impl Database {
         status: String,
         bucket_max_seconds: i64,
     ) -> Result<(), sqlx::Error> {
-        let id = Uuid::new_v4();
-        let device_uuid = Uuid::parse_str(&device_id)
-            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
-
-        let safe_bucket_max = bucket_max_seconds.max(1);
-        let mut safe_active = active_seconds.max(0).min(safe_bucket_max);
-        let mut safe_idle = idle_seconds.max(0).min(safe_bucket_max);
-        if safe_active + safe_idle > safe_bucket_max {
-            if status == "idle" {
-                safe_active = 0;
-                safe_idle = safe_bucket_max;
-            } else {
-                safe_active = safe_bucket_max;
-                safe_idle = 0;
-            }
-        }
-
-        sqlx::query(
-            r#"
-            INSERT INTO input_activity_metrics (id, device_id, timestamp, active_seconds, idle_seconds, keys_count, mouse_moves_count, clicks_count, status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            "#,
-        )
-        .bind(id)
-        .bind(device_uuid)
-        .bind(timestamp)
-        .bind(safe_active)
-        .bind(safe_idle)
-        .bind(keys_count.max(0))
-        .bind(mouse_moves_count.max(0))
-        .bind(clicks_count.max(0))
-        .bind(&status)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
-    }
-
-    pub async fn get_device_time_totals_today(&self, tz_offset_minutes: i32) -> Result<Vec<DeviceTimeTotals>, sqlx::Error> {
-        // tz_offset_minutes = client's UTC offset in minutes (e.g. UTC-3 => -180, UTC+5 => 300)
-        // local midnight in UTC = date_trunc('day', NOW() + offset) - offset
-        let rows = sqlx::query_as::<_, (Uuid, i64, i64, i64, i64, i64)>(
-            "SELECT device_id,
-                    COALESCE(SUM(active_seconds), 0)::BIGINT,
-                    COALESCE(SUM(idle_seconds), 0)::BIGINT,
-                    COALESCE(SUM(keys_count), 0)::BIGINT,
-                    COALESCE(SUM(mouse_moves_count), 0)::BIGINT,
-                    COALESCE(SUM(clicks_count), 0)::BIGINT
-                         FROM input_activity_metrics
-                         WHERE timestamp >= date_trunc('day', NOW() + make_interval(mins => $1)) - make_interval(mins => $1)
-                             AND (active_seconds + idle_seconds) <= 60
-             GROUP BY device_id"
-        )
-        .bind(tz_offset_minutes)
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(rows
-            .into_iter()
-            .map(|(device_id, active_seconds, idle_seconds, keys_count, mouse_moves_count, clicks_count)| DeviceTimeTotals {
-                device_id,
-                active_seconds,
-                idle_seconds,
-                keys_count,
-                mouse_moves_count,
-                clicks_count,
-            })
-            .collect())
-    }
-
-    pub async fn get_single_device_time_totals_today(
-        &self,
-        device_id: Uuid,
-        tz_offset_minutes: i32,
-    ) -> Result<DeviceTimeTotals, sqlx::Error> {
-        let row = sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
-            "SELECT COALESCE(SUM(active_seconds), 0)::BIGINT,
-                    COALESCE(SUM(idle_seconds), 0)::BIGINT,
-                    COALESCE(SUM(keys_count), 0)::BIGINT,
-                    COALESCE(SUM(mouse_moves_count), 0)::BIGINT,
-                    COALESCE(SUM(clicks_count), 0)::BIGINT
-                         FROM input_activity_metrics
-                         WHERE device_id = $1
-                             AND timestamp >= date_trunc('day', NOW() + make_interval(mins => $2)) - make_interval(mins => $2)
-                             AND (active_seconds + idle_seconds) <= 60"
-        )
-        .bind(device_id)
-        .bind(tz_offset_minutes)
-        .fetch_one(&self.pool)
-        .await?;
-
-        Ok(DeviceTimeTotals {
-            device_id,
-            active_seconds: row.0,
-            idle_seconds: row.1,
-            keys_count: row.2,
-            mouse_moves_count: row.3,
-            clicks_count: row.4,
-        })
+        let mut writer = crate::telemetry_writer::TelemetryWriter::begin(&self.pool).await?;
+        let result = writer.insert_input_summary(device_id, timestamp, active_seconds, idle_seconds, keys_count, mouse_moves_count, clicks_count, status, bucket_max_seconds, None).await?;
+        writer.commit().await?;
+        Ok(result)
     }
 
     // Device Methods
@@ -1826,44 +1041,10 @@ impl Database {
         nickname: Option<String>,
         version: Option<String>,
     ) -> Result<Device, sqlx::Error> {
-        let last_seen = Utc::now();
-        let device_uuid = Uuid::parse_str(&device_id)
-            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
-
-        sqlx::query(
-            r#"
-            INSERT INTO devices (device_id, hostname, nickname, mac_address, version, last_seen)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (device_id) DO UPDATE SET
-                hostname = EXCLUDED.hostname,
-                nickname = COALESCE(EXCLUDED.nickname, devices.nickname),
-                mac_address = COALESCE(EXCLUDED.mac_address, devices.mac_address),
-                version = COALESCE(EXCLUDED.version, devices.version),
-                last_seen = EXCLUDED.last_seen,
-                updated_at = NOW()
-            "#,
-        )
-        .bind(device_uuid)
-        .bind(&hostname)
-        .bind(&nickname)
-        .bind(&mac_address)
-        .bind(&version)
-        .bind(last_seen)
-        .execute(&self.pool)
-        .await?;
-
-        tracing::info!("🖥️  Registered device: {} ({})", hostname, device_id);
-
-        Ok(Device {
-            id: device_uuid,
-            hostname,
-            device_id: device_uuid,
-            mac_address,
-            version,
-            created_at: last_seen,
-            last_seen,
-            nickname,
-        })
+        let mut writer = crate::telemetry_writer::TelemetryWriter::begin(&self.pool).await?;
+        let result = writer.register_device(hostname, device_id, mac_address, nickname, version).await?;
+        writer.commit().await?;
+        Ok(result)
     }
 
     pub async fn get_devices(&self) -> Result<Vec<Device>, sqlx::Error> {
@@ -1936,11 +1117,10 @@ impl Database {
         &self,
         device_id: Uuid,
     ) -> Result<Vec<AgentCommand>, sqlx::Error> {
+        sqlx::query("UPDATE agent_commands SET status='expired' WHERE device_id=$1 AND status IN ('pending','delivered') AND created_at<=now()-interval '1 hour'").bind(device_id).execute(&self.pool).await?;
         let rows = sqlx::query_as::<_, (Uuid, Uuid, String, serde_json::Value, String, DateTime<Utc>, Option<DateTime<Utc>>, Option<serde_json::Value>)>(
-            "SELECT id, device_id, command, payload, status, created_at, acked_at, result \
-             FROM agent_commands \
-             WHERE device_id = $1 AND status = 'pending' \
-             ORDER BY created_at ASC"
+            "WITH selected AS (SELECT id FROM agent_commands WHERE device_id=$1 AND command IN ('ping','status','run_diagnostic') AND created_at>now()-interval '1 hour' AND (status='pending' OR (status='delivered' AND delivered_at<now()-interval '60 seconds')) ORDER BY created_at,id LIMIT 25 FOR UPDATE SKIP LOCKED)
+             UPDATE agent_commands c SET status='delivered',delivered_at=now() FROM selected s WHERE c.id=s.id RETURNING c.id,c.device_id,c.command,c.payload,c.status,c.created_at,c.acked_at,c.result"
         )
         .bind(device_id)
         .fetch_all(&self.pool)
@@ -1969,23 +1149,11 @@ impl Database {
         Ok(())
     }
 
-    pub async fn ack_agent_command(
-        &self,
-        command_id: Uuid,
-        ack_status: &str,
-        result: serde_json::Value,
-    ) -> Result<(), sqlx::Error> {
-        let final_status = if ack_status == "ok" { "done" } else { "failed" };
-        sqlx::query(
-            "UPDATE agent_commands SET status = $2, acked_at = NOW(), result = $3 \
-             WHERE id = $1"
-        )
-        .bind(command_id)
-        .bind(final_status)
-        .bind(result)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
+    pub async fn ack_agent_command(&self,command_id:Uuid,ack_status:&str,result:serde_json::Value)->Result<bool,sqlx::Error> {
+        let status=if ack_status=="ok"{"done"}else{"failed"};
+        let changed=sqlx::query("UPDATE agent_commands SET status=$2,acked_at=now(),result=$3 WHERE id=$1 AND status='delivered' AND created_at>now()-interval '1 hour'").bind(command_id).bind(status).bind(&result).execute(&self.pool).await?;
+        if changed.rows_affected()==1{return Ok(true);}
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM agent_commands WHERE id=$1 AND status=$2 AND result=$3)").bind(command_id).bind(status).bind(result).fetch_one(&self.pool).await
     }
 
     pub async fn list_agent_commands(
@@ -2035,84 +1203,6 @@ impl Database {
         Ok(())
     }
 
-    /// Get overview statistics for the dashboard (devices today, active time, idle time, etc.)
-    pub async fn get_overview(&self) -> Result<Overview, sqlx::Error> {
-        // Count unique devices that sent input summaries today.
-        let devices_today_result = sqlx::query_scalar::<_, i64>(
-                        "SELECT COUNT(DISTINCT device_id)
-                         FROM input_activity_metrics
-                         WHERE timestamp >= date_trunc('day', NOW())
-                             AND (active_seconds + idle_seconds) <= 60"
-        )
-        .fetch_optional(&self.pool)
-        .await?
-        .unwrap_or(0);
-
-        // Aggregate daily input metrics from midnight.
-        let active_time_result = sqlx::query_scalar::<_, i64>(
-                        "SELECT COALESCE(SUM(active_seconds), 0)::BIGINT
-                         FROM input_activity_metrics
-                         WHERE timestamp >= date_trunc('day', NOW())
-                             AND (active_seconds + idle_seconds) <= 60"
-        )
-        .fetch_one(&self.pool)
-        .await?;
-
-        let idle_time_result = sqlx::query_scalar::<_, i64>(
-                        "SELECT COALESCE(SUM(idle_seconds), 0)::BIGINT
-                         FROM input_activity_metrics
-                         WHERE timestamp >= date_trunc('day', NOW())
-                             AND (active_seconds + idle_seconds) <= 60"
-        )
-        .fetch_one(&self.pool)
-        .await?;
-
-        let keys_today = sqlx::query_scalar::<_, i64>(
-                        "SELECT COALESCE(SUM(keys_count), 0)::BIGINT
-                         FROM input_activity_metrics
-                         WHERE timestamp >= date_trunc('day', NOW())
-                             AND (active_seconds + idle_seconds) <= 60"
-        )
-        .fetch_one(&self.pool)
-        .await?;
-
-        let mouse_moves_today = sqlx::query_scalar::<_, i64>(
-                        "SELECT COALESCE(SUM(mouse_moves_count), 0)::BIGINT
-                         FROM input_activity_metrics
-                         WHERE timestamp >= date_trunc('day', NOW())
-                             AND (active_seconds + idle_seconds) <= 60"
-        )
-        .fetch_one(&self.pool)
-        .await?;
-
-        let mouse_clicks_today = sqlx::query_scalar::<_, i64>(
-                        "SELECT COALESCE(SUM(clicks_count), 0)::BIGINT
-                         FROM input_activity_metrics
-                         WHERE timestamp >= date_trunc('day', NOW())
-                             AND (active_seconds + idle_seconds) <= 60"
-        )
-        .fetch_one(&self.pool)
-        .await?;
-
-        // Calculate idle percentage
-        let total_time = active_time_result + idle_time_result;
-        let idle_pct = if total_time > 0 {
-            (idle_time_result as f64 / total_time as f64) * 100.0
-        } else {
-            0.0
-        };
-
-        Ok(Overview {
-            devices_today: devices_today_result,
-            active_time: active_time_result,
-            idle_time: idle_time_result,
-            idle_pct,
-            keys_today,
-            mouse_moves_today,
-            mouse_clicks_today,
-        })
-    }
-
     /// Get top 6 most used applications in the last N days
     // -------------------------------------------------------------------------
     // Security Events
@@ -2129,49 +1219,10 @@ impl Database {
         event_fingerprint: Option<String>,
         timestamp: DateTime<Utc>,
     ) -> Result<SecurityEvent, sqlx::Error> {
-        let device_uuid = Uuid::parse_str(&device_id)
-            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
-
-        let row = sqlx::query_as::<_, (i64, DateTime<Utc>, Uuid, String, Option<String>, Option<String>, String, serde_json::Value, Option<String>, DateTime<Utc>)>(
-            r#"
-            INSERT INTO security_events
-                (timestamp, device_id, query_name, query_pack, mitre_technique, severity, raw_data, event_fingerprint)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            ON CONFLICT (event_fingerprint) WHERE event_fingerprint IS NOT NULL DO NOTHING
-            RETURNING id, timestamp, device_id, query_name, query_pack, mitre_technique, severity, raw_data, event_fingerprint, created_at
-            "#,
-        )
-        .bind(timestamp)
-        .bind(device_uuid)
-        .bind(&query_name)
-        .bind(&query_pack)
-        .bind(&mitre_technique)
-        .bind(&severity)
-        .bind(&raw_data)
-        .bind(&event_fingerprint)
-        .fetch_optional(&self.pool)
-        .await?;
-
-        if let Some((id, ts, did, qn, qp, mt, sev, rd, fp, ca)) = row {
-            return Ok(SecurityEvent {
-                id, timestamp: ts, device_id: did,
-                query_name: qn, query_pack: qp, mitre_technique: mt,
-                severity: sev, raw_data: rd, event_fingerprint: fp, created_at: ca,
-            });
-        }
-
-        // Event was deduplicated (ON CONFLICT DO NOTHING)
-        sqlx::query_as::<_, (i64, DateTime<Utc>, Uuid, String, Option<String>, Option<String>, String, serde_json::Value, Option<String>, DateTime<Utc>)>(
-            "SELECT id, timestamp, device_id, query_name, query_pack, mitre_technique, severity, raw_data, event_fingerprint, created_at FROM security_events WHERE event_fingerprint = $1"
-        )
-        .bind(&event_fingerprint)
-        .fetch_one(&self.pool)
-        .await
-        .map(|(id, ts, did, qn, qp, mt, sev, rd, fp, ca)| SecurityEvent {
-            id, timestamp: ts, device_id: did,
-            query_name: qn, query_pack: qp, mitre_technique: mt,
-            severity: sev, raw_data: rd, event_fingerprint: fp, created_at: ca,
-        })
+        let mut writer = crate::telemetry_writer::TelemetryWriter::begin(&self.pool).await?;
+        let result = writer.insert_security_event(device_id, query_name, query_pack, mitre_technique, severity, raw_data, event_fingerprint, timestamp).await?;
+        writer.commit().await?;
+        Ok(result)
     }
 
     pub async fn get_security_events(
@@ -2243,10 +1294,10 @@ impl Database {
 
     pub async fn get_top_apps(&self, days: i64) -> Result<Vec<TopApp>, sqlx::Error> {
         let apps = sqlx::query_as::<_, (String, i64)>(
-            "SELECT app_name, COALESCE(SUM(duration_seconds), 0)::BIGINT as total_duration FROM activity_logs 
-             WHERE timestamp >= NOW() - INTERVAL '1 day' * $1 
-             GROUP BY app_name 
-             ORDER BY total_duration DESC 
+            "SELECT app_name, COALESCE(SUM(duration_seconds), 0)::BIGINT as total_duration FROM desktop_activity
+             WHERE timestamp >= NOW() - INTERVAL '1 day' * $1
+             GROUP BY app_name
+             ORDER BY total_duration DESC
              LIMIT 6"
         )
         .bind(days)
@@ -2268,5 +1319,75 @@ impl Clone for Database {
         Self {
             pool: self.pool.clone(),
         }
+    }
+}
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+    use sqlx::Executor;
+
+    #[tokio::test]
+    #[ignore = "requires a disposable TimescaleDB and LEGACY_SCHEMA_DIR"]
+    async fn fresh_and_legacy_migrations_preserve_data() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("disposable database URL");
+        let admin = PgPool::connect(&url).await.unwrap();
+        for legacy in [false, true] {
+            let name = format!("migration_test_{}", Uuid::new_v4().simple());
+            admin.execute(format!("CREATE DATABASE {name}").as_str()).await.unwrap();
+            let db_url = format!("{}/{}", url.rsplit_once('/').unwrap().0, name);
+            let pool = PgPool::connect(&db_url).await.unwrap();
+            let id = Uuid::new_v4();
+            if legacy {
+                let root = std::env::var("LEGACY_SCHEMA_DIR").unwrap();
+                for file in ["001_init_schema.sql", "002_input_heatmaps_and_alerts.sql", "003_security_events.sql"] {
+                    let sql = std::fs::read_to_string(format!("{root}/{file}")).unwrap();
+                    pool.execute(sql.as_str()).await.unwrap();
+                }
+                sqlx::query("INSERT INTO devices(device_id,hostname,last_seen) VALUES ($1,'preserved',now())")
+                    .bind(id).execute(&pool).await.unwrap();
+                pool.execute("SELECT alter_job(job_id, scheduled => false) FROM timescaledb_information.jobs WHERE proc_name LIKE 'policy_%'").await.unwrap();
+                sqlx::query("INSERT INTO activity_logs(device_id,app_name,duration_seconds,timestamp) SELECT $1,'legacy',42,now()-interval '40 days'+n*interval '1 second' FROM generate_series(1,100000) n")
+                    .bind(id).execute(&pool).await.unwrap();
+                pool.execute("SELECT compress_chunk(c) FROM show_chunks('activity_logs') c").await.unwrap();
+                let compressed: i64 = sqlx::query_scalar("SELECT count(*) FROM timescaledb_information.chunks WHERE hypertable_name='activity_logs' AND is_compressed")
+                    .fetch_one(&pool).await.unwrap();
+                assert!(compressed > 0);
+                // Lock contention must abort migration rather than hang startup.
+                let mut blocker = pool.begin().await.unwrap();
+                sqlx::query("LOCK TABLE devices IN ACCESS EXCLUSIVE MODE").execute(&mut *blocker).await.unwrap();
+                let blocked = tokio::time::timeout(std::time::Duration::from_secs(15), Database::connect(&db_url)).await.unwrap();
+                assert!(blocked.is_err());
+                blocker.rollback().await.unwrap();
+                let applied: i64 = sqlx::query_scalar("SELECT count(*) FROM _sqlx_migrations WHERE success").fetch_one(&pool).await.unwrap();
+                assert_eq!(applied, 0);
+
+            }
+            let started = std::time::Instant::now();
+            // Concurrent startup must serialize migration application.
+            let (first, second) = tokio::join!(Database::connect(&db_url), Database::connect(&db_url));
+            let first = first.unwrap();
+            let second = second.unwrap();
+            println!("Migration legacy={legacy}, elapsed={:?}", started.elapsed());
+            let count: i64 = sqlx::query_scalar("SELECT count(*) FROM _sqlx_migrations WHERE success")
+                .fetch_one(&pool).await.unwrap();
+            assert_eq!(count, 3);
+            if legacy {
+                let duration: i64 = sqlx::query_scalar("SELECT SUM(duration_seconds)::bigint FROM activity_logs WHERE device_id=$1")
+                    .bind(id).fetch_one(&pool).await.unwrap();
+                assert_eq!(duration, 4_200_000);
+                let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM activity_logs WHERE id IS NOT NULL AND created_at IS NOT NULL")
+                    .fetch_one(&pool).await.unwrap();
+                assert_eq!(rows, 100_000);
+                assert_eq!(first.get_devices().await.unwrap().len(), 1);
+            }
+            // These columns were missing or incompatible in the Docker schema.
+            pool.execute("SELECT id::bigint, timestamp, resolved_at FROM security_alerts; SELECT auto_restarted FROM process_termination_attempts; SELECT id, created_at FROM activity_logs;")
+                .await.unwrap();
+            first.pool.close().await;
+            second.pool.close().await;
+            pool.close().await;
+            admin.execute(format!("DROP DATABASE {name}").as_str()).await.unwrap();
+        }
+        admin.close().await;
     }
 }

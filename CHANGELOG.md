@@ -1,3 +1,79 @@
+# Changelog
+
+## Recuperación y preparación de GitHub — 2026-11-03
+
+- Piloto Windows: reconexión tras 75 s sin RabbitMQ y recuperación automática de SCM en 16 s comprobadas; binario 0.1.0 sin cambios.
+- Scripts de comprobación usan cookies/CSRF; smoke aislado y escritorio real aprobados. Recursos de UI incorporados a los builds de validación Linux.
+- Preflight de publicación, exclusión del binario heredado y retirada de credenciales incrustadas en configuración/instaladores antiguos. Revocación histórica pendiente.
+- Release por tags agent-v, versión comprobada, hashes y borradores; sin publicación automática estable.
+
+## Piloto local 0.1.0 — 2026-11-03, privado
+
+- Instalación limpia autorizada: MSI Windows 0.1.0 nuevo y stack reconstruido sobre volúmenes vacíos; sin migrar datos 3.4.0.
+- PostgreSQL interno a Docker, sin publicación del puerto reservado por Windows.
+- Login aclara que el código de autenticación solo aplica si la cuenta tiene MFA configurado; controles del servidor intactos.
+- Recepción real de recursos, actividad, ventanas, contadores por sesión y CSV comprobada. Pendientes reinicio real, desconexión prolongada, Linux y aceptación productiva.
+
+## Cierre funcional del candidato — 2026-11-02, sin publicar
+
+- Resumen global, equipo, histórico y CSV con contadores por sesión y días UTC; migración 0017 y compactación conservan totales y ausencia de captura.
+- Snapshots periódicos y cierre ordenado; errores de API y filtros inválidos explícitos.
+- Políticas sin listas contradictorias; comandos limitados a consultas con vencimiento, reentrega y ACK idempotente.
+- Inventario y eventos reproducidos contra consumidor real; USB conserva instante observado y alertas resueltas no se sobrescriben.
+- Bloque 4 cerrado con alcance y evidencia en docs/BLOCK4_CLOSURE.md. Agente 0.1.0 todavía sin paquete nuevo ni despliegue; transición desde 3.4.0 pendiente.
+
+## Datos por sesión — 2026-11-02, sin publicar
+
+- Ventanas por principal y sesión, fecha/vigencia visibles y manejo de snapshots vacíos o atrasados (migración 0016).
+- Contadores diarios UTC y totales independientes de paginación, compartidos con exportación CSV de sesiones.
+- Resumen del equipo con detalle plegable; datos no disponibles no se convierten en cero.
+- Exportación de actividad valida UUID, fechas y rangos antes de consultar; errores de ventanas devuelven HTTP 500.
+- Sin actualización del piloto ni cambio de versión del agente.
+
+## Acceso humano — 2026-10-30, sin publicar
+
+- Bloque 3: cookies revocables, CSRF, MFA TOTP para administradores, límites de intentos/API y auditoría por actor/equipo/resultado.
+- Sesiones y acceso en dashboard; herramienta Linux para alta, baja, roles y recuperación de cuentas/MFA.
+- CSP productiva compatible con el tema y protección de fórmulas en CSV. Migración 0015; requiere actualización coordinada de servidor y dashboard.
+- Comprobaciones aisladas aprobadas; piloto y agente instalado sin cambios. Ver ACCESS_CONTROL y P4_VALIDATION.
+
+## Agente 0.1.0 — En desarrollo, no publicado
+
+Fecha de inicio: 2026-10-28. Nueva serie del agente refactorizado; no modifica retrospectivamente las releases 3.x.
+
+- Versión del agente fijada en 0.1.0, sincronizada con Cargo.lock; salud/eventos usan la versión de compilación.
+- Manifiestos de release incluyen versión del agente y hash de su Cargo.toml.
+- Instalador local admite nombres numéricos versionados conservando comprobación de hash.
+- README renovado con arquitectura, piloto, límites y mantenimiento documental; política de versiones en docs/VERSIONING.md.
+- No se generó ni instaló un binario 0.1.0 en este cambio. El piloto 3.4.0 permanece sin modificar.
+- Transición MSI desde 3.x, firma y certificación de producción pendientes.
+
+## Servidor y despliegue — 2026-10-29, sin publicar
+
+- Candidato productivo con roles PostgreSQL separados y migraciones fuera del proceso HTTP.
+- Servidor/dashboard/mantenimiento sin root y configuración HTTPS/AMQPS con certificados externos.
+- Generador Linux de secretos/cuentas/certificados y documentación de límites y preparación.
+- Comprobaciones aisladas de permisos, mantenimiento y Nginx; sin despliegue del candidato ni cambios al piloto.
+
+## Identidad HTTP — 2026-10-29, sin publicar
+
+- Credenciales individuales revocables y con vencimiento; hashes en DB, emisión administrativa y auditoría.
+- UUID autorizado para políticas, comandos, registro y actividad HTTP; token compartido prohibido en producción.
+- Migración 0013 preparada. Enrolamiento, renovación automática y aislamiento de agentes RabbitMQ pendientes.
+- Piloto e instalador sin cambios; agente fuente sigue 0.1.0.
+
+## Identidad HTTP/AMQPS completa — 2026-10-29, sin publicar
+
+- Enrolamiento de un solo uso, renovación automática y recuperación idempotente del agente.
+- Usuarios RabbitMQ por credencial con permisos por UUID; revocación y cierre de conexiones, reconciliación y cuarentena.
+- Almacenamiento cifrado/atómico de credenciales, custodia de claves y rechazo de transporte inseguro en producción.
+- Gestión administrativa desde Diagnóstico y herramientas de configuración/renovación TLS con rollback.
+- Recorrido aislado de identidad aprobado; fuente del agente sigue 0.1.0. Piloto sin cambios.
+
+## Historial heredado
+
+El contenido siguiente se conserva como registro de versiones anteriores. Sus afirmaciones no certifican el estado actual; consultar README y TODO vigentes.
+
 # Changelog - ActivityMonitor Enterprise v3
 
 ## [3.3.5] - 2026-05-22

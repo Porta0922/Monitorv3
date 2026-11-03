@@ -22,6 +22,7 @@ struct PublisherState {
 impl RabbitMQPublisher {
     /// Connect to RabbitMQ and initialize exchanges
     pub async fn connect(rabbitmq_url: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        if crate::network_identity::production() && reqwest::Url::parse(rabbitmq_url).map(|u|u.scheme()!="amqps").unwrap_or(true){return Err("Production requires AMQPS".into());}
         let publisher = Self {
             rabbitmq_url: rabbitmq_url.to_string(),
             state: Mutex::new(PublisherState {
@@ -42,7 +43,7 @@ impl RabbitMQPublisher {
         rabbitmq_url: &str,
         state: &mut PublisherState,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        tracing::info!("🔌 Agent connecting to RabbitMQ at: {}", rabbitmq_url);
+        tracing::info!("Agent connecting to RabbitMQ");
 
         let connection_result = tokio::time::timeout(
             std::time::Duration::from_secs(10),
@@ -67,6 +68,7 @@ impl RabbitMQPublisher {
             Box::new(e) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
+        if !crate::network_identity::production() {
         tracing::info!("📢 Agent declaring 'monitoring' exchange (Topic, Durable)");
         channel
             .exchange_declare(
@@ -83,6 +85,9 @@ impl RabbitMQPublisher {
                 tracing::error!("❌ Agent failed to declare exchange: {}", e);
                 Box::new(e) as Box<dyn std::error::Error + Send + Sync>
             })?;
+
+        }
+        channel.confirm_select(lapin::options::ConfirmSelectOptions::default()).await?;
 
         state.connection = Some(connection);
         state.channel = Some(channel);
@@ -181,8 +186,19 @@ impl RabbitMQPublisher {
         event_type: &str,
         payload: serde_json::Value,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let routing_key = format!("monitoring.{}", event_type);
+        let mut payload=payload;
+        if let Some(object)=payload.as_object_mut(){object.remove("auth_token");}
+        let routing_key=if crate::network_identity::production(){
+            let device=payload["device_id"].as_str().and_then(|s|Uuid::parse_str(s).ok()).ok_or_else(||Self::boxed_error("Missing device identity".into()))?;
+            format!("monitoring.{device}.{event_type}")
+        }else{format!("monitoring.{event_type}")};
         let body = serde_json::to_vec(&payload)?;
+        if body.len()>1048576{return Err(Self::boxed_error("Telemetry exceeds 1 MiB".into()));}
+        let mut properties=BasicProperties::default().with_content_type("application/json".into()).with_delivery_mode(2);
+        if crate::network_identity::production(){
+            let url=reqwest::Url::parse(&self.rabbitmq_url)?;
+            properties=properties.with_user_id(url.username().into());
+        }
 
         tracing::info!("📤 Publishing event: {} (routing_key: {})", event_type, routing_key);
 
@@ -206,19 +222,20 @@ impl RabbitMQPublisher {
             let publish_result = tokio::time::timeout(
                 std::time::Duration::from_secs(5),
                 async {
-                    channel
+                    let confirmation = channel
                         .basic_publish(
                             "monitoring",
                             &routing_key,
-                            BasicPublishOptions::default(),
+                            BasicPublishOptions { mandatory: true, ..Default::default() },
                             &body,
-                            BasicProperties::default()
-                                .with_content_type("application/json".into())
-                                .with_delivery_mode(2u8),
+                            properties.clone(),
                         )
                         .await?
                         .await?;
-                    Ok::<(), lapin::Error>(())
+                    match confirmation {
+                        lapin::publisher_confirm::Confirmation::Ack(None) => Ok(()),
+                        _ => Err(Self::boxed_error("Broker did not confirm a routed message".into())),
+                    }
                 }
             ).await;
 
@@ -303,31 +320,24 @@ impl RabbitMQPublisher {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[tokio::test]
-    #[ignore]  // Requires running RabbitMQ
-    async fn test_rabbitmq_connection() {
-        let publisher = RabbitMQPublisher::connect("amqp://guest:guest@localhost:5672")
-            .await;
-        assert!(publisher.is_ok());
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_publish_activity_event() {
-        let publisher = RabbitMQPublisher::connect("amqp://guest:guest@localhost:5672")
-            .await
-            .expect("Failed to connect");
-
-        let device_id = Uuid::new_v4();
-        let result = publisher.publish_activity_event(
-            device_id,
-            "notepad.exe",
-            "Untitled - Notepad",
-            60,
-        )
-        .await;
-
-        assert!(result.is_ok());
+    #[ignore = "requires PROBE_RABBITMQ_URL pointing to a disposable broker"]
+    async fn broker_confirms_routed_messages_and_rejects_unroutable_messages() {
+        let url = std::env::var("PROBE_RABBITMQ_URL").unwrap();
+        let publisher = RabbitMQPublisher::connect(&url).await.unwrap();
+        let connection = Connection::connect(&url, ConnectionProperties::default()).await.unwrap();
+        let channel = connection.create_channel().await.unwrap();
+        let queue = channel.queue_declare("", lapin::options::QueueDeclareOptions {
+            exclusive: true, auto_delete: true, ..Default::default()
+        }, Default::default()).await.unwrap();
+        let event_type = format!("probe_{}", Uuid::new_v4().simple());
+        let key = format!("monitoring.{event_type}");
+        channel.queue_bind(queue.name().as_str(), "monitoring", &key, Default::default(), Default::default()).await.unwrap();
+        let payload = json!({"test_id":Uuid::new_v4().to_string()});
+        publisher.publish_event(&event_type, payload.clone()).await.unwrap();
+        let received = channel.basic_get(queue.name().as_str(), lapin::options::BasicGetOptions { no_ack: true }).await.unwrap().unwrap();
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(&received.delivery.data).unwrap(), payload);
+        channel.queue_delete(queue.name().as_str(), Default::default()).await.unwrap();
+        assert!(publisher.publish_event(&event_type, payload).await.is_err());
     }
 }

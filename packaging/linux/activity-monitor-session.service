@@ -1,0 +1,23 @@
+# Optional desktop companion. Global unit is gated by a per-user administrator-owned marker.
+[Unit]
+Description=ActivityMonitor desktop session collector
+ConditionPathExists=/etc/activity-monitor/sessions/%U/autostart.enabled
+PartOf=graphical-session.target
+After=graphical-session.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+Environment=AGENT_MODE=session
+Environment=AGENT_CONFIG_FILE=/etc/activity-monitor/sessions/%U/session.env
+ExecStart=/opt/activity-monitor/bin/activity-monitor-agent
+UMask=0077
+Restart=on-failure
+RestartSec=15s
+TimeoutStopSec=15s
+KillMode=control-group
+NoNewPrivileges=true
+
+[Install]
+WantedBy=graphical-session.target

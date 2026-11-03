@@ -1,96 +1,18 @@
-import { useNavigate } from 'react-router-dom';
-import { useEffect, useState } from 'react';
-import { apiClient } from '../api/client';
-
-interface NavItem {
-  path: string;
-  label: string;
-  icon: string;
-  current: string;
-}
-
-export function Sidebar({ currentPage }: { currentPage: string }) {
-  const navigate = useNavigate();
-  const [newAlertsCount, setNewAlertsCount] = useState(0);
-
-  const navItems: NavItem[] = [
-    { path: '/dashboard', label: 'Resumen', icon: '◆', current: 'dashboard' },
-    { path: '/activity', label: 'En Vivo', icon: '◉', current: 'activity' },
-    { path: '/metrics', label: 'Metricas', icon: '◈', current: 'metrics' },
-    { path: '/security', label: 'Seguridad', icon: '⬢', current: 'security' },
-    { path: '/alerts', label: 'Historial', icon: '◌', current: 'alerts' },
-    { path: '/wifi', label: 'WiFi', icon: '◎', current: 'wifi' },
-  ];
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadAlerts = async () => {
-      try {
-        const alerts = await apiClient.getAlerts(undefined, false);
-        if (isMounted) {
-          setNewAlertsCount(alerts.length);
-        }
-      } catch {
-        if (isMounted) {
-          setNewAlertsCount(0);
-        }
-      }
-    };
-
-    loadAlerts();
-    const interval = setInterval(loadAlerts, 15000);
-
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, []);
-
-  return (
-    <div className="sticky top-0 h-screen w-[220px] border-r border-[#16213f] bg-[#060a1a] flex flex-col">
-      {/* Header */}
-      <div className="h-16 border-b border-[#16213f] px-5 flex items-center">
-        <div>
-          <div className="flex items-center gap-2">
-            <p className="font-display text-xl font-black tracking-widest text-[#00d9ff]">AME</p>
-            {newAlertsCount > 0 && <span className="inline-block h-2 w-2 rounded-full bg-red-500"></span>}
-          </div>
-          <p className="font-mono text-[10px] tracking-[0.2em] text-[#6f7ea8]">ENTERPRISE</p>
-        </div>
-      </div>
-
-      {/* Navigation Items */}
-      <nav className="flex-1 pt-4 px-2 space-y-1">
-        {navItems.map((item) => (
-          <button
-            key={item.path}
-            onClick={() => navigate(item.path)}
-            className={`w-full flex items-center gap-3 px-4 py-2 rounded-md transition-all duration-200 ${
-              currentPage === item.current
-                ? 'bg-[#032538] text-[#00d9ff] border border-[#00d9ff]/30'
-                : 'text-[#8a97ba] hover:text-[#dbe4ff] hover:bg-[#0d1630]'
-            }`}
-          >
-            <span className="text-xs w-4 flex-shrink-0">{item.icon}</span>
-            <span className="font-mono text-xs tracking-wide">{item.label}</span>
-            {item.current === 'security' && newAlertsCount > 0 && (
-              <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-red-500/40 bg-red-500/15 px-2 py-[2px] font-mono text-[9px] text-red-300">
-                <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-400"></span>
-                {newAlertsCount}
-              </span>
-            )}
-          </button>
-        ))}
-      </nav>
-
-      {/* Footer */}
-      <div className="border-t border-[#1e2339] p-4">
-        <div className="rounded-md border border-[#152243] bg-[#0a1228] px-3 py-2">
-          <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-[#5f719c]">Centro de mando</p>
-          <p className="mt-1 font-mono text-[10px] text-[#8a97ba]">Monitoreo operativo en tiempo real.</p>
-        </div>
-      </div>
-    </div>
-  );
+import {apiClient} from '../api/client';
+import { Link } from 'react-router-dom';
+import { Icon } from './Icon';
+import type { IconName } from './Icon';
+const groups: { label: string; items: [string, string, string, IconName][] }[] = [
+  { label: 'Supervisión', items: [['dashboard', '/dashboard', 'Equipos', 'grid'], ['activity', '/activity', 'Actividad', 'activity'], ['metrics', '/metrics', 'Métricas', 'chart'], ['administration', '/administration', 'Administración', 'monitor'], ['session', '/session', 'Sesiones y acceso', 'shield']] },
+  { label: 'Protección', items: [['alerts', '/alerts', 'Alertas', 'bell'], ['security', '/security', 'Eventos de seguridad', 'shield']] },
+  { label: 'Equipos y conexiones', items: [['inventory', '/inventory', 'Inventario', 'box'], ['usb', '/usb', 'Dispositivos USB', 'usb'], ['wifi', '/wifi', 'Redes WiFi', 'wifi']] },
+];
+export function Sidebar({ currentPage, onNavigate }: { currentPage: string; onNavigate?: () => void }) {
+  return <aside className="workspace-sidebar">
+    <Link className="brand" to="/dashboard" onClick={onNavigate}><span className="brand-mark"><Icon name="activity" /></span><span>Monitor<span className="brand-sub">Administración de equipos</span></span></Link>
+    <nav aria-label="Navegación principal">{groups.map(group => <div className="nav-group" key={group.label}>
+      <p className="nav-label">{group.label}</p>{group.items.filter(([key])=>key!=='administration'||apiClient.getRole()==='admin').map(([key, path, label, icon]) => <Link key={key} to={path} onClick={onNavigate} aria-current={currentPage === key ? 'page' : undefined} className={`nav-link ${currentPage === key ? 'selected' : ''}`}><Icon name={icon} /><span>{label}</span></Link>)}
+    </div>)}</nav>
+    <div className="sidebar-note"><span className="eyebrow">Espacio de trabajo</span><strong>Operaciones de TI</strong><p>Visibilidad de tu infraestructura, equipo por equipo.</p></div>
+  </aside>;
 }

@@ -10,8 +10,11 @@ use sha2::{Digest, Sha256};
 
 use crate::config::RuntimeConfig;
 use crate::postgres_db::Database;
+use crate::telemetry_writer::TelemetryWriter;
 
 pub struct RabbitMQConsumer;
+
+pub(crate) static CONSUMER_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 impl RabbitMQConsumer {
     fn is_unknown_like(value: &str) -> bool {
@@ -108,17 +111,67 @@ impl RabbitMQConsumer {
             || title == "default ime"
     }
 
+    async fn persist(event: &Value, queue: &str, db: &Database, config: &RuntimeConfig)
+        -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        crate::replay_policy::validate(event)?;
+        let device = event["device_id"].as_str().ok_or("Missing device_id")?;
+        uuid::Uuid::parse_str(device)?;
+        let mut writer = TelemetryWriter::begin(&db.pool).await?;
+        let fresh = writer.register_processed_event(&Self::event_dedupe_id(event, queue), device,
+            event["event_type"].as_str().unwrap_or(queue), event["sequence"].as_i64(),
+            event["boot_id"].as_str()).await?;
+        if fresh && event.get("source_principal").is_some() {
+            writer.insert_session_event(event).await?;
+        } else if fresh {
+            match queue {
+                "activity_queue" => Self::handle_activity_event(event, &mut writer).await?,
+                "inventory_queue" => Self::handle_inventory_event(event, &mut writer, config).await?,
+                "heartbeat_queue" => Self::handle_heartbeat_event(event, &mut writer, config).await?,
+                "usb_queue" => Self::handle_usb_event(event, &mut writer).await?,
+                "wifi_queue" => Self::handle_wifi_event(event, &mut writer).await?,
+                "running_apps_queue" => Self::handle_running_apps_event(event, &mut writer).await?,
+                "security_queue" => Self::handle_security_event(event, &mut writer).await?,
+                _ => return Err("Unsupported telemetry queue".into()),
+            }
+        }
+        writer.commit().await?;
+        Ok(())
+    }
+
+    async fn transfer_failed(channel: &Channel, delivery: &lapin::message::Delivery, queue: &str,
+        malformed: bool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use lapin::types::AMQPValue;
+        let mut headers = delivery.properties.headers().clone().unwrap_or_default();
+        let attempts = match headers.inner().get("x-monitor-attempts") {
+            Some(AMQPValue::LongUInt(value)) => *value,
+            _ => 0,
+        };
+        let destination = if malformed || attempts >= 3 { format!("{queue}.dead") } else { queue.to_string() };
+        headers.insert("x-monitor-attempts".into(), AMQPValue::LongUInt(attempts.saturating_add(1)));
+        if destination == queue { tokio::time::sleep(std::time::Duration::from_secs(2)).await; }
+        let properties = crate::broker_identity::retry_properties(delivery,headers);
+        let confirmation = channel.basic_publish("", &destination,
+            lapin::options::BasicPublishOptions { mandatory: true, ..Default::default() },
+            &delivery.data, properties).await?.await?;
+        if !matches!(confirmation, lapin::publisher_confirm::Confirmation::Ack(None)) {
+            return Err("Retry/dead-letter publication was not confirmed or was returned".into());
+        }
+        delivery.ack(Default::default()).await?;
+        Ok(())
+    }
+
     /// Start RabbitMQ consumer for monitoring events with PostgreSQL database connection
     pub async fn start_consumer(
         rabbitmq_url: &str,
         db: Database,
         config: RuntimeConfig,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("========================================");
         println!("🚀 INICIALIZANDO CONSUMIDOR RABBITMQ");
         println!("========================================");
-        info!("🔌 Connecting to RabbitMQ at: {}", rabbitmq_url);
+        info!("Connecting to RabbitMQ");
         
+        CONSUMER_READY.store(false, std::sync::atomic::Ordering::Release);
         // Connect to RabbitMQ
         let connection = Connection::connect(
             rabbitmq_url,
@@ -128,7 +181,7 @@ impl RabbitMQConsumer {
         .map_err(|e| {
             error!("❌ Failed to connect to RabbitMQ: {}", e);
             println!("ERROR: No se pudo conectar a RabbitMQ: {}", e);
-            Box::new(e) as Box<dyn std::error::Error>
+            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
         println!("✅ Conectado a RabbitMQ exitosamente");
@@ -138,7 +191,7 @@ impl RabbitMQConsumer {
             .map_err(|e| {
                 error!("❌ Failed to create channel: {}", e);
                 println!("ERROR: No se pudo crear canal RabbitMQ: {}", e);
-                Box::new(e) as Box<dyn std::error::Error>
+                Box::new(e) as Box<dyn std::error::Error + Send + Sync>
             })?;
 
         println!("✅ Canal RabbitMQ creado");
@@ -159,7 +212,7 @@ impl RabbitMQConsumer {
         .map_err(|e| {
             error!("❌ Failed to declare exchange: {}", e);
             println!("ERROR: No se pudo declarar exchange: {}", e);
-            Box::new(e) as Box<dyn std::error::Error>
+            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
         println!("✅ Exchange 'monitoring' declarado con éxito");
@@ -191,6 +244,9 @@ impl RabbitMQConsumer {
                 println!("ERROR CRÍTICO: heartbeat_queue falló");
                 e
             })?;
+
+        channel.queue_bind("heartbeat_queue", "monitoring", "monitoring.health",
+            Default::default(), Default::default()).await?;
 
         Self::setup_queue(&channel, "usb_queue", "monitoring.usb", db.clone(), config.clone(), error_tx.clone()).await
             .map_err(|e| {
@@ -226,7 +282,11 @@ impl RabbitMQConsumer {
         info!("✅ RabbitMQ Queues initialized");
         info!("📡 RabbitMQ consumer started, listening to monitoring.* events");
 
-        if let Some(err_msg) = error_rx.recv().await {
+        CONSUMER_READY.store(true, std::sync::atomic::Ordering::Release);
+        let stopped = error_rx.recv().await;
+        let _ = connection.close(200, "consumer recovery").await;
+        CONSUMER_READY.store(false, std::sync::atomic::Ordering::Release);
+        if let Some(err_msg) = stopped {
             return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, err_msg)));
         }
 
@@ -244,7 +304,7 @@ impl RabbitMQConsumer {
         db: Database,
         config: RuntimeConfig,
         error_tx: mpsc::UnboundedSender<String>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Declare durable queue - with explicit println for debugging
         println!("Intentando declarar cola {}...", queue_name);
         info!("  📋 Creating queue '{}' (Durable: true, Exclusive: false, AutoDelete: false)", queue_name);
@@ -262,10 +322,15 @@ impl RabbitMQConsumer {
         .map_err(|e| {
             error!("    ❌ Failed to declare queue '{}': {}", queue_name, e);
             println!("ERROR al declarar cola {}: {}", queue_name, e);
-            Box::new(e) as Box<dyn std::error::Error>
+            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
         println!("Cola {} declarada con éxito", queue_name);
+        if std::env::var("MONITOR_ENV").as_deref()==Ok("production") {
+            let scoped=routing_key.replacen("monitoring.","monitoring.*.",1);
+            channel.queue_bind(queue_name,"monitoring",&scoped,Default::default(),Default::default()).await?;
+            if queue_name=="heartbeat_queue" {channel.queue_bind(queue_name,"monitoring","monitoring.*.health",Default::default(),Default::default()).await?;}
+        }
         info!("    ✅ Queue '{}' created successfully", queue_name);
 
         // Bind queue to exchange - explicit confirmation
@@ -282,11 +347,16 @@ impl RabbitMQConsumer {
         .map_err(|e| {
             error!("    ❌ Failed to bind queue '{}' to exchange: {}", queue_name, e);
             println!("ERROR al vincular cola {} a exchange: {}", queue_name, e);
-            Box::new(e) as Box<dyn std::error::Error>
+            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
         println!("Cola {} vinculada con éxito al exchange 'monitoring'", queue_name);
         info!("    ✅ Queue '{}' bound successfully to 'monitoring' with routing key '{}'", queue_name, routing_key);
+
+        channel.basic_qos(16, Default::default()).await?;
+        channel.queue_declare(&format!("{queue_name}.dead"), QueueDeclareOptions { durable: true, ..Default::default() }, Default::default()).await?;
+        channel.confirm_select(Default::default()).await?;
+        let retry_channel = channel.clone();
 
         // Start consuming
         let consumer = channel.basic_consume(
@@ -299,7 +369,7 @@ impl RabbitMQConsumer {
         .map_err(|e| {
             error!("    ❌ Failed to start consuming from queue '{}': {}", queue_name, e);
             println!("ERROR al iniciar consumidor de cola {}: {}", queue_name, e);
-            Box::new(e) as Box<dyn std::error::Error>
+            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
         println!("Consumidor iniciado para cola {}", queue_name);
@@ -318,75 +388,36 @@ impl RabbitMQConsumer {
             while let Some(delivery) = consumer.next().await {
                 match delivery {
                     Ok(delivery) => {
-                        if let Ok(payload) = std::str::from_utf8(&delivery.data) {
-                            if let Ok(event) = serde_json::from_str::<Value>(payload) {
-                                {
-                                    let dedupe_id = Self::event_dedupe_id(&event, queue_name_str.as_str());
-                                    let device_id = event.get("device_id").and_then(|value| value.as_str()).unwrap_or("unknown");
-                                    let event_type = event.get("event_type").and_then(|value| value.as_str()).unwrap_or(queue_name_str.as_str());
-                                    let sequence = event.get("sequence").and_then(|value| value.as_i64());
-                                    let boot_id = event.get("boot_id").and_then(|value| value.as_str());
-
-                                    match db_clone
-                                        .register_processed_event(&dedupe_id, device_id, event_type, sequence, boot_id)
-                                        .await
-                                    {
-                                        Ok(false) => {
-                                            info!("⏭️ Skipping duplicate event: {} ({})", dedupe_id, event_type);
-                                            let _ = delivery.ack(Default::default()).await;
-                                            continue;
-                                        }
-                                        Ok(true) => {}
-                                        Err(e) => {
-                                            warn!("Failed to apply idempotency check for event {}: {}", dedupe_id, e);
-                                        }
-                                    }
-                                }
-
-                                match queue_name_str.as_str() {
-                                    "activity_queue" => {
-                                        if let Err(e) = Self::handle_activity_event(&event, &db_clone).await {
-                                            warn!("Failed to process activity event: {}", e);
-                                        }
-                                    }
-                                    "inventory_queue" => {
-                                        if let Err(e) = Self::handle_inventory_event(&event, &db_clone).await {
-                                            warn!("Failed to process inventory event: {}", e);
-                                        }
-                                    }
-                                    "heartbeat_queue" => {
-                                        if let Err(e) = Self::handle_heartbeat_event(&event, &db_clone, &config_clone).await {
-                                            warn!("Failed to process heartbeat event: {}", e);
-                                        }
-                                    }
-                                    "usb_queue" => {
-                                        if let Err(e) = Self::handle_usb_event(&event, &db_clone).await {
-                                            warn!("Failed to process usb event: {}", e);
-                                        }
-                                    }
-                                    "wifi_queue" => {
-                                        if let Err(e) = Self::handle_wifi_event(&event, &db_clone).await {
-                                            warn!("Failed to process wifi event: {}", e);
-                                        }
-                                    }
-                                    "running_apps_queue" => {
-                                        if let Err(e) = Self::handle_running_apps_event(&event, &db_clone).await {
-                                            warn!("Failed to process running_apps event: {}", e);
-                                        }
-                                    }
-                                    "security_queue" => {
-                                        if let Err(e) = Self::handle_security_event(&event, &db_clone).await {
-                                            warn!("Failed to process security event: {}", e);
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            } else {
-                                warn!("Failed to parse event from {}", queue_name_str);
+                        if delivery.data.len()>1048576 {let _=delivery.reject(lapin::options::BasicRejectOptions{requeue:false}).await;continue;}
+                        let parsed = serde_json::from_slice::<Value>(&delivery.data);
+                        if let Ok(event)=&parsed {
+                            match crate::broker_identity::validate_delivery(&db_clone,&delivery,event).await {
+                                Ok(true)=>{},
+                                Ok(false)=>{warn!("Quarantined telemetry with invalid/revoked device identity");if Self::transfer_failed(&retry_channel,&delivery,&queue_name_str,true).await.is_err(){let _=error_tx_clone.send("Identity quarantine unavailable".into());break;}continue;},
+                                Err(_)=>{let _=error_tx_clone.send("Identity database unavailable".into());break;}
                             }
                         }
+                        let malformed = parsed.as_ref().map_or(true, |event| {
+                            event["device_id"].as_str().and_then(|id| uuid::Uuid::parse_str(id).ok()).is_none()
+                                || crate::replay_policy::validate(event).is_err()
+                        });
+                        let result = match parsed {
+                            Ok(event) if !malformed => Self::persist(&event, &queue_name_str, &db_clone, &config_clone).await,
+                            _ => Err("Malformed telemetry".into()),
+                        };
+                        let settled = match result {
+                            Ok(()) => delivery.ack(Default::default()).await.map_err(|e| e.to_string()),
+                            Err(error) => {
+                                warn!(queue = %queue_name_str, %error, "Telemetry transaction failed; retaining message in retry/dead queue");
+                                Self::transfer_failed(&retry_channel, &delivery, &queue_name_str, malformed).await.map_err(|e| e.to_string())
+                            }
+                        };
+                        if let Err(error) = settled {
+                            // Closing the connection requeues the unacknowledged original.
+                            let _ = error_tx_clone.send(error);
+                            break;
+                        }
 
-                        let _ = delivery.ack(Default::default()).await;
                     }
                     Err(e) => {
                         let err_msg = format!("Error receiving message from {}: {}", queue_name_str, e);
@@ -406,7 +437,7 @@ impl RabbitMQConsumer {
     }
 
     /// Handle activity event - IMPLEMENTED
-    async fn handle_activity_event(event: &Value, db: &Database) -> Result<(), Box<dyn std::error::Error>> {
+    async fn handle_activity_event(event: &Value, db: &mut TelemetryWriter) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!("📊 Processing activity event...");
 
         let payload = event.get("payload").unwrap_or(event);
@@ -432,7 +463,7 @@ impl RabbitMQConsumer {
             mac_address,
             None,
             version,
-        ).await;
+        ).await?;
 
         // Insert activity log
         let log = db.insert_activity_log(
@@ -447,7 +478,7 @@ impl RabbitMQConsumer {
     }
 
     /// Handle inventory event - IMPLEMENTED
-    async fn handle_inventory_event(event: &Value, db: &Database) -> Result<(), Box<dyn std::error::Error>> {
+    async fn handle_inventory_event(event: &Value, db: &mut TelemetryWriter, config: &RuntimeConfig) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!("📦 Processing inventory event...");
 
         let payload = event.get("payload").unwrap_or(event);
@@ -465,7 +496,14 @@ impl RabbitMQConsumer {
             mac_address,
             None,
             version,
-        ).await;
+        ).await?;
+
+        if event["event_type"]=="inventory_snapshot" {
+            if event["schema_version"].as_u64()!=Some(2) || event["source_role"]=="session" {return Err("Invalid inventory snapshot role/version".into());}
+            let observed=DateTime::parse_from_rfc3339(event["timestamp"].as_str().ok_or("Missing inventory timestamp")?)?.with_timezone(&Utc);
+            if observed>Utc::now()+chrono::Duration::seconds(config.max_event_future_skew_seconds.max(1)) {return Err("Future inventory snapshot".into());}
+            return db.reconcile_inventory(&device_id,observed,payload).await;
+        }
 
         // New format: payload.apps = [ { app_name, version, exe_hash, detected_at } ]
         if let Some(apps) = payload["apps"].as_array() {
@@ -508,9 +546,9 @@ impl RabbitMQConsumer {
 
     async fn handle_heartbeat_event(
         event: &Value,
-        db: &Database,
+        db: &mut TelemetryWriter,
         config: &RuntimeConfig,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let payload = event.get("payload").unwrap_or(event);
         let event_type = event["event_type"].as_str().unwrap_or("heartbeat");
 
@@ -520,16 +558,19 @@ impl RabbitMQConsumer {
         let status = payload["status"].as_str().unwrap_or("active");
 
         let version = event.get("version").and_then(|v| v.as_str()).map(str::to_string);
-        let _ = db.register_device(hostname, device_id.clone(), mac_address, None, version).await;
+        let _ = db.register_device(hostname, device_id.clone(), mac_address, None, version).await?;
 
         // Only input_summary events should contribute to persisted time counters.
         // Regular heartbeat events contain cumulative idle_seconds and would inflate totals.
-        let event_timestamp = event
+        let parsed_timestamp = event
             .get("timestamp")
             .and_then(|value| value.as_str())
             .and_then(|raw| DateTime::parse_from_rfc3339(raw).ok())
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(Utc::now);
+            .map(|dt| dt.with_timezone(&Utc));
+        if (event_type == "agent_health" || payload.get("system_metrics").is_some()) && parsed_timestamp.is_none() {
+            return Err("Current telemetry requires a valid observed timestamp".into());
+        }
+        let event_timestamp = parsed_timestamp.unwrap_or_else(Utc::now);
         let now = Utc::now();
         let max_past = chrono::Duration::seconds(config.max_event_past_skew_seconds.max(1));
         let max_future = chrono::Duration::seconds(config.max_event_future_skew_seconds.max(1));
@@ -540,6 +581,23 @@ impl RabbitMQConsumer {
                 event_timestamp
             );
             return Ok(());
+        }
+
+        if event_type == "agent_health" {
+            crate::telemetry_contract::health(payload)?;
+            let health = serde_json::json!({"status":payload["status"], "tasks":payload["tasks"], "collectors":payload["collectors"],
+                "capabilities":payload["capabilities"], "monitoring_paused":payload["monitoring_paused"],
+                "enabled_monitors":payload["enabled_monitors"], "disabled_monitors":payload["disabled_monitors"],
+                "agent_uptime_seconds":payload["agent_uptime_seconds"], "cache_unsynced_events":payload["cache_unsynced_events"],
+                "sessions":payload["sessions"], "policy_fingerprint":payload["policy_fingerprint"], "config_version":payload["config_version"], "version":payload["version"]});
+            db.update_telemetry_state(&device_id, "health", event_timestamp, health).await?;
+            return Ok(());
+        }
+        if event_type == "input_summary" && event["source_role"] != "session" {
+            if let Some(metrics) = payload.get("system_metrics") {
+                crate::telemetry_contract::resources(metrics)?;
+                db.update_telemetry_state(&device_id, "resources", event_timestamp, metrics.clone()).await?;
+            }
         }
 
         let active_seconds = payload["active_seconds"].as_i64().unwrap_or(0);
@@ -555,7 +613,7 @@ impl RabbitMQConsumer {
         let top_process_memory_mb = payload["top_process_memory_mb"].as_f64();
 
         if event_type == "input_summary"
-            && (active_seconds > 0 || idle_seconds > 0 || keys_count > 0 || mouse_moves_count > 0 || clicks_count > 0)
+            && (active_seconds > 0 || idle_seconds > 0 || keys_count > 0 || mouse_moves_count > 0 || clicks_count > 0 || (payload["is_service"] != true && payload["input_available"].is_boolean()))
         {
             let _ = db
                 .insert_input_summary(
@@ -568,11 +626,12 @@ impl RabbitMQConsumer {
                     clicks_count,
                     status.to_string(),
                     config.input_bucket_max_seconds,
+                    payload["input_available"].as_bool(),
                 )
-                .await;
+                .await?;
         }
 
-        if event_type == "input_summary" && (cpu_percent.is_some() || memory_used_mb.is_some() || memory_percent.is_some()) {
+        if event_type == "input_summary" && cpu_percent.is_some() && memory_used_mb.is_some() && memory_percent.is_some() {
             let _ = db
                 .insert_node_resource_metric(
                     device_id.clone(),
@@ -584,21 +643,21 @@ impl RabbitMQConsumer {
                     top_process_cpu_percent,
                     top_process_memory_mb,
                 )
-                .await;
+                .await?;
         }
 
         info!("✅ Heartbeat processed: {} ({})", device_id, status);
         Ok(())
     }
 
-    async fn handle_usb_event(event: &Value, db: &Database) -> Result<(), Box<dyn std::error::Error>> {
+    async fn handle_usb_event(event: &Value, db: &mut TelemetryWriter) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let payload = event.get("payload").unwrap_or(event);
         let device_id = event["device_id"].as_str().unwrap_or("unknown").to_string();
         let hostname = event["hostname"].as_str().unwrap_or(&device_id).to_string();
         let mac_address = event["mac_address"].as_str().map(str::to_string);
 
         let version = event.get("version").and_then(|v| v.as_str()).map(str::to_string);
-        let _ = db.register_device(hostname, device_id.clone(), mac_address, None, version).await;
+        let _ = db.register_device(hostname, device_id.clone(), mac_address, None, version).await?;
 
         let device_name = payload["device_name"].as_str().unwrap_or("USB Device").to_string();
         let action = payload["action"].as_str().unwrap_or("IN").to_string();
@@ -614,6 +673,7 @@ impl RabbitMQConsumer {
                 device_name.clone(),
                 serial_number,
                 volume_label,
+                event["timestamp"].as_str().and_then(|v|DateTime::parse_from_rfc3339(v).ok()).map(|v|v.with_timezone(&Utc)).unwrap_or_else(Utc::now),
             )
             .await?;
 
@@ -621,14 +681,14 @@ impl RabbitMQConsumer {
         Ok(())
     }
 
-    async fn handle_wifi_event(event: &Value, db: &Database) -> Result<(), Box<dyn std::error::Error>> {
+    async fn handle_wifi_event(event: &Value, db: &mut TelemetryWriter) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let payload = event.get("payload").unwrap_or(event);
         let device_id = event["device_id"].as_str().unwrap_or("unknown").to_string();
         let hostname = event["hostname"].as_str().unwrap_or(&device_id).to_string();
         let mac_address = event["mac_address"].as_str().map(str::to_string);
 
         let version = event.get("version").and_then(|v| v.as_str()).map(str::to_string);
-        let _ = db.register_device(hostname, device_id.clone(), mac_address, None, version).await;
+        let _ = db.register_device(hostname, device_id.clone(), mac_address, None, version).await?;
 
         let event_timestamp = event
             .get("timestamp")
@@ -659,14 +719,14 @@ impl RabbitMQConsumer {
         Ok(())
     }
 
-    async fn handle_running_apps_event(event: &Value, db: &Database) -> Result<(), Box<dyn std::error::Error>> {
+    async fn handle_running_apps_event(event: &Value, db: &mut TelemetryWriter) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let payload = event.get("payload").unwrap_or(event);
         let device_id = event["device_id"].as_str().unwrap_or("unknown").to_string();
         let hostname = event["hostname"].as_str().unwrap_or(&device_id).to_string();
         let mac_address = event["mac_address"].as_str().map(str::to_string);
 
         let version = event.get("version").and_then(|v| v.as_str()).map(str::to_string);
-        let _ = db.register_device(hostname, device_id.clone(), mac_address, None, version).await;
+        let _ = db.register_device(hostname, device_id.clone(), mac_address, None, version).await?;
 
         let mut apps = Vec::new();
         if let Some(items) = payload["apps"].as_array() {
@@ -690,7 +750,7 @@ impl RabbitMQConsumer {
         Ok(())
     }
 
-    async fn handle_security_event(event: &Value, db: &Database) -> Result<(), Box<dyn std::error::Error>> {
+    async fn handle_security_event(event: &Value, db: &mut TelemetryWriter) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let payload = event.get("payload").unwrap_or(event);
         let device_id = event["device_id"].as_str().unwrap_or("unknown").to_string();
         let hostname   = event["hostname"].as_str().unwrap_or(&device_id).to_string();
@@ -703,7 +763,7 @@ impl RabbitMQConsumer {
             .unwrap_or_else(chrono::Utc::now);
 
         let version = event.get("version").and_then(|v| v.as_str()).map(str::to_string);
-        let _ = db.register_device(hostname, device_id.clone(), mac_address, None, version).await;
+        let _ = db.register_device(hostname, device_id.clone(), mac_address, None, version).await?;
 
         let query_name = payload["query_name"].as_str();
         let inferred_alert_type = match query_name {
@@ -736,7 +796,7 @@ impl RabbitMQConsumer {
                 .to_string();
 
             if let Ok(device_uuid) = uuid::Uuid::parse_str(&device_id) {
-                match db
+                db
                     .insert_security_alert(
                         device_uuid,
                         alert_type,
@@ -745,20 +805,7 @@ impl RabbitMQConsumer {
                         description.as_str(),
                         severity.as_str(),
                     )
-                    .await {
-                        Ok(alert) => info!(
-                            "✅ Security alert stored: id={} type={} severity={}",
-                            alert.id,
-                            alert.alert_type,
-                            alert.severity
-                        ),
-                        Err(e) => warn!(
-                            "Failed to store security alert for {} type {}: {}",
-                            device_id,
-                            alert_type,
-                            e
-                        ),
-                    }
+                    .await?;
 
                 if alert_type == "PROCESS_TERMINATION_ATTEMPTED" {
                     let blocked = payload["blocked"].as_bool().unwrap_or(true);
@@ -772,7 +819,7 @@ impl RabbitMQConsumer {
                             auto_restarted,
                             Some(timestamp),
                         )
-                        .await;
+                        .await?;
                 }
             } else {
                 warn!(
@@ -793,7 +840,7 @@ impl RabbitMQConsumer {
         let raw_data = payload["raw_data"].clone();
         let event_fingerprint = payload["event_fingerprint"].as_str().map(str::to_string);
 
-        match db.insert_security_event(
+        db.insert_security_event(
             device_id.clone(),
             query_name.clone(),
             query_pack,
@@ -802,12 +849,127 @@ impl RabbitMQConsumer {
             raw_data,
             event_fingerprint,
             timestamp,
-        ).await {
-            Ok(ev) => info!("✅ Security event stored: id={} query={} technique={:?} severity={}",
-                ev.id, query_name, mitre_technique, severity),
-            Err(e) => warn!("Failed to store security event for {}: {}", device_id, e),
-        }
+        ).await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod transaction_tests {
+    use super::*;
+    #[tokio::test]
+    #[ignore = "requires disposable TEST_DATABASE_URL"]
+    async fn rollback_and_concurrent_replay() {
+        let url = std::env::var("TEST_DATABASE_URL").unwrap();
+        let admin = sqlx::PgPool::connect(&url).await.unwrap();
+        let name = format!("telemetry_test_{}", uuid::Uuid::new_v4().simple());
+        sqlx::query(&format!("CREATE DATABASE {name}")).execute(&admin).await.unwrap();
+        let test_url = format!("{}/{}", url.rsplit_once('/').unwrap().0, name);
+        let db = Database::connect(&test_url).await.unwrap();
+        let config = RuntimeConfig::from_env();
+        let device = uuid::Uuid::new_v4().to_string();
+        let event_id = uuid::Uuid::new_v4().to_string();
+        let mut event = serde_json::json!({"event_id":event_id,"device_id":device,"hostname":"transaction-test",
+            "event_type":"input_summary", "timestamp":Utc::now(),
+            "payload":{"active_seconds":30,"cpu_percent":42.5,"memory_used_mb":1024,"memory_percent":25}});
+        sqlx::query("ALTER TABLE node_resource_metrics ADD CONSTRAINT injected_failure CHECK (cpu_percent < 0)")
+            .execute(&db.pool).await.unwrap();
+        assert!(RabbitMQConsumer::persist(&event, "heartbeat_queue", &db, &config).await.is_err());
+        for table in ["devices", "processed_events", "input_activity_metrics", "node_resource_metrics"] {
+            let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}")).fetch_one(&db.pool).await.unwrap();
+            assert_eq!(count, 0, "Rollback must include {table}");
+        }
+        sqlx::query("ALTER TABLE node_resource_metrics DROP CONSTRAINT injected_failure").execute(&db.pool).await.unwrap();
+        let results = futures::future::join_all((0..16).map(|_| RabbitMQConsumer::persist(&event, "heartbeat_queue", &db, &config))).await;
+        assert!(results.into_iter().all(|r| r.is_ok()));
+        for table in ["devices", "processed_events", "input_activity_metrics", "node_resource_metrics"] {
+            let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}")).fetch_one(&db.pool).await.unwrap();
+            assert_eq!(count, 1, "Concurrent replay duplicated {table}");
+        }
+        event["event_id"] = uuid::Uuid::new_v4().to_string().into();
+        RabbitMQConsumer::persist(&event, "heartbeat_queue", &db, &config).await.unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM node_resource_metrics").fetch_one(&db.pool).await.unwrap();
+        assert_eq!(count, 2);
+        db.pool.close().await;
+        sqlx::query(&format!("DROP DATABASE {name}")).execute(&admin).await.unwrap();
+        admin.close().await;
+    }
+}
+
+#[cfg(test)]
+mod broker_tests {
+    use super::*;
+    use lapin::{options::*, BasicProperties};
+    #[tokio::test]
+    #[ignore = "requires disposable TEST_DATABASE_URL and local test RabbitMQ management"]
+    async fn failed_write_retries_to_dead_queue_then_replays_after_repair() {
+        let url = std::env::var("TEST_DATABASE_URL").unwrap();
+        let management = std::env::var("TEST_RABBITMQ_MANAGEMENT_URL").unwrap();
+        let broker = std::env::var("TEST_RABBITMQ_BASE_URL").unwrap();
+        let name = format!("delivery_test_{}", uuid::Uuid::new_v4().simple());
+        let http = reqwest::Client::builder().timeout(std::time::Duration::from_secs(10)).build().unwrap();
+        let vhost_url = format!("{management}/api/vhosts/{name}");
+        http.put(&vhost_url).basic_auth("guest", Some("guest")).send().await.unwrap().error_for_status().unwrap();
+        let admin = sqlx::PgPool::connect(&url).await.unwrap();
+        sqlx::query(&format!("CREATE DATABASE {name}")).execute(&admin).await.unwrap();
+        let db_url = format!("{}/{}",url.rsplit_once('/').unwrap().0,name);
+        let db = Database::connect(&db_url).await.unwrap();
+        let amqp_url = format!("{broker}/{name}");
+        let consumer_db = db.clone(); let consumer_url = amqp_url.clone();
+        let worker = tokio::spawn(async move { RabbitMQConsumer::start_consumer(&consumer_url, consumer_db, RuntimeConfig::from_env()).await });
+        let conn = Connection::connect(&amqp_url, ConnectionProperties::default()).await.unwrap();
+        let channel = conn.create_channel().await.unwrap();
+        channel.confirm_select(Default::default()).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            while !CONSUMER_READY.load(std::sync::atomic::Ordering::Acquire) { tokio::time::sleep(std::time::Duration::from_millis(50)).await; }
+        }).await.unwrap();
+        sqlx::query("ALTER TABLE node_resource_metrics ADD CONSTRAINT injected_failure CHECK(cpu_percent < 0)").execute(&db.pool).await.unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let event = serde_json::json!({"event_id":id,"device_id":uuid::Uuid::new_v4(),"hostname":"retry-test",
+            "event_type":"input_summary","timestamp":Utc::now(),"payload":{"active_seconds":30,"cpu_percent":42.5,"memory_used_mb":1024,"memory_percent":25}});
+        let body = serde_json::to_vec(&event).unwrap();
+        let confirmed = channel.basic_publish("monitoring","monitoring.heartbeat", BasicPublishOptions { mandatory:true,..Default::default() },
+            &body,BasicProperties::default().with_delivery_mode(2)).await.unwrap().await.unwrap();
+        assert!(matches!(confirmed,lapin::publisher_confirm::Confirmation::Ack(None)));
+        let dead = tokio::time::timeout(std::time::Duration::from_secs(40), async {
+            loop {
+                if let Some(message) = channel.basic_get("heartbeat_queue.dead",BasicGetOptions::default()).await.unwrap() { break message; }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }).await.unwrap();
+        assert_eq!(dead.delivery.data,body);
+        assert_eq!(dead.delivery.properties.headers().as_ref().unwrap().inner().get("x-monitor-attempts"), Some(&lapin::types::AMQPValue::LongUInt(4)));
+        for table in ["processed_events","devices","input_activity_metrics","node_resource_metrics"] {
+            let count:i64=sqlx::query_scalar(&format!("SELECT count(*) FROM {table}")).fetch_one(&db.pool).await.unwrap(); assert_eq!(count,0);
+        }
+        sqlx::query("ALTER TABLE node_resource_metrics DROP CONSTRAINT injected_failure").execute(&db.pool).await.unwrap();
+        for _ in 0..8 {
+            channel.basic_publish("monitoring","monitoring.heartbeat",Default::default(), &body,BasicProperties::default().with_delivery_mode(2)).await.unwrap().await.unwrap();
+        }
+        dead.delivery.ack(Default::default()).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            loop {
+                let count:i64=sqlx::query_scalar("SELECT count(*) FROM node_resource_metrics").fetch_one(&db.pool).await.unwrap();
+                if count==1 { break; }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }).await.unwrap();
+        // Malformed input is retained in dead-letter storage, not silently acknowledged.
+        channel.basic_publish("monitoring","monitoring.heartbeat",Default::default(), b"not-json",BasicProperties::default().with_delivery_mode(2)).await.unwrap().await.unwrap();
+        let malformed = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            loop {
+                if let Some(message)=channel.basic_get("heartbeat_queue.dead",Default::default()).await.unwrap() { break message; }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }).await.unwrap();
+        assert_eq!(malformed.delivery.data,b"not-json"); malformed.delivery.ack(Default::default()).await.unwrap();
+        let count:i64=sqlx::query_scalar("SELECT count(*) FROM node_resource_metrics").fetch_one(&db.pool).await.unwrap(); assert_eq!(count,1);
+        conn.close(200,"test complete").await.unwrap();
+        worker.abort(); let _ = worker.await;
+        db.pool.close().await;
+        http.delete(&vhost_url).basic_auth("guest",Some("guest")).send().await.unwrap().error_for_status().unwrap();
+        sqlx::query(&format!("DROP DATABASE {name} WITH (FORCE)")).execute(&admin).await.unwrap();
+        admin.close().await;
     }
 }

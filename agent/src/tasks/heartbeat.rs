@@ -13,8 +13,8 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
             // Re-check session 0 every time to be safe
             let is_session_0 = is_running_in_session_0();
 
-            let (status, idle_seconds, total_idle_today) = if is_session_0 {
-                ("service", 0, 0)
+            let (status, idle_seconds, total_idle_today) = if !crate::runtime::input_available() {
+                (if is_session_0 { "service" } else { "online" }, 0, 0)
             } else {
                 context.keystroke_tracker.update_idle_status().await;
                 let stats = context.keystroke_tracker.get_stats().await;
@@ -32,13 +32,14 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
                     "idle_seconds": idle_seconds,
                     "total_idle_seconds_today": total_idle_today,
                     "is_service": is_session_0,
+                    "input_available": crate::runtime::input_available(),
                 }),
             );
 
             context.publish_or_cache("heartbeat", heartbeat).await;
 
             // Explicit idle/active transitions (Skip if service)
-            if !is_session_0 && last_idle_state != Some(is_idle) {
+            if crate::runtime::input_available() && last_idle_state != Some(is_idle) {
                 let transition = context.build_event_envelope(
                     "idle_state_change",
                     1,

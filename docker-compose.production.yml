@@ -1,0 +1,126 @@
+# Candidate hardening overlay; NOT an approval to expose this stack.
+# Separate project, Linux host, pre-provisioned certificates. Identity per agent remains pending.
+services:
+  postgres:
+    environment:
+      POSTGRES_USER: monitor_bootstrap
+      POSTGRES_PASSWORD: !reset null
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    ports: !reset []
+    secrets: [db_password]
+    volumes:
+      - ./.production/init-roles.sql:/docker-entrypoint-initdb.d/10-monitor-roles.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U monitor_bootstrap -d activity_monitor"]
+  rabbitmq:
+    environment:
+      RABBITMQ_DEFAULT_USER: !reset null
+      RABBITMQ_DEFAULT_PASS: !reset null
+    ports: !override
+      - "127.0.0.1:25671:5671"
+    volumes:
+      - ./.production/tls/ca.crt:/run/tls/ca.crt:ro
+      - ./.production/tls/broker.crt:/run/tls/broker.crt:ro
+      - ./.production/tls/broker.key:/run/tls/broker.key:ro
+      - ./.production/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./.production/rabbit-definitions.json:/etc/rabbitmq/definitions.json:ro
+  redis:
+    profiles: [unused-redis]
+    ports: !reset []
+  server:
+    env_file: [./.production/endpoint.env]
+    build:
+      target: production
+    user: "65532:65532"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      SSL_CERT_FILE: /run/tls/ca.crt
+      MONITOR_ENV: production
+      BROKER_ADMIN_URL: https://rabbitmq:15671
+      BROKER_ADMIN_PASSWORD_FILE: /run/secrets/broker_admin_password
+      JWT_SECRET: !reset null
+      AGENT_AUTH_TOKEN: !reset null
+      ADMIN_PASSWORD: !reset null
+      DATABASE_URL: !reset null
+      RABBITMQ_URL: !reset null
+      JWT_SECRET_FILE: /run/secrets/jwt_secret
+      DATABASE_URL_FILE: /run/secrets/database_url
+      RABBITMQ_URL_FILE: /run/secrets/rabbitmq_url
+      AUTH_USERS_FILE: /run/monitor-auth/users.json
+    secrets: [jwt_secret, database_url, rabbitmq_url, broker_admin_password]
+    volumes:
+      - ./.production/accounts:/run/monitor-auth:ro
+      - ./.production/tls/ca.crt:/run/tls/ca.crt:ro
+    ports: !reset []
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: 2
+    logging: &bounded_logs
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+  migrate:
+    build:
+      context: .
+      dockerfile: DockerServer/Dockerfile
+      target: production
+    user: "65532:65532"
+    command: ["/usr/local/bin/activity-monitor-server", "--migrate"]
+    restart: "no"
+    environment:
+      MIGRATION_DATABASE_URL_FILE: /run/secrets/migration_url
+    secrets: [migration_url]
+    networks: [activity-monitor]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 512m
+    logging: *bounded_logs
+  dashboard:
+    build:
+      target: production
+    user: "65532:65532"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    volumes:
+      - ./.production/tls/web.crt:/run/tls/web.crt:ro
+      - ./.production/tls/web.key:/run/tls/web.key:ro
+    ports: !override
+      - "127.0.0.1:18443:8443"
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 256m
+    logging: *bounded_logs
+  db-maintenance:
+    user: "65532:65532"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    environment:
+      PGUSER: monitor_maintenance
+      PGPASSWORD: !reset null
+      PGPASSWORD_FILE: /run/secrets/maintenance_password
+    secrets: [maintenance_password]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 256m
+    logging: *bounded_logs
+secrets:
+  broker_admin_password: {file: ./.production/secrets/broker_admin_password}
+  db_password: {file: ./.production/secrets/db_password}
+  jwt_secret: {file: ./.production/secrets/jwt_secret}
+  database_url: {file: ./.production/secrets/database_url}
+  rabbitmq_url: {file: ./.production/secrets/rabbitmq_url}
+  migration_url: {file: ./.production/secrets/migration_url}
+  maintenance_password: {file: ./.production/secrets/maintenance_password}

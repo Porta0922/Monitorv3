@@ -1,0 +1,44 @@
+name: Agent lifecycle checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux desktop build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libx11-dev libxi-dev libxtst-dev libxcb1-dev libxrandr-dev libdbus-1-dev libpipewire-0.3-dev libclang-dev libgbm-dev libwayland-dev libxkbcommon-dev libegl-dev
+      - run: ./tests/windows_lifecycle_scripts.ps1
+        if: runner.os == 'Windows'
+      - run: rustup show active-toolchain
+      - run: cargo test --locked -p activity-monitor-agent --no-run
+      - run: cargo test --locked -p activity-monitor-agent lifecycle_tests
+      - run: cargo test --locked -p activity-monitor-agent policy_tests
+      - run: cargo test --locked -p activity-monitor-agent durability_tests
+      - run: cargo test --locked -p activity-monitor-agent ipc_tests
+      - run: cargo test --locked -p activity-monitor-agent persistence_tests
+      - run: cargo test --locked -p activity-monitor-agent web_lifecycle_tests
+      - run: cargo test --locked -p activity-monitor-agent runtime_signal_tests
+        if: runner.os == 'Linux'
+  linux-container:
+    strategy:
+      fail-fast: false
+      matrix:
+        dockerfile: [tests/Dockerfile.agent, tests/Dockerfile.agent-ubuntu]
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f ${{ matrix.dockerfile }} -t monitor-agent-validation .
+      - run: python3 tests/agent_runtime.py --image monitor-agent-validation
+      - name: Linux lifecycle scripts (simulated systemctl)
+        run: docker run --rm --network none --mount "type=bind,source=${{ github.workspace }},target=/repo,readonly" monitor-agent-validation sh /repo/tests/linux_lifecycle_scripts.sh

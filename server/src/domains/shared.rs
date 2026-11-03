@@ -80,11 +80,19 @@ pub fn serialize_device(device: Device, config: &RuntimeConfig) -> serde_json::V
         "created_at": device.created_at.to_rfc3339(),
         "last_seen": device.last_seen.to_rfc3339(),
         "online": online,
-        "stale": !online,
+        "stale": online && device.last_seen <= Utc::now()-Duration::seconds(config.stale_threshold_seconds.max(1)),
         "status": if online { "online" } else { "offline" }
     })
 }
 
 pub fn parse_iso_date(value: Option<&str>) -> Option<chrono::NaiveDate> {
     value.and_then(|v| chrono::NaiveDate::parse_from_str(v, "%Y-%m-%d").ok())
+}
+
+pub fn data_response(value:serde_json::Value)->axum::response::Response {
+ use axum::response::IntoResponse;
+ let status=if value["success"]==false || value.get("error").is_some(){
+  if value["error"].as_str().is_some_and(|s|s.starts_with("invalid")){axum::http::StatusCode::BAD_REQUEST}else{axum::http::StatusCode::INTERNAL_SERVER_ERROR}
+ }else{axum::http::StatusCode::OK};
+ (status,axum::Json(value)).into_response()
 }

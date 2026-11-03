@@ -17,6 +17,7 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
             
             match usb_monitor.scan_devices().await {
                 Ok(events) => {
+                    crate::capture_diagnostics::record("usb_detector", "capture_ok", None);
                     for mut event in events {
                         event.device_id = uuid::Uuid::parse_str(&context.device_id).unwrap_or_default();
 
@@ -38,6 +39,7 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
                     }
                 }
                 Err(e) => {
+                    crate::capture_diagnostics::record("usb_detector", "capture_error", Some(&e.to_string()));
                     tracing::warn!("USB scan error: {}", e);
                 }
             }

@@ -1,5 +1,5 @@
 interface BarChartProps {
-  data: any[];
+  data: Record<string, number>[];
   dataKey: string;
   label: string;
   color?: string;
@@ -9,7 +9,7 @@ export function SimpleBarChart({
   data,
   dataKey,
   label,
-  color = '#29B6F6',
+  color = 'var(--palette-29b6f6)',
 }: BarChartProps) {
   if (!data || data.length === 0) return null;
 
@@ -39,7 +39,7 @@ export function SimpleBarChart({
           y1={y}
           x2={width - padding}
           y2={y}
-          stroke="#1a3a52"
+          stroke="var(--palette-1a3a52)"
           strokeWidth="1"
           strokeDasharray="4"
         />
@@ -48,7 +48,7 @@ export function SimpleBarChart({
           y={y + 4}
           textAnchor="end"
           fontSize="11"
-          fill="#8899bb"
+          fill="var(--palette-8899bb)"
         >
           {Math.round(value)}
         </text>
@@ -58,7 +58,8 @@ export function SimpleBarChart({
 
   return (
     <div className="h-full w-full">
-      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="h-full w-full rounded bg-[#0a122a]/60">
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label={label} className="w-full rounded bg-[var(--palette-f5f7f6)]/60">
+        <title>{label}</title>
         {/* Grid */}
         {gridLines}
 
@@ -68,7 +69,7 @@ export function SimpleBarChart({
           y1={padding}
           x2={padding}
           y2={height - padding}
-          stroke="#FF9800"
+          stroke="var(--palette-ff9800)"
           strokeWidth="2"
         />
         <line
@@ -76,7 +77,7 @@ export function SimpleBarChart({
           y1={height - padding}
           x2={width - padding}
           y2={height - padding}
-          stroke="#FF9800"
+          stroke="var(--palette-ff9800)"
           strokeWidth="2"
         />
 
@@ -104,9 +105,9 @@ export function SimpleBarChart({
                 y={height - padding + 20}
                 textAnchor="middle"
                 fontSize="11"
-                fill="#8899bb"
+                fill="var(--palette-8899bb)"
               >
-                {d.hour || i}h
+                {d.hour ?? i}h
               </text>
             </g>
           );
@@ -117,7 +118,7 @@ export function SimpleBarChart({
           x={15}
           y={padding - 10}
           fontSize="12"
-          fill="#00d9ff"
+          fill="var(--palette-17715a)"
           fontWeight="bold"
         >
           {label}

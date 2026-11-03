@@ -1,0 +1,49 @@
+name: Stack smoke test
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust route and unit tests
+        run: docker build --target validation -f DockerServer/Dockerfile -t monitor-validation .
+      - name: Build and start isolated stack
+        run: docker compose -p monitor-refactor-test -f docker-compose.yml -f tests/compose.smoke.yml up -d --build --wait --wait-timeout 180
+      - name: Fresh and legacy database migrations
+        run: >-
+          docker run --rm --network monitor-refactor-test_activity-monitor
+          -v "$PWD/migrations:/legacy:ro"
+          -e TEST_DATABASE_URL=postgres://monitor_user:monitor_password@postgres/activity_monitor
+          -e TEST_RABBITMQ_MANAGEMENT_URL=http://rabbitmq:15672
+          -e TEST_RABBITMQ_BASE_URL=amqp://guest:guest@rabbitmq:5672
+          -e LEGACY_SCHEMA_DIR=/legacy
+          -e CARGO_BUILD_JOBS=1
+          monitor-validation cargo test --locked --release -p activity-monitor-server -- --ignored --test-threads=1
+      - name: Synthetic RabbitMQ ingestion through dashboard API
+        env:
+          SMOKE_BASE_URL: http://127.0.0.1:15173
+          SMOKE_BROKER_URL: http://127.0.0.1:15674
+        run: python3 tests/smoke_stack.py
+      - name: Nginx recovery after API address changes
+        run: python3 tests/nginx_recreation.py
+      - name: Agent cache and publisher confirmations
+        run: >-
+          docker run --rm --network monitor-refactor-test_activity-monitor
+          -e PROBE_RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/%2f
+          monitor-validation cargo test --locked --release -p agent-transport-probe
+          -- --include-ignored --skip usb_detection
+      - name: Agent transport and outage recovery
+        env:
+          PROBE_IMAGE: monitor-validation
+        run: python3 tests/p0_recovery.py
+      - name: Logs
+        if: always()
+        run: docker compose -p monitor-refactor-test -f docker-compose.yml -f tests/compose.smoke.yml logs --tail=100
+      - name: Remove disposable stack
+        if: always()
+        run: docker compose -p monitor-refactor-test -f docker-compose.yml -f tests/compose.smoke.yml down --volumes

@@ -1,0 +1,35 @@
+[Unit]
+Description=ActivityMonitor system agent
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=activity-monitor
+Group=activity-monitor
+Environment=AGENT_MODE=service
+Environment=AGENT_CONFIG_FILE=/etc/activity-monitor/.env
+Environment=AGENT_DATA_DIR=/var/lib/activity-monitor
+Environment=AGENT_LOG_DIR=/var/log/activity-monitor
+WorkingDirectory=/var/lib/activity-monitor
+ExecStart=/opt/activity-monitor/bin/activity-monitor-agent
+StateDirectory=activity-monitor
+StateDirectoryMode=0700
+LogsDirectory=activity-monitor
+LogsDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=15s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/activity-monitor /var/log/activity-monitor
+
+[Install]
+WantedBy=multi-user.target

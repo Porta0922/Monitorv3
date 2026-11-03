@@ -1,5 +1,5 @@
 use chrono::Utc;
-use sysinfo::{System, SystemExt, ProcessExt, PidExt, CpuExt};
+use sysinfo::{System, SystemExt, ProcessExt, PidExt, CpuExt, DiskExt, NetworkExt, NetworksExt};
 use sha2::{Sha256, Digest};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -95,9 +95,10 @@ pub struct OpenAppSnapshot {
 
 #[derive(Debug, Clone)]
 pub struct NodeResourceSnapshot {
-    pub cpu_percent: f64,
-    pub memory_used_mb: f64,
-    pub memory_percent: f64,
+    pub system_metrics: serde_json::Value,
+    pub cpu_percent: Option<f64>,
+    pub memory_used_mb: Option<f64>,
+    pub memory_percent: Option<f64>,
     pub top_process_name: Option<String>,
     pub top_process_cpu_percent: Option<f64>,
     pub top_process_memory_mb: Option<f64>,
@@ -105,6 +106,8 @@ pub struct NodeResourceSnapshot {
 
 pub struct ResourceMonitor {
     sys: System,
+    previous: Option<std::time::Instant>,
+    network_totals: HashMap<String, (u64, u64)>,
 }
 
 pub struct MonitoringLoop {
@@ -148,34 +151,31 @@ impl MonitoringLoop {
 
     /// Capture visible user-facing apps that currently have open windows.
     pub fn capture_open_apps(&mut self) -> Vec<OpenAppSnapshot> {
-        #[cfg(target_os = "windows")]
-        {
-            return capture_open_apps_windows(&mut self.sys);
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            return capture_open_apps_macos(&mut self.sys);
-        }
-
-        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-        {
-            self.capture_processes()
-                .into_iter()
-                .filter(|process| !process.name.trim().is_empty())
-                .map(|process| OpenAppSnapshot {
-                    app_name: process.name,
-                    primary_title: String::new(),
-                    window_count: 1,
-                    exe_path: process.exe_path,
-                    exe_hash: process.exe_hash,
-                })
-                .collect()
-        }
+        crate::capture_diagnostics::record("running_apps","no_observation",None);
+        #[cfg(target_os="windows")] let apps=capture_open_apps_windows(&mut self.sys);
+        #[cfg(target_os="macos")] let apps=capture_open_apps_macos(&mut self.sys);
+        #[cfg(target_os="linux")] let apps={
+            let mut apps=Vec::new();
+            match xcap::Window::all() {
+                Ok(windows)=>for window in windows {
+                    match (window.app_name(),window.title()) {
+                        (Ok(app_name),Ok(title)) if !app_name.is_empty() && !title.is_empty()=>apps.push(OpenAppSnapshot{app_name,primary_title:title,window_count:1,exe_path:None,exe_hash:None}),
+                        (Err(error),_)=>crate::capture_diagnostics::record("running_apps","capture_error",Some(&error.to_string())),
+                        (_,Err(error))=>crate::capture_diagnostics::record("running_apps","capture_error",Some(&error.to_string())),
+                        _=>{}
+                    }
+                },
+                Err(error)=>crate::capture_diagnostics::record("running_apps","capture_error",Some(&error.to_string()))
+            } apps
+        };
+        #[cfg(not(any(target_os="linux",target_os="windows",target_os="macos")))] let apps=Vec::new();
+        if !apps.is_empty() && crate::capture_diagnostics::latest("running_apps")["state"]!="capture_error" {crate::capture_diagnostics::record("running_apps","capture_ok",None);}
+        apps
     }
 
     /// Get currently active window using platform APIs
     pub fn capture_active_window(&self) -> Option<WindowCapture> {
+        crate::capture_diagnostics::record("window_activity","no_observation",None);
         // Platform-specific implementation
         #[cfg(target_os = "windows")]
         {
@@ -212,7 +212,7 @@ impl MonitoringLoop {
 
 impl ResourceMonitor {
     pub fn new() -> Self {
-        Self { sys: System::new() }
+        Self { sys: System::new(), previous: None, network_totals: HashMap::new() }
     }
 
     pub fn capture_snapshot(&mut self) -> NodeResourceSnapshot {
@@ -220,16 +220,54 @@ impl ResourceMonitor {
         self.sys.refresh_memory();
         self.sys.refresh_processes();
 
-        let cpu_percent = f64::from(self.sys.global_cpu_info().cpu_usage()).max(0.0);
-        let total_memory_kb = self.sys.total_memory();
-        let used_memory_kb = self.sys.used_memory();
-
-        let memory_used_mb = (used_memory_kb as f64) / 1024.0;
-        let memory_percent = if total_memory_kb > 0 {
-            ((used_memory_kb as f64) / (total_memory_kb as f64) * 100.0).clamp(0.0, 100.0)
-        } else {
-            0.0
-        };
+        let now = std::time::Instant::now();
+        let elapsed = self.previous.map(|last| now.duration_since(last).as_secs_f64());
+        let cpu_percent = if elapsed.is_some_and(|seconds| seconds >= 0.2) && !self.sys.cpus().is_empty() {
+            Some(f64::from(self.sys.global_cpu_info().cpu_usage()).clamp(0.0, 100.0))
+        } else { None };
+        // sysinfo 0.29 reports both system and process memory in bytes.
+        let total_memory = self.sys.total_memory();
+        let used_memory = self.sys.used_memory();
+        let memory_used_mb = (total_memory > 0).then_some(used_memory as f64 / 1_048_576.0);
+        let memory_percent = (total_memory > 0).then(|| (used_memory as f64 / total_memory as f64 * 100.0).clamp(0.0, 100.0));
+        self.sys.refresh_disks_list();
+        self.sys.refresh_disks();
+        let disks: Vec<_> = self.sys.disks().iter().take(128).map(|disk| serde_json::json!({
+            "mount": disk.mount_point().to_string_lossy(),
+            "total_bytes": disk.total_space(), "available_bytes": disk.available_space(),
+            "used_percent": if disk.total_space() > 0 { Some((disk.total_space().saturating_sub(disk.available_space())) as f64 / disk.total_space() as f64 * 100.0) } else { None },
+        })).collect();
+        self.sys.refresh_networks_list();
+        self.sys.refresh_networks();
+        let mut totals = HashMap::new();
+        let network: Vec<_> = self.sys.networks().iter().take(128).map(|(name, data)| {
+            let received = data.total_received(); let transmitted = data.total_transmitted();
+            let rates = self.network_totals.get(name).zip(elapsed).and_then(|(&(rx, tx), seconds)| {
+                if seconds > 0.0 && received >= rx && transmitted >= tx {
+                    Some(((received-rx) as f64 / seconds, (transmitted-tx) as f64 / seconds))
+                } else { None }
+            });
+            totals.insert(name.clone(), (received, transmitted));
+            serde_json::json!({"name":name, "received_bytes":received, "transmitted_bytes":transmitted,
+                "receive_bytes_per_second":rates.map(|r|r.0), "transmit_bytes_per_second":rates.map(|r|r.1),
+                "rate_state":if rates.is_some(){"available"}else{"warming_up"}})
+        }).collect();
+        self.network_totals = totals;
+        self.previous = Some(now);
+        let system_metrics = serde_json::json!({
+            "schema_version":1, "sample_interval_seconds":elapsed,
+            "hardware":{"logical_cpu_count":self.sys.cpus().len(),
+                "cpu_model":self.sys.cpus().first().map(|cpu|cpu.brand()),
+                "os_version":self.sys.long_os_version(), "kernel_version":self.sys.kernel_version()},
+            "cpu_percent":cpu_percent, "cpu_state":if cpu_percent.is_some(){"available"}else{"warming_up"},
+            "memory_used_bytes":(total_memory>0).then_some(used_memory),
+            "memory_total_bytes":(total_memory>0).then_some(total_memory), "memory_percent":memory_percent,
+            "memory_state":if total_memory>0 {"available"}else{"unavailable"},
+            "uptime_seconds":self.sys.uptime(),
+            "disks_state":if disks.is_empty(){"unavailable"}else{"available"}, "disks":disks,
+            "network_state":if network.is_empty(){"unavailable"}else{"available"}, "network":network,
+            "capabilities":crate::runtime::capabilities(),
+        });
 
         let top_process = self
             .sys
@@ -255,6 +293,7 @@ impl ResourceMonitor {
         };
 
         NodeResourceSnapshot {
+            system_metrics,
             cpu_percent,
             memory_used_mb,
             memory_percent,
@@ -352,7 +391,10 @@ fn capture_open_apps_windows(sys: &mut System) -> Vec<OpenAppSnapshot> {
 
     let mut windows = Vec::<WindowSeed>::new();
     unsafe {
-        EnumWindows(Some(enum_windows_proc), &mut windows as *mut _ as LPARAM);
+        if EnumWindows(Some(enum_windows_proc), &mut windows as *mut _ as LPARAM)==0 {
+            crate::capture_diagnostics::record("running_apps","capture_error",Some(&std::io::Error::last_os_error().to_string()));
+            return Vec::new();
+        }
     }
 
     if windows.is_empty() {
@@ -500,6 +542,9 @@ fn capture_active_window_windows() -> Option<WindowCapture> {
             }
         }
 
+        if app_name=="Unknown" {
+            crate::capture_diagnostics::record("window_activity","capture_error",Some("Foreground executable metadata unavailable or access denied"));
+        }
         Some(WindowCapture {
             app_name,
             window_title,
@@ -511,130 +556,26 @@ fn capture_active_window_windows() -> Option<WindowCapture> {
 // Linux implementation (uses xprop to query X11/XWayland active window properties)
 #[cfg(target_os = "linux")]
 fn capture_active_window_linux() -> Option<WindowCapture> {
-    use std::process::Command;
-
-    // Helper to get active window ID string (e.g. "0x3c00012") via xprop
-    let get_active_window_id = || -> Option<String> {
-        let output = Command::new("xprop")
-            .args(["-root", "_NET_ACTIVE_WINDOW"])
-            .output()
-            .ok()?;
-        let output_str = String::from_utf8_lossy(&output.stdout);
-        let id_str = output_str
-            .split("window id #")
-            .nth(1)?
-            .trim()
-            .split_whitespace()
-            .next()?
-            .to_string();
-        if id_str == "0x0" { None } else { Some(id_str) }
-    };
-
-    let active_id_str = get_active_window_id();
-
-    if let Some(ref id_str) = active_id_str {
-        // Try to parse the window ID into u32 for xcap matching
-        let parsed_id = if id_str.starts_with("0x") || id_str.starts_with("0X") {
-            u32::from_str_radix(&id_str[2..], 16).ok()
-        } else {
-            id_str.parse::<u32>().ok()
-        };
-
-        if let Some(window_id) = parsed_id {
-            // Attempt to use xcap for X11/Wayland window details if matching window ID is found
-            if let Ok(windows) = xcap::Window::all() {
-                for window in windows {
-                    if window.id().ok() == Some(window_id) {
-                        let app_name = match window.app_name() {
-                            Ok(name) if !name.is_empty() => name,
-                            _ => "Unknown".to_string(),
-                        };
-                        let window_title = match window.title() {
-                            Ok(title) if !title.is_empty() => title,
-                            _ => "Sin titulo".to_string(),
-                        };
-                        return Some(WindowCapture {
-                            app_name,
-                            window_title,
-                            timestamp: Utc::now(),
-                        });
-                    }
-                }
-            }
-        }
-
-        // Fallback to traditional xprop details retrieval
-        let details_output = Command::new("xprop")
-            .args(["-id", id_str, "WM_CLASS", "WM_NAME", "_NET_WM_NAME"])
-            .output()
-            .ok()?;
-
-        let details_str = String::from_utf8_lossy(&details_output.stdout);
-        
-        let mut app_name = String::new();
-        let mut window_title = String::new();
-
-        for line in details_str.lines() {
-            if line.starts_with("WM_CLASS") {
-                if let Some(val) = line.split('=').nth(1) {
-                    if let Some(first_quote) = val.find('"') {
-                        if let Some(second_quote) = val[first_quote + 1..].find('"') {
-                            app_name = val[first_quote + 1..first_quote + 1 + second_quote].to_string();
-                        }
-                    }
-                }
-            } else if line.starts_with("_NET_WM_NAME") || line.starts_with("WM_NAME") {
-                if window_title.is_empty() {
-                    if let Some(val) = line.split('=').nth(1) {
-                        if let Some(first_quote) = val.find('"') {
-                            if let Some(second_quote) = val[first_quote + 1..].find('"') {
-                                window_title = val[first_quote + 1..first_quote + 1 + second_quote].to_string();
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if !app_name.is_empty() || !window_title.is_empty() {
-            if app_name.is_empty() {
-                app_name = "Unknown".to_string();
-            }
-            if window_title.is_empty() {
-                window_title = "Sin titulo".to_string();
-            }
-            return Some(WindowCapture {
-                app_name,
-                window_title,
-                timestamp: Utc::now(),
-            });
-        }
+    fn read(args:&[&str])->Result<String,String> {
+        let out=std::process::Command::new("xprop").args(args).output().map_err(|e|e.to_string())?;
+        if !out.status.success() {return Err(format!("xprop failed: {}",out.status));}
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
-
-    // Wayland / fallback: XDG Session Type might be Wayland, where active_id_str is None
-    // Try to get the active/visible window using xcap
-    if let Ok(windows) = xcap::Window::all() {
-        let active_windows: Vec<_> = windows.into_iter()
-            .filter(|w| !w.is_minimized().unwrap_or(true) && w.title().map(|t| !t.is_empty()).unwrap_or(false))
-            .collect();
-        if let Some(first_window) = active_windows.first() {
-            let app_name = match first_window.app_name() {
-                Ok(name) if !name.is_empty() => name,
-                _ => "Unknown".to_string(),
-            };
-            let window_title = match first_window.title() {
-                Ok(title) if !title.is_empty() => title,
-                _ => "Sin titulo".to_string(),
-            };
-            return Some(WindowCapture {
-                app_name,
-                window_title,
-                timestamp: Utc::now(),
-            });
+    let result=(||->Result<Option<WindowCapture>,String>{
+        let root=read(&["-root","_NET_ACTIVE_WINDOW"])?;
+        let id=root.split("window id #").nth(1).and_then(|v|v.split_whitespace().next()).ok_or("Window manager did not report an active-window property")?;
+        if id=="0x0" {return Ok(None);}
+        let details=read(&["-id",id,"WM_CLASS","_NET_WM_NAME","WM_NAME"])?;
+        let mut app=String::new();let mut title=String::new();
+        for line in details.lines() {
+            let quoted=line.split('"').nth(1).unwrap_or("");
+            if line.starts_with("WM_CLASS") {app=quoted.to_string();}
+            if line.starts_with("_NET_WM_NAME") || (title.is_empty() && line.starts_with("WM_NAME")) {title=quoted.to_string();}
         }
-    }
-
-    None
+        if app.is_empty() {return Err("Foreground window class is unavailable".into());}
+        Ok(Some(WindowCapture{app_name:app,window_title:title,timestamp:Utc::now()}))
+    })();
+    match result {Ok(v)=>v,Err(error)=>{crate::capture_diagnostics::record("window_activity","capture_error",Some(&error));None}}
 }
 
 // macOS implementation (requires Cocoa framework or osascript)

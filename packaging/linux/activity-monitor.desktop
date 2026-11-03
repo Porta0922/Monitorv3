@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Monitor — Mi equipo
+Comment=Consultar recursos y estado de este equipo
+Exec=xdg-open http://127.0.0.1:9876/
+Icon=utilities-system-monitor
+Terminal=false
+Categories=System;Monitor;
+StartupNotify=false

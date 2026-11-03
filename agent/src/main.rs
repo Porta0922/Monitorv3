@@ -1,8 +1,15 @@
 #![windows_subsystem = "windows"]
 
+pub mod runtime;
+pub mod native_worker;
+pub mod persistent_file;
+mod network_identity;
+pub mod session_policy;
+pub mod session_relay;
 pub mod monitoring;
 pub mod offline_cache;
 pub mod inventory;
+pub mod inventory_snapshot;
 pub mod device_id;
 pub mod rabbitmq_publisher;
 pub mod usb_detection;
@@ -16,6 +23,8 @@ pub mod tasks;
 pub mod config_manager;
 pub mod task_supervisor;
 pub mod health_reporter;
+mod session_health;
+mod capture_diagnostics;
 pub mod command_channel;
 pub mod remote_policy;
 pub mod discovery;
@@ -30,7 +39,6 @@ use std::sync::atomic::AtomicBool;
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::{sleep, Duration};
 use device_id::{load_or_create_device_identity, get_device_nickname};
-use process_protection::ProcessProtection;
 use input_tracking::InputTracker;
 use keystroke_tracker::KeystrokeTracker;
 
@@ -64,8 +72,8 @@ fn run_service() -> Result<(), windows_service::Error> {
 
     let event_handler = move |control_event| -> ServiceControlHandlerResult {
         match control_event {
-            ServiceControl::Stop => {
-                let _ = shutdown_tx.blocking_send(());
+            ServiceControl::Stop | ServiceControl::Shutdown => {
+                let _ = shutdown_tx.try_send(());
                 ServiceControlHandlerResult::NoError
             }
             ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
@@ -78,7 +86,7 @@ fn run_service() -> Result<(), windows_service::Error> {
     status_handle.set_service_status(ServiceStatus {
         service_type: ServiceType::OWN_PROCESS,
         current_state: ServiceState::Running,
-        controls_accepted: ServiceControlAccept::STOP,
+        controls_accepted: ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN,
         exit_code: ServiceExitCode::Win32(0),
         checkpoint: 0,
         wait_hint: std::time::Duration::default(),
@@ -92,9 +100,10 @@ fn run_service() -> Result<(), windows_service::Error> {
         .build()
         .unwrap();
 
-    rt.block_on(async {
-        if let Err(e) = run_agent(shutdown_rx).await {
-            tracing::error!("Agent error: {}", e);
+    let failed = rt.block_on(async {
+        match run_agent(shutdown_rx).await {
+            Ok(()) => false,
+            Err(error) => { tracing::error!(%error, "Agent failed"); true }
         }
     });
 
@@ -102,7 +111,7 @@ fn run_service() -> Result<(), windows_service::Error> {
         service_type: ServiceType::OWN_PROCESS,
         current_state: ServiceState::Stopped,
         controls_accepted: ServiceControlAccept::empty(),
-        exit_code: ServiceExitCode::Win32(0),
+        exit_code: ServiceExitCode::Win32(if failed { 1 } else { 0 }),
         checkpoint: 0,
         wait_hint: std::time::Duration::default(),
         process_id: None,
@@ -112,33 +121,31 @@ fn run_service() -> Result<(), windows_service::Error> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(target_os = "linux")]
+    if std::env::args().nth(1).as_deref()==Some("--internal-x11-input-worker") {
+        return keystroke_tracker::linux_input_listener::worker_main();
+    }
+    if runtime::is_session() && std::env::var_os("AGENT_CONFIG_FILE").is_none() {
+        return Err("Session mode requires a dedicated AGENT_CONFIG_FILE".into());
+    }
     // Attempt to load .env from global config path if it exists
     let env_path = if cfg!(windows) {
         r"C:\ProgramData\ActivityMonitor\.env"
     } else {
         "/etc/activity-monitor/.env"
     };
-    dotenvy::from_path(env_path).ok();
+    let env_path = std::env::var("AGENT_CONFIG_FILE").unwrap_or_else(|_| env_path.to_string());
+    if std::path::Path::new(&env_path).exists() { dotenvy::from_path(&env_path)?; }
+    runtime::validate_mode()?;
 
     let is_session_0 = is_running_in_session_0();
 
     // Initialize logging with both console and file output
-    let log_dir = if cfg!(windows) {
-        r"C:\ProgramData\ActivityMonitor\logs".to_string()
-    } else {
-        if is_session_0 {
-            "/var/log/activity-monitor".to_string()
-        } else {
-            if let Ok(home) = std::env::var("HOME") {
-                format!("{}/.local/share/activity-monitor/logs", home)
-            } else {
-                "/tmp/activity-monitor/logs".to_string()
-            }
-        }
-    };
-    
+    let log_dir = std::env::var("AGENT_LOG_DIR").unwrap_or_else(|_|
+        runtime::data_dir().join("logs").to_string_lossy().into_owned());
+
     // Ensure the log directory exists
-    let _ = std::fs::create_dir_all(&log_dir);
+    std::fs::create_dir_all(&log_dir)?;
     
     let log_filename = if is_session_0 { "agent_service.log" } else { "agent_user.log" };
     
@@ -173,7 +180,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(windows)]
     {
         // Register application restart with Windows Error Reporting (WER)
-        register_windows_restart();
+        // Recovery belongs to the Windows Service Control Manager.
     }
     
     // Prune logs older than 7 days to prevent unbounded disk growth
@@ -181,8 +188,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Auto-discovery: find agent-config.json and registry overrides
     // This fills env vars that weren't set by .env (env vars take precedence).
-    let discovered = discovery::discover();
-    discovery::apply_to_env(&discovered);
+    if !runtime::is_session() {
+        let discovered = discovery::discover();
+        discovery::apply_to_env(&discovered);
+    }
     
     let version = env!("CARGO_PKG_VERSION");
     println!("ActivityMonitor Agent v{}", version);
@@ -237,6 +246,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // On Windows, try to start as a service dispatcher first.
         // If it fails, we assume we're running in a user session/console.
         if let Err(e) = service_dispatcher::start(SERVICE_NAME, ffi_service_main) {
+            if is_session_0 { return Err(Box::new(e)); }
             tracing::info!("Service dispatcher failed ({}). Falling back to console mode...", e);
             
             let rt = tokio::runtime::Builder::new_multi_thread()
@@ -248,7 +258,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             
             let tx_clone = tx.clone();
             rt.spawn(async move {
-                if tokio::signal::ctrl_c().await.is_ok() {
+                if runtime::shutdown_signal().await.is_ok() {
                     let _ = tx_clone.send(()).await;
                 }
             });
@@ -271,7 +281,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         
         let tx_clone = tx.clone();
         rt.spawn(async move {
-            if tokio::signal::ctrl_c().await.is_ok() {
+            if runtime::shutdown_signal().await.is_ok() {
                 let _ = tx_clone.send(()).await;
             }
         });
@@ -297,86 +307,72 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         sleep(Duration::from_secs(3)).await;
     }
 
-    // Load device identity (or create if new)
-    let device_identity = load_or_create_device_identity()?;
+    #[cfg(unix)]
+    let _process_lock = runtime::lock_instance()?;
+    let relay = if runtime::is_session() || (is_session_0 && runtime::relay_enabled()) {
+        Some(Arc::new(session_relay::SessionRelay::from_env()?))
+    } else { None };
+    // Only the service/standalone agent owns device enrollment.
+    let device_identity = if runtime::is_session() {
+        session_relay::load_identity(relay.as_ref().expect("session relay configured")).await?
+    } else { load_or_create_device_identity()? };
     tracing::info!("📱 Device ID: {}", device_identity.device_id);
     tracing::info!("💻 Hostname: {}", device_identity.hostname);
     tracing::info!("🔐 Device auth token enabled: {}", std::env::var("AGENT_AUTH_TOKEN").is_ok());
     
+    network_identity::initialize(device_identity.device_id).await.map_err(|e|e.to_string())?;
+
     // Check for nickname
     if let Some(nickname) = get_device_nickname() {
         tracing::info!("📛 Nickname: {}", nickname);
     }
     
     // Initialize offline cache with secure hardware-bound key derivation
-    let env_key = std::env::var("AGENT_OFFLINE_CACHE_KEY").ok();
+    let env_key = std::env::var("AGENT_OFFLINE_CACHE_KEY").ok().or_else(|| {
+        if runtime::is_session() { std::env::var("AGENT_SESSION_RELAY_KEY").ok() } else { None }
+    });
     let encryption_key = offline_cache::resolve_secure_key(env_key.as_deref(), &device_identity.device_id);
     
-    let db_name = if is_session_0 { "agent_service_cache.db" } else { "agent_user_cache.db" };
+    let db_name = if runtime::is_session() { "session_outbox.db" } else if is_session_0 { "agent_service_cache.db" } else { "agent_user_cache.db" };
     
-    let db_path = if cfg!(windows) {
-        std::path::PathBuf::from(r"C:\ProgramData\ActivityMonitor").join(db_name)
-    } else {
-        if is_session_0 {
-            std::path::PathBuf::from("/var/lib/activity-monitor").join(db_name)
-        } else {
-            let user_dir = if let Ok(home) = std::env::var("HOME") {
-                std::path::PathBuf::from(home).join(".local/share/activity-monitor")
-            } else {
-                std::path::PathBuf::from("/tmp/activity-monitor")
-            };
-            user_dir.join(db_name)
-        }
-    };
+    let db_path = runtime::data_dir().join(db_name);
+    std::fs::create_dir_all(runtime::data_dir())?;
+    let cache_path = db_path.to_str().ok_or("Cache path is not valid UTF-8")?;
+    let cache = Arc::new(offline_cache::OfflineCache::new(cache_path, &encryption_key)?);
+    tracing::info!("Persistent offline cache initialized");
+    tracing::info!(capabilities = %runtime::capabilities(), "Agent runtime capabilities");
 
-    if let Some(parent) = db_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-
-    let cache = Arc::new(
-        offline_cache::OfflineCache::new(db_path.to_str().unwrap_or(db_name), &encryption_key)
-            .unwrap_or_else(|_| {
-                tracing::warn!("Failed to initialize offline cache at {:?}, continuing with memory cache", db_path);
-                offline_cache::OfflineCache::new(":memory:", &encryption_key).unwrap()
-            })
-    );
-    
-    tracing::info!("✅ Offline cache initialized");
-    
-    // Initialize Process Protection (Anti-Kill)
-    let protection = ProcessProtection::new(device_identity.device_id.to_string(), true);
-    if let Err(e) = protection.init() {
-        tracing::warn!("⚠️  Process protection initialization warning: {}", e);
-    } else {
-        tracing::info!("✅ Process protection enabled");
-    }
-    
     // Initialize Input Tracking (Keyboard/Mouse Heatmaps)
     let input_tracker = Arc::new(InputTracker::new(device_identity.device_id.to_string(), 19));
-    input_tracker.set_screen_resolution(1920, 1080).await;
+    // No fabricated screen dimensions; coordinate capture is explicitly unavailable.
     tracing::info!("✅ Input activity tracking enabled");
 
     // Initialize Keystroke Tracking (Idle detection + keystroke counting)
     let keystroke_tracker = Arc::new(KeystrokeTracker::new());
     
+    #[allow(unused_mut)]
+    let mut native_workers: Vec<native_worker::NativeWorker> = Vec::new();
+    if runtime::desktop_capture_available() {
     // Initialize platform-specific input listener
     #[cfg(target_os = "windows")]
     {
         use keystroke_tracker::windows_input_listener;
-        if let Err(e) = windows_input_listener::init_input_listener(keystroke_tracker.clone()).await {
-            tracing::warn!("⚠️  Failed to initialize keystroke tracking: {}", e);
-        } else {
-            tracing::info!("✅ Keystroke tracking enabled");
+        match windows_input_listener::init_input_listener(keystroke_tracker.clone()).await {
+            Ok(worker) => {
+                native_workers.push(worker);
+                runtime::mark_input_available();
+                tracing::info!("Windows input listener started");
+            }
+            Err(error) => {runtime::set_input_diagnostic(false,"failed",Some(error.to_string()));tracing::warn!(%error, "Failed to initialize Windows input listener");},
         }
     }
     
     #[cfg(target_os = "linux")]
     {
         use keystroke_tracker::linux_input_listener;
-        if let Err(e) = linux_input_listener::init_input_listener(keystroke_tracker.clone()).await {
-            tracing::warn!("⚠️  Failed to initialize keystroke tracking: {}", e);
-        } else {
-            tracing::info!("✅ Keystroke tracking enabled");
+        match linux_input_listener::init_input_listener(keystroke_tracker.clone()).await {
+            Ok(worker)=>native_workers.push(worker),
+            Err(error)=>{runtime::set_input_diagnostic(false,"failed",Some(error.to_string()));tracing::warn!(%error,"Linux input worker could not start");}
         }
     }
     
@@ -386,16 +382,20 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         if let Err(e) = macos_input_listener::init_input_listener(keystroke_tracker.clone()).await {
             tracing::warn!("⚠️  Failed to initialize keystroke tracking: {}", e);
         } else {
+            runtime::mark_input_available();
             tracing::info!("✅ Keystroke tracking enabled");
         }
     }
     
+    }
+
     // Initialize RabbitMQ publisher
     let rabbitmq_url = std::env::var("RABBITMQ_URL")
         .unwrap_or_else(|_| "amqp://guest:guest@localhost:5672/%2F".to_string());
-    tracing::info!("🔌 RabbitMQ URL configured for agent: {}", rabbitmq_url);
+    let rabbitmq_url=network_identity::rabbit_url(&rabbitmq_url);
+    tracing::info!("RabbitMQ endpoint configured");
 
-    let initial_publisher = match rabbitmq_publisher::RabbitMQPublisher::connect(&rabbitmq_url).await {
+    let initial_publisher = if runtime::is_session() { None } else { match rabbitmq_publisher::RabbitMQPublisher::connect(&rabbitmq_url).await {
         Ok(conn) => {
             tracing::info!("✅ RabbitMQ connected");
             Some(Arc::new(conn))
@@ -404,6 +404,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
             tracing::warn!("⚠️  RabbitMQ connection failed: {}. Running in offline mode.", e);
             None
         }
+    }
     };
 
     let publisher: tasks::SharedPublisher = Arc::new(RwLock::new(initial_publisher));
@@ -412,7 +413,7 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     // like WifiMonitor can force-resend their current state to the new server.
     let wifi_resend_flag = Arc::new(AtomicBool::new(false));
 
-    let auth_token = std::env::var("AGENT_AUTH_TOKEN").unwrap_or_else(|_| "dev-agent-token".to_string());
+    let auth_token = if runtime::is_session() { String::new() } else { std::env::var("AGENT_AUTH_TOKEN").unwrap_or_else(|_| "dev-agent-token".to_string()) };
     let device_id_str = device_identity.device_id.to_string();
     let hostname = device_identity.hostname.clone();
     let mac_address = device_identity.mac_address.clone();
@@ -427,8 +428,10 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     let events_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
     // Initialize Configuration Manager
-    let config_manager = config_manager::ConfigManager::new();
+    let config_manager = config_manager::ConfigManager::new()?;
     tracing::info!("✅ Configuration manager initialized (v{})", config_manager.version());
+
+    keystroke_tracker.set_idle_threshold(config_manager.get().await.idle_threshold_seconds);
 
     // Construct TaskContext
     let context = Arc::new(tasks::TaskContext {
@@ -448,6 +451,52 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
 
     // Create Task Supervisor for lifecycle management
     let supervisor = task_supervisor::TaskSupervisor::new();
+
+    if is_session_0 {
+        for (index,relay) in session_relay::SessionRelay::service_relays()?.into_iter().enumerate() {
+            let listener=Arc::new(relay.bind().await?);let ctx=context.clone();
+            supervisor.track(&format!("session_relay_{index}"),move || {
+                let relay=relay.clone();let listener=listener.clone();let ctx=ctx.clone();
+                tokio::spawn(async move {relay.serve(listener,ctx).await})
+            }).await;
+        }
+    }
+
+    if runtime::is_session() {
+        #[cfg(windows)]
+        native_workers.push(ui::spawn_tray(web_state.clone()));
+        let relay = relay.expect("session relay configured");
+        session_policy::bootstrap(&context, &relay).await?;
+        for name in ["window_activity", "running_apps", "heatmap", "session_input"] {
+            let ctx = context.clone();
+            supervisor.track(name, move || session_policy::spawn_collector(ctx.clone(), name)).await;
+        }
+        supervisor.track("session_policy", {
+            let ctx = context.clone(); let relay = relay.clone();
+            move || session_policy::spawn_sync(ctx.clone(), relay.clone())
+        }).await;
+        supervisor.track("session_health", {
+            let ctx=context.clone();let sup=supervisor.clone();let relay=relay.clone();
+            move || session_health::spawn(ctx.clone(),sup.clone(),relay.clone())
+        }).await;
+        supervisor.track("session_sender", {
+            let ctx = context.clone();let relay=relay.clone();
+            move || session_relay::spawn_sender(ctx.clone(), relay.clone())
+        }).await;
+        supervisor.start_monitor();
+        tracing::info!("Session collector started with service policy");
+        shutdown_rx.recv().await;
+        supervisor.shutdown_and_wait().await;
+        let closed=context.build_event_envelope("running_apps",1,serde_json::json!({"apps":[],"session_closed":true}));
+        // Best effort live delivery after collectors stop; persist for later retry
+        // if the service is temporarily unreachable. Crashes use stale reporting.
+        if !matches!(relay.deliver("running_apps",&closed).await,Ok(true)){let _=context.publish_or_cache("running_apps",closed).await;}
+
+        for worker in native_workers {
+            if let Err(error) = worker.shutdown().await { tracing::warn!(%error, "Native shutdown incomplete"); }
+        }
+        return Ok(());
+    }
 
     // Track all background telemetry tasks via supervisor
     track_if_enabled(&supervisor, &config_manager, "window_activity", {
@@ -501,6 +550,10 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     }).await;
 
     // Track support/infrastructure tasks
+    if network_identity::production() {
+        let ctx=context.clone();
+        supervisor.track("network_identity",move || network_identity::spawn(ctx.clone())).await;
+    }
     supervisor.track("reconnector", {
         let ctx = context.clone();
         let url = rabbitmq_url.clone();
@@ -513,74 +566,70 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     }).await;
 
     // Shutdown listener is NOT supervised (it listens until shutdown)
-    tasks::support::spawn_shutdown_listener(context.clone());
+    // Administrative shutdown is not a security incident.
 
     // Start supervisor background monitor (auto-restart crashed tasks)
     supervisor.start_monitor();
 
     // Spawn health reporter, command channel, and remote policy consumer
-    health_reporter::spawn_health_reporter(context.clone(), supervisor.clone(), config_manager.clone());
-    command_channel::spawn_command_channel(context.clone(), supervisor.clone(), config_manager.clone());
-    remote_policy::spawn_remote_policy_consumer(context.clone(), config_manager.clone());
+    supervisor.track("health_reporter", {
+        let ctx = context.clone(); let cfg = config_manager.clone();
+        let sup = supervisor.clone();
+        move || health_reporter::spawn_health_reporter(ctx.clone(), sup.clone(), cfg.clone())
+    }).await;
+    supervisor.track("command_channel", {
+        let ctx = context.clone(); let cfg = config_manager.clone();
+        let sup = supervisor.clone();
+        move || command_channel::spawn_command_channel(ctx.clone(), sup.clone(), cfg.clone())
+    }).await;
+    supervisor.track("remote_policy", {
+        let ctx = context.clone(); let cfg = config_manager.clone();
+        move || remote_policy::spawn_remote_policy_consumer(ctx.clone(), cfg.clone())
+    }).await;
+
 
     // Spawn Web UI (always, works in both service and user mode)
-    web::spawn_web_server(web_state.clone());
+    supervisor.track("local_web", {
+        let state = web_state.clone();
+        move || web::spawn_web_server(state.clone())
+    }).await;
 
     // Spawn System Tray (Windows user mode only - no exit option)
     #[cfg(windows)]
     if !is_session_0 {
-        ui::spawn_tray(web_state.clone());
+        native_workers.push(ui::spawn_tray(web_state.clone()));
     }
 
-    // Spawn status updater for Web UI
+    let mut background_tasks = tokio::task::JoinSet::new();
+    // Read-only local status; contains no tokens, activity text or administrator commands.
     {
         let ws = web_state.clone();
         let ec = events_counter.clone();
         let ctx = context.clone();
-        tokio::spawn(async move {
+        let sup = supervisor.clone();
+        background_tasks.spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(5));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 interval.tick().await;
                 let connected = ctx.publisher.read().await.is_some();
                 ws.connected.store(connected, std::sync::atomic::Ordering::Relaxed);
-                ws.events_today.store(ec.load(std::sync::atomic::Ordering::Relaxed), std::sync::atomic::Ordering::Relaxed);
-            }
-        });
-    }
-
-    // Spawn auto-update checker (first check after 5 minutes, then every hour)
-    {
-        tokio::spawn(async move {
-            use std::time::Duration;
-            use crate::updater::ApplyUpdateResult;
-
-            let initial_delay = 5 * 60u64;
-
-            tracing::info!("[AutoUpdate] First check in {:.1}h", initial_delay as f64 / 3600.0);
-            tokio::time::sleep(Duration::from_secs(initial_delay)).await;
-
-            loop {
-                tracing::info!("[AutoUpdate] Checking for updates...");
-
-                match crate::updater::apply_update().await {
-                    ApplyUpdateResult::Updated { version } => {
-                        tracing::info!("[AutoUpdate] Update v{} applied. Exiting agent.", version);
-                        break;
-                    }
-                    ApplyUpdateResult::UpToDate => {
-                        tracing::info!("[AutoUpdate] Already up to date (v{})", env!("CARGO_PKG_VERSION"));
-                    }
-                    ApplyUpdateResult::Failed(e) => {
-                        tracing::warn!("[AutoUpdate] Check failed: {}", e);
-                    }
+                let events=ec.load(std::sync::atomic::Ordering::Relaxed);
+                ws.events_today.store(events,std::sync::atomic::Ordering::Relaxed);
+                let pending=ctx.cache.get_unsynced_event_count().await.ok();
+                if let Some(count)=pending {ws.cache_pending.store(count as u64,std::sync::atomic::Ordering::Relaxed);}
+                let policy=ctx.config_manager.get().await;
+                let tasks:Vec<_>=sup.handles().iter().map(|task|serde_json::json!({"name":task.name,"running":task.running,"has_error":task.last_error.is_some(),"restart_count":task.restart_count})).collect();
+                if let Ok(mut status)=ws.local_status.lock() {
+                    *status=serde_json::json!({"observed_at":chrono::Utc::now(),"publisher_available":connected,
+                        "events_since_start":events,"cache_pending":pending,"monitoring_paused":policy.monitoring_paused,
+                        "tasks":tasks});
                 }
-
-                tracing::info!("[AutoUpdate] Next check in 1 hour");
-                tokio::time::sleep(Duration::from_secs(3600)).await;
             }
         });
     }
+
+    // Updates are administrator-owned until signed platform packages are available.
 
     tracing::info!("✅ Agent started successfully");
     tracing::info!("📊 Monitoring: focus-activity | heartbeat | open apps | USB | USB-copy-detect | WiFi | inventory | input summary | security");
@@ -589,11 +638,21 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
     // Keep agent running until shutdown signal is received
     shutdown_rx.recv().await;
     tracing::info!("🛑 Shutdown signal received. Stopping agent...");
+    supervisor.shutdown_and_wait().await;
+    background_tasks.shutdown().await;
+    for worker in native_workers {
+        if let Err(error) = worker.shutdown().await { tracing::warn!(%error, "Native shutdown incomplete"); }
+    }
 
     Ok(())
 }
 
 pub fn is_running_in_session_0() -> bool {
+    match std::env::var("AGENT_MODE").as_deref() {
+        Ok("service") => return true,
+        Ok("interactive" | "session") => return false,
+        _ => {},
+    }
     #[cfg(windows)]
     {
         use winapi::um::processthreadsapi::GetCurrentProcessId;
@@ -621,12 +680,17 @@ async fn track_if_enabled<F>(
 ) where
     F: Fn() -> tokio::task::JoinHandle<()> + Send + 'static,
 {
-    if config_manager.get().await.is_monitor_enabled(name) {
-        supervisor.track(name, factory).await;
-        tracing::info!("[Startup] monitor '{}' enabled", name);
-    } else {
-        tracing::info!("[Startup] monitor '{}' disabled by policy (enabled_monitors)", name);
+    if !runtime::permits_task(name) {
+        tracing::info!(monitor = name, "Monitor unavailable in this runtime; omitted");
+        return;
     }
+    let factory = Arc::new(std::sync::Mutex::new(factory));
+    let config = config_manager.clone();
+    let task_name = name.to_string();
+    supervisor.track(name, move || {
+        session_policy::spawn_service_collector(config.clone(), task_name.clone(), factory.clone())
+    }).await;
+    tracing::info!(monitor = name, "Collector registered with live policy control");
 }
 
 fn prune_old_logs(log_dir: &str, prefix: &str, max_days: i64) {

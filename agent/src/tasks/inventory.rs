@@ -1,110 +1,28 @@
 use std::sync::Arc;
-use std::collections::HashSet;
-use chrono::Utc;
-use crate::inventory::InventoryScanner;
-use crate::is_running_in_session_0;
 use super::{TaskContext, TaskInterval, live_sleep};
 
 pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
-    let is_session_0 = is_running_in_session_0();
-    if cfg!(windows) && !is_session_0 {
-        tracing::info!("Skipping software inventory task (handled by service)");
-        return tokio::spawn(std::future::pending::<()>());
-    }
-
     tokio::spawn(async move {
-        let mut known_inventory_fingerprints: HashSet<String> = HashSet::new();
-
-        // Initial baseline snapshot when agent starts.
-        let initial_apps = match InventoryScanner::scan_installed_software().await {
-            Ok(apps) => Some(apps),
-            Err(e) => {
-                tracing::warn!("Initial inventory scan error: {}", e);
-                None
-            }
-        };
-
-        if let Some(apps) = initial_apps {
-            for app in &apps {
-                let key = InventoryScanner::fingerprint(
-                    &app.app_name,
-                    app.version.as_deref(),
-                    &app.exe_hash,
-                );
-                known_inventory_fingerprints.insert(key);
-            }
-
-            let detected_at = Utc::now().to_rfc3339();
-            let inventory_payload = context.build_event_envelope(
-                "inventory",
-                1,
-                serde_json::json!({
-                    "detected_at": detected_at,
-                    "apps": apps.into_iter().map(|app| serde_json::json!({
-                        "app_name": app.app_name,
-                        "version": app.version,
-                        "exe_hash": app.exe_hash,
-                        "detected_at": detected_at,
-                    })).collect::<Vec<_>>(),
-                }),
-            );
-            context.publish_or_cache("inventory", inventory_payload).await;
-            tracing::info!("✅ Initial inventory snapshot published: {} apps", known_inventory_fingerprints.len());
-        }
-
         loop {
-            live_sleep(&context, TaskInterval::Inventory).await;
-
-            let apps = match InventoryScanner::scan_installed_software().await {
-                Ok(apps) => Some(apps),
-                Err(e) => {
-                    tracing::warn!("Inventory scan error: {}", e);
-                    None
-                }
-            };
-
-            let Some(apps) = apps else {
-                continue;
-            };
-
-            let mut new_apps = Vec::new();
-            for app in apps {
-                let key = InventoryScanner::fingerprint(
-                    &app.app_name,
-                    app.version.as_deref(),
-                    &app.exe_hash,
-                );
-
-                if known_inventory_fingerprints.insert(key) {
-                    new_apps.push(app);
+            let mut failed=false;
+            let mut capture_failed=false;
+            let mut sources=0;
+            for mut snapshot in crate::inventory_snapshot::scan().await {
+                // Every snapshot is complete for one explicit source or reports failure.
+                // The durable outbox owns retries; no in-memory fingerprint can hide a lost scan.
+                sources += 1;
+                capture_failed |= snapshot["complete"] != true;
+                failed |= snapshot["complete"] != true;
+                snapshot["interval_days"] = serde_json::json!(context.config_manager.get().await.inventory_interval_days);
+                let event = context.build_event_envelope("inventory_snapshot", 2, snapshot);
+                if !context.publish_or_cache("inventory", event).await {
+                    failed=true;
+                    tracing::warn!("Inventory snapshot was not accepted; next scan will reconcile state");
                 }
             }
-
-            if new_apps.is_empty() {
-                tracing::info!("Software inventory weekly scan complete: no new applications detected");
-                continue;
-            }
-
-            tracing::info!(
-                "Software inventory weekly scan complete: {} new apps detected",
-                new_apps.len()
-            );
-
-            let detected_at = Utc::now().to_rfc3339();
-            let inventory_payload = context.build_event_envelope(
-                "inventory",
-                1,
-                serde_json::json!({
-                    "detected_at": detected_at,
-                    "apps": new_apps.into_iter().map(|app| serde_json::json!({
-                        "app_name": app.app_name,
-                        "version": app.version,
-                        "exe_hash": app.exe_hash,
-                        "detected_at": detected_at,
-                    })).collect::<Vec<_>>(),
-                }),
-            );
-            context.publish_or_cache("inventory", inventory_payload).await;
+            crate::capture_diagnostics::record("inventory", if capture_failed { "capture_error" } else if sources == 0 { "no_observation" } else { "capture_ok" }, if capture_failed { Some("Una o más fuentes no completaron el escaneo") } else { None });
+            if failed { tokio::time::sleep(std::time::Duration::from_secs(300)).await; }
+            else { live_sleep(&context, TaskInterval::Inventory).await; }
         }
     })
 }

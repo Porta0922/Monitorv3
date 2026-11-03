@@ -32,13 +32,18 @@ struct ManagedTask {
     gave_up: bool,
 }
 
+struct AbortOnDrop(tokio::task::AbortHandle);
+impl Drop for AbortOnDrop { fn drop(&mut self) { self.0.abort(); } }
+
 pub struct TaskSupervisor {
+    stopping: AtomicBool,
     tasks: StdMutex<Vec<ManagedTask>>,
 }
 
 impl TaskSupervisor {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
+            stopping: AtomicBool::new(false),
             tasks: StdMutex::new(Vec::new()),
         })
     }
@@ -47,6 +52,9 @@ impl TaskSupervisor {
     where
         F: Fn() -> JoinHandle<()> + Send + 'static,
     {
+        // Serialize registration with shutdown; never start a collector after Stop.
+        let mut tasks = self.tasks.lock().unwrap();
+        if self.stopping.load(Ordering::Relaxed) { return; }
         let name = name.to_string();
         let running = Arc::new(AtomicBool::new(true));
         let last_error: Arc<StdMutex<Option<String>>> = Arc::new(StdMutex::new(None));
@@ -61,7 +69,9 @@ impl TaskSupervisor {
                 let last_error = last_error.clone();
                 let handle = factory();
                 let name2 = name.clone();
+                let abort_on_drop = AbortOnDrop(handle.abort_handle());
                 tokio::spawn(async move {
+                    let _abort_on_drop = abort_on_drop;
                     // Wait for the inner task to complete
                     match handle.await {
                         Ok(()) => {
@@ -98,7 +108,7 @@ impl TaskSupervisor {
             gave_up: false,
         };
 
-        self.tasks.lock().unwrap().push(managed);
+        tasks.push(managed);
     }
 
     pub fn start_monitor(self: &Arc<Self>) {
@@ -109,6 +119,7 @@ impl TaskSupervisor {
             loop {
                 interval.tick().await;
                 let mut tasks = this.tasks.lock().unwrap();
+                if this.stopping.load(Ordering::Relaxed) { return; }
                 let now = Instant::now();
                 for task in tasks.iter_mut() {
                     let is_finished = task.handle.lock().unwrap().is_finished();
@@ -167,6 +178,29 @@ impl TaskSupervisor {
         });
     }
 
+    pub fn shutdown(&self) {
+        let tasks = self.tasks.lock().unwrap();
+        self.stopping.store(true, Ordering::Relaxed);
+        for task in tasks.iter() {
+            task.handle.lock().unwrap().abort();
+            task.running.store(false, Ordering::Relaxed);
+        }
+    }
+
+    pub async fn shutdown_and_wait(&self) {
+        let handles: Vec<_> = {
+            let mut tasks = self.tasks.lock().unwrap();
+            self.stopping.store(true, Ordering::Relaxed);
+            tasks.drain(..).map(|task| {
+                task.running.store(false, Ordering::Relaxed);
+                let handle = task.handle.into_inner().unwrap();
+                handle.abort();
+                handle
+            }).collect()
+        };
+        for handle in handles { let _ = handle.await; }
+    }
+
     pub fn handles(&self) -> Vec<TaskHandle> {
         let tasks = self.tasks.lock().unwrap();
         tasks
@@ -182,5 +216,32 @@ impl TaskSupervisor {
                 }
             })
             .collect()
+    }
+}
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    #[tokio::test]
+    async fn shutdown_cancels_child_and_rejects_late_registration() {
+        let supervisor = TaskSupervisor::new();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel();
+        struct NotifyDrop(Option<tokio::sync::oneshot::Sender<()>>);
+        impl Drop for NotifyDrop { fn drop(&mut self) { let _ = self.0.take().unwrap().send(()); } }
+        let signals = StdMutex::new(Some((started_tx, dropped_tx)));
+        supervisor.track("pending", move || {
+            let (started, dropped) = signals.lock().unwrap().take().unwrap();
+            tokio::spawn(async move {
+                let _guard = NotifyDrop(Some(dropped));
+                let _ = started.send(());
+                std::future::pending::<()>().await;
+            })
+        }).await;
+        started_rx.await.unwrap();
+        supervisor.shutdown();
+        tokio::time::timeout(Duration::from_secs(2), dropped_rx).await.unwrap().unwrap();
+        supervisor.track("late", || panic!("must not start after administrative stop")).await;
+        assert_eq!(supervisor.handles().len(), 1);
+        assert!(!supervisor.handles()[0].running);
     }
 }

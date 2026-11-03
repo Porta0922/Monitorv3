@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package Name="Monitor — Agente de oficina" Manufacturer="ActivityMonitor" Version="$(var.Version)" UpgradeCode="A88051A5-83D5-4BC3-B493-B779FAF705CC" Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="Ya hay una versión más reciente de Monitor instalada." Schedule="afterInstallInitialize" />
+    <MediaTemplate EmbedCab="yes" />
+    <util:QueryWindowsWellKnownSIDs />
+    <Property Id="MONITOR_COORDINATED" Secure="yes" />
+    <Launch Condition="MONITOR_COORDINATED = 1 OR UPGRADINGPRODUCTCODE" Message="Utilice install-package.ps1 para coordinar instalación, reparación o eliminación con las sesiones." />
+    <StandardDirectory Id="ProgramFiles64Folder"><Directory Id="INSTALLFOLDER" Name="ActivityMonitor">
+      <Component Id="AgentService" Guid="B833E78A-9E91-43E4-9987-5463B232FB06">
+        <File Id="AgentExecutable" Source="$(var.Payload)\activity-monitor-agent.exe" KeyPath="yes" />
+        <ServiceInstall Id="InstallAgentService" Name="ActivityMonitor" DisplayName="Monitor — Agente del equipo" Description="Supervisión del equipo de oficina" Type="ownProcess" Start="auto" ErrorControl="normal" Account="LocalSystem">
+          <util:ServiceConfig FirstFailureActionType="restart" SecondFailureActionType="restart" ThirdFailureActionType="none" RestartServiceDelayInSeconds="15" ResetPeriodInDays="1" />
+        </ServiceInstall>
+        <ServiceControl Id="ControlAgentService" Name="ActivityMonitor" Stop="both" Remove="uninstall" Wait="yes" />
+        <RegistryValue Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\ActivityMonitor" Name="Environment" Type="multiString">
+          <MultiString Value="AGENT_MODE=service" />
+          <MultiString Value="AGENT_CONFIG_FILE=[CONFIGFOLDER].env" />
+        </RegistryValue>
+      </Component>
+      <Component Id="LocalViewLink" Guid="6437CD9D-35EA-4547-B7F5-42B477663AC0">
+        <File Id="LocalViewUrl" Source="$(var.Payload)\Mi equipo.url" KeyPath="yes"><Shortcut Id="LocalViewShortcut" Directory="ProgramMenuFolder" Name="Monitor — Mi equipo" Advertise="no" /></File>
+      </Component>
+      <Component Id="SessionAutostart" Guid="C44FD43C-FAE8-4DC4-9249-A2011FA8671F">
+        <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Run" Name="ActivityMonitorSession" Type="string" Value="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File &quot;[INSTALLFOLDER]maintenance\start-enrolled-session.ps1&quot;" KeyPath="yes" />
+      </Component>
+      <Directory Id="MAINTENANCE" Name="maintenance" />
+    </Directory></StandardDirectory>
+    <StandardDirectory Id="CommonAppDataFolder"><Directory Id="CONFIGFOLDER" Name="ActivityMonitor">
+      <Component Id="RetainedConfiguration" Guid="41E8429C-52E6-4447-93A4-E85E1F5FE316" Permanent="yes" NeverOverwrite="yes">
+        <CreateFolder><Permission User="[WIX_ACCOUNT_ADMINISTRATORS_NODOMAIN]" GenericAll="yes" /><Permission User="[WIX_ACCOUNT_LOCALSYSTEM_NODOMAIN]" GenericAll="yes" /></CreateFolder>
+        <File Id="InitialConfiguration" Source="$(var.Payload)\agent.env" Name=".env" KeyPath="yes" />
+      </Component>
+    </Directory></StandardDirectory>
+    <Feature Id="Main" Title="Agente y vista local" Level="1"><ComponentRef Id="AgentService" /><ComponentRef Id="SessionAutostart" /><ComponentRef Id="RetainedConfiguration" /><ComponentRef Id="LocalViewLink" /><ComponentGroupRef Id="MaintenanceScripts" /></Feature>
+  </Package>
+</Wix>

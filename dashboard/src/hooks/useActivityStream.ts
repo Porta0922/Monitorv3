@@ -26,7 +26,7 @@ export function useActivityStream() {
 
     const connect = () => {
       try {
-        eventSource = new EventSource(`http://${window.location.hostname}:3000/api/stream`);
+        eventSource = new EventSource(`/api/stream`);
 
         eventSource.onopen = () => {
           setIsConnected(true);
@@ -55,8 +55,8 @@ export function useActivityStream() {
             connect();
           }, nextDelay);
         };
-      } catch (err: any) {
-        setError(err.message || 'Failed to connect to activity stream');
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Failed to connect to activity stream');
         setIsConnected(false);
       }
     };

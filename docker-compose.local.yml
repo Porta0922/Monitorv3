@@ -1,0 +1,31 @@
+# Local P4 pilot. Use --project-name monitorv32-local --env-file .local-test/.env.
+# Secret values live only in the ignored local environment file.
+services:
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${LOCAL_DB_PASSWORD:?Local database password required}
+    # Database access stays on the Compose network; avoids Windows reserved ports.
+    ports: !override []
+  rabbitmq:
+    hostname: rabbitmq-local
+    environment:
+      RABBITMQ_DEFAULT_USER: monitor_local
+      RABBITMQ_DEFAULT_PASS: ${LOCAL_RABBIT_PASSWORD:?Local broker password required}
+    ports: !override
+      - "127.0.0.1:5673:5672"
+      - "127.0.0.1:15675:15672"
+  redis:
+    ports: !override
+      - "127.0.0.1:63790:6379"
+  server:
+    environment:
+      DATABASE_URL: postgresql://monitor_user:${LOCAL_DB_PASSWORD}@postgres:5432/activity_monitor
+      RABBITMQ_URL: amqp://monitor_local:${LOCAL_RABBIT_PASSWORD}@rabbitmq:5672/%2f
+    ports: !override
+      - "127.0.0.1:18000:3000"
+  dashboard:
+    ports: !override
+      - "127.0.0.1:18080:80"
+  db-maintenance:
+    environment:
+      PGPASSWORD: ${LOCAL_DB_PASSWORD}

@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import ts from '../dashboard/node_modules/typescript/lib/typescript.js';
+const source=readFileSync(new URL('../dashboard/src/api/desktop.ts',import.meta.url),'utf8');
+const js=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const {groupHourlyPrograms}=await import('data:text/javascript;base64,'+Buffer.from(js).toString('base64'));
+const row=(hour,app_name,window_title,total_seconds,count)=>({hour,app_name,window_title,total_seconds,count});
+const result=groupHourlyPrograms([row(12,'Editor','Document A',30,2),row(9,'Browser','Page',15,1),row(12,'Editor','Document B',60,3)]);
+assert.deepEqual(result.map(g=>g.hour),[9,12]);
+assert.equal(result[1].programs.length,1);
+assert.equal(result[1].programs[0].window_count,2);
+assert.equal(result[1].programs[0].seconds,90);
+assert.equal(result[1].programs[0].intervals,5);
+assert.equal(result[1].programs[0].duration,'0 h 1 min 30 s');
+assert.deepEqual(groupHourlyPrograms([]),[]);
+assert.throws(()=>groupHourlyPrograms([row(25,'App','Title',5,1)]));
+console.log('Desktop contract: grouping, ordering, totals, windows, empty data and invalid hours passed.');

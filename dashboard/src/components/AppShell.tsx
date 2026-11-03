@@ -1,60 +1,31 @@
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../api/client';
+import { ThemeSelect } from './ThemeSelect';
 import { Sidebar } from './Sidebar';
-
-interface AppShellProps {
-  currentPage: string;
-  title: string;
-  subtitle?: string;
-  actions?: ReactNode;
-  children: ReactNode;
-  noScroll?: boolean;
-}
-
-export function AppShell({ currentPage, title, subtitle, actions, children, noScroll = false }: AppShellProps) {
+import { Icon } from './Icon';
+interface AppShellProps { currentPage: string; title: string; subtitle?: string; actions?: ReactNode; children: ReactNode; noScroll?: boolean; contentClassName?: string }
+export function AppShell({ currentPage, title, subtitle, actions, children, contentClassName = '' }: AppShellProps) {
   const navigate = useNavigate();
-  const now = new Date().toLocaleTimeString('es-AR');
-
-  const handleLogout = () => {
-    apiClient.logout();
-    navigate('/login');
-  };
-
-  return (
-    <div className="min-h-screen bg-[#070b1d] text-[#e4e6eb]">
-      <div className="flex min-h-screen">
-        <Sidebar currentPage={currentPage} />
-
-        <main className={`flex-1 ${noScroll ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-          <div className="mx-auto w-full max-w-[1680px] px-6 py-5">
-            <header className="mb-6 border-b border-[#16213f] pb-4">
-              <div className="mb-3 flex items-center justify-between">
-                <p className="font-display text-sm uppercase tracking-[0.18em] text-[#00d9ff]">Activity Monitor Enterprise (AME)</p>
-                <p className="font-mono text-xs text-[#637197]">{now}</p>
-              </div>
-
-              <div className="flex items-end justify-between gap-4">
-                <div>
-                  <h1 className="font-display text-3xl font-black tracking-wide text-[#e4e6eb]">{title}</h1>
-                  {subtitle && <p className="mt-1 text-sm text-[#8a97ba]">{subtitle}</p>}
-                </div>
-                <div className="flex items-center gap-3">
-                  {actions}
-                  <button
-                    onClick={handleLogout}
-                    className="rounded-full border border-[#31497a] bg-[#0c1633] px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-[#9bb0dd] transition-colors hover:border-[#ff5f7a]/50 hover:text-[#ff8ea0]"
-                  >
-                    Cerrar sesion
-                  </button>
-                </div>
-              </div>
-            </header>
-
-            <div className="space-y-4">{children}</div>
-          </div>
-        </main>
-      </div>
+  const menu = useRef<HTMLDialogElement>(null);
+  const [logoutError,setLogoutError]=useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => { document.title = `${title} · Monitor`; }, [title]);
+  useEffect(() => { if (menuOpen) menu.current?.showModal(); else menu.current?.close(); }, [menuOpen]);
+  return <div className="workspace">
+    <a href="#main-content" className="skip-link">Saltar al contenido</a>
+    <div className="desktop-navigation"><Sidebar currentPage={currentPage} /></div>
+    <dialog ref={menu} className="mobile-navigation" onClose={() => setMenuOpen(false)} onCancel={() => setMenuOpen(false)} aria-label="Menú de navegación">
+      <button className="icon-button mobile-close" aria-label="Cerrar menú" onClick={() => setMenuOpen(false)}><Icon name="close" /></button><Sidebar currentPage={currentPage} onNavigate={() => setMenuOpen(false)} />
+    </dialog>
+    <div className="workspace-main">
+      <div className="workspace-topbar"><div className="topbar-context"><button className="icon-button mobile-menu" aria-label="Abrir navegación" onClick={() => setMenuOpen(true)}><Icon name="menu" /></button><span>Monitor</span><span aria-hidden="true">/</span><strong>Consola de administración</strong></div><div className="topbar-actions"><ThemeSelect /><button className="button button-quiet" onClick={async () => {try{await apiClient.logout();navigate('/login');}catch{setLogoutError('No se pudo confirmar el cierre de sesión. Reintenta cuando vuelva la conexión.');}}}><Icon name="logout" />Cerrar sesión</button></div></div>
+      <main id="main-content" tabIndex={-1} className={`workspace-content ${contentClassName}`}>
+        <header className="page-header"><div><p className="eyebrow">Supervisión de equipos de oficina</p><h1>{title}</h1>{subtitle && <p className="page-description">{subtitle}</p>}</div>{actions && <div className="page-actions">{actions}</div>}</header>
+        <div className="page-body">{logoutError&&<p role="alert" className="notice notice-error">{logoutError}</p>}{children}</div>
+        <footer className="workspace-footer">Monitor <span>Los horarios se muestran según la zona indicada en cada vista.</span></footer>
+      </main>
     </div>
-  );
+  </div>;
 }

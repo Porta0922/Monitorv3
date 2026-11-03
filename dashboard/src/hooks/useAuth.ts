@@ -1,32 +1,8 @@
-// Authentication hook
-import { useState, useEffect } from 'react';
-import { apiClient } from '../api/client';
-
-export function useAuth() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    // Check if already authenticated
-    setIsAuthenticated(apiClient.isAuthenticated());
-    setIsLoading(false);
-  }, []);
-
-  const login = async (username: string, password: string) => {
-    try {
-      await apiClient.login(username, password);
-      setIsAuthenticated(true);
-      return true;
-    } catch (error) {
-      console.error('Login failed:', error);
-      return false;
-    }
-  };
-
-  const logout = () => {
-    apiClient.logout();
-    setIsAuthenticated(false);
-  };
-
-  return { isAuthenticated, isLoading, login, logout };
+import {useEffect,useState} from 'react';
+import {apiClient} from '../api/client';
+export function useAuth(){
+ const [state,setState]=useState(()=>({isAuthenticated:apiClient.isAuthenticated(),isLoading:!apiClient.isInitialized()}));
+ useEffect(()=>{const update=()=>setState({isAuthenticated:apiClient.isAuthenticated(),isLoading:!apiClient.isInitialized()});const unsubscribe=apiClient.subscribe(update);void apiClient.restoreSession().then(update);return unsubscribe;},[]);
+ const login=async(username:string,password:string,otp='')=>{try{await apiClient.login(username,password,otp);return true;}catch{return false;}};
+ return {...state,login,logout:()=>apiClient.logout()};
 }

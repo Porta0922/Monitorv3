@@ -9,3 +9,4 @@ pub mod keystroke;
 pub mod agent;
 pub mod dashboard;
 pub mod auth;
+pub mod administration;

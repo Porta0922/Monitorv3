@@ -61,8 +61,8 @@ set OSQUERY_MSI_URL=https://github.com/osquery/osquery/releases/download/%OSQUER
 set OSQUERY_MSI_PATH=%TEMP%\osquery-%OSQUERY_VERSION%.msi
 set AGENT_AUTH_TOKEN=change-me-in-production
 set AGENT_OFFLINE_CACHE_KEY=replace-with-32-byte-cache-key!!
-set AGENT_SERVER_URL=http://10.30.0.123:3000
-set RABBITMQ_URL=amqp://eclub:eCLUB123@10.30.0.123:5672/%%2f
+set AGENT_SERVER_URL=http://monitor.example.invalid:3000
+set RABBITMQ_URL=amqp://CHANGE_USER:CHANGE_PASSWORD@monitor.example.invalid:5672/%%2f
 
 :MAIN_MENU
 cls
@@ -102,10 +102,10 @@ echo === Modificar Credenciales ===
 set /p INPUT_AUTH_TOKEN="Enter agent auth token (or press Enter for default dev-agent-token): "
 if not "!INPUT_AUTH_TOKEN!"=="" set AGENT_AUTH_TOKEN=!INPUT_AUTH_TOKEN!
 
-set /p INPUT_SERVER_URL="Enter server URL for remote osquery policy (or press Enter for default http://10.30.0.123:3000): "
+set /p INPUT_SERVER_URL="Enter server URL for remote osquery policy (or press Enter for default http://monitor.example.invalid:3000): "
 if not "!INPUT_SERVER_URL!"=="" set AGENT_SERVER_URL=!INPUT_SERVER_URL!
 
-set /p INPUT_RABBITMQ_URL="Enter RabbitMQ URL (or press Enter for default amqp://eclub:eCLUB123@10.30.0.123:5672/%%2f): "
+set /p INPUT_RABBITMQ_URL="Enter RabbitMQ URL (or press Enter for default amqp://CHANGE_USER:CHANGE_PASSWORD@monitor.example.invalid:5672/%%2f): "
 if not "!INPUT_RABBITMQ_URL!"=="" set RABBITMQ_URL=!INPUT_RABBITMQ_URL!
 
 if not exist "%CONFIG_DIR%" mkdir "%CONFIG_DIR%"
@@ -172,10 +172,10 @@ goto STEP_1
 set /p INPUT_AUTH_TOKEN="Enter agent auth token (or press Enter for default change-me-in-production): "
 if not "!INPUT_AUTH_TOKEN!"=="" set AGENT_AUTH_TOKEN=!INPUT_AUTH_TOKEN!
 
-set /p INPUT_SERVER_URL="Enter server URL for remote osquery policy (or press Enter for default http://10.30.0.123:3000): "
+set /p INPUT_SERVER_URL="Enter server URL for remote osquery policy (or press Enter for default http://monitor.example.invalid:3000): "
 if not "!INPUT_SERVER_URL!"=="" set AGENT_SERVER_URL=!INPUT_SERVER_URL!
 
-set /p INPUT_RABBITMQ_URL="Enter RabbitMQ URL (or press Enter for default amqp://eclub:eCLUB123@10.30.0.123:5672/%%2f): "
+set /p INPUT_RABBITMQ_URL="Enter RabbitMQ URL (or press Enter for default amqp://CHANGE_USER:CHANGE_PASSWORD@monitor.example.invalid:5672/%%2f): "
 if not "!INPUT_RABBITMQ_URL!"=="" set RABBITMQ_URL=!INPUT_RABBITMQ_URL!
 
 :STEP_1

@@ -12,15 +12,6 @@ use std::sync::Arc;
 use uuid::Uuid;
 use crate::api::AppState;
 
-fn verify_agent_token(headers: &axum::http::HeaderMap) -> bool {
-    let expected = std::env::var("AGENT_AUTH_TOKEN").unwrap_or_else(|_| "dev-agent-token".to_string());
-    headers
-        .get("x-agent-token")
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v == expected)
-        .unwrap_or(false)
-}
-
 fn verify_admin_token(state: &AppState, headers: &HeaderMap) -> bool {
     let token = headers
         .get(axum::http::header::AUTHORIZATION)
@@ -32,10 +23,12 @@ fn verify_admin_token(state: &AppState, headers: &HeaderMap) -> bool {
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
+        .route("/enroll",axum::routing::post(crate::agent_enrollment::enroll))
+        .route("/renew",axum::routing::post(crate::agent_enrollment::renew))
         .route("/osquery-policy", axum::routing::get(osquery_policy))
         .route("/policy", axum::routing::get(agent_policy))
         .route("/commands", axum::routing::get(pending_commands).post(create_command))
-        .route("/commands/{id}/ack", axum::routing::post(ack_command))
+        .route("/commands/:id/ack", axum::routing::post(ack_command))
 }
 
 #[derive(Deserialize)]
@@ -59,10 +52,10 @@ struct OsqueryPolicy {
 }
 
 async fn osquery_policy(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
-    if !verify_agent_token(&headers) {
+    if !crate::api::valid_agent_token(&state, &headers).await {
         return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "success": false, "error": "unauthorized" })));
     }
 
@@ -89,7 +82,7 @@ async fn osquery_policy(
 }
 
 #[derive(Serialize)]
-struct AgentConfigPolicy {
+pub struct AgentConfigPolicy {
     window_activity_interval_secs: u64,
     heartbeat_interval_secs: u64,
     usb_detector_interval_secs: u64,
@@ -103,34 +96,51 @@ struct AgentConfigPolicy {
     idle_threshold_seconds: u64,
     activity_heartbeat_seconds: u64,
     enabled_monitors: Vec<String>,
+    disabled_monitors: Vec<String>,
+    monitoring_paused: bool,
 }
 
 fn env_u64(key: &str, default: u64) -> u64 {
     std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
 }
 
+#[derive(Deserialize)]
+struct PolicyQuery {device_id:Option<String>}
+
+pub fn default_policy()->AgentConfigPolicy {
+    AgentConfigPolicy {
+        window_activity_interval_secs: env_u64("AGENT_CONFIG_WINDOW_ACTIVITY_INTERVAL", 2),
+        heartbeat_interval_secs: env_u64("AGENT_CONFIG_HEARTBEAT_INTERVAL", 60),
+        usb_detector_interval_secs: env_u64("AGENT_CONFIG_USB_DETECTOR_INTERVAL", 60),
+        usb_copy_interval_secs: env_u64("AGENT_CONFIG_USB_COPY_INTERVAL", 60),
+        wifi_interval_secs: env_u64("AGENT_CONFIG_WIFI_INTERVAL", 120),
+        running_apps_interval_secs: env_u64("AGENT_CONFIG_RUNNING_APPS_INTERVAL", 60),
+        inventory_interval_days: env_u64("AGENT_CONFIG_INVENTORY_INTERVAL_DAYS", 1),
+        heatmap_interval_secs: env_u64("AGENT_CONFIG_HEATMAP_INTERVAL", 3600),
+        resource_logger_interval_secs: env_u64("AGENT_CONFIG_RESOURCE_LOGGER_INTERVAL", 60),
+        osquery_scheduler_seconds: env_u64("AGENT_CONFIG_OSQUERY_SCHEDULER_SECONDS", 0),
+        idle_threshold_seconds: env_u64("AGENT_CONFIG_IDLE_THRESHOLD", 300),
+        activity_heartbeat_seconds: env_u64("AGENT_CONFIG_ACTIVITY_HEARTBEAT", 30),
+        enabled_monitors: std::env::var("AGENT_CONFIG_ENABLED_MONITORS").unwrap_or_default()
+            .split(',').map(str::trim).filter(|v| !v.is_empty()).map(str::to_owned).collect(),
+        disabled_monitors: std::env::var("AGENT_CONFIG_DISABLED_MONITORS").unwrap_or_default()
+            .split(',').map(str::trim).filter(|v| !v.is_empty()).map(str::to_owned).collect(),
+        monitoring_paused: std::env::var("AGENT_CONFIG_MONITORING_PAUSED").as_deref() == Ok("true"),
+    }
+}
+
 async fn agent_policy(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
+    Query(query):Query<PolicyQuery>,
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
-    if !verify_agent_token(&headers) {
+    if !crate::api::valid_agent_token(&state, &headers).await {
         return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "success": false, "error": "unauthorized" })));
     }
 
-    let policy = AgentConfigPolicy {
-        window_activity_interval_secs: env_u64("AGENT_CONFIG_WINDOW_ACTIVITY_INTERVAL", 0),
-        heartbeat_interval_secs: env_u64("AGENT_CONFIG_HEARTBEAT_INTERVAL", 0),
-        usb_detector_interval_secs: env_u64("AGENT_CONFIG_USB_DETECTOR_INTERVAL", 0),
-        usb_copy_interval_secs: env_u64("AGENT_CONFIG_USB_COPY_INTERVAL", 0),
-        wifi_interval_secs: env_u64("AGENT_CONFIG_WIFI_INTERVAL", 0),
-        running_apps_interval_secs: env_u64("AGENT_CONFIG_RUNNING_APPS_INTERVAL", 0),
-        inventory_interval_days: env_u64("AGENT_CONFIG_INVENTORY_INTERVAL_DAYS", 0),
-        heatmap_interval_secs: env_u64("AGENT_CONFIG_HEATMAP_INTERVAL", 0),
-        resource_logger_interval_secs: env_u64("AGENT_CONFIG_RESOURCE_LOGGER_INTERVAL", 0),
-        osquery_scheduler_seconds: env_u64("AGENT_CONFIG_OSQUERY_SCHEDULER_SECONDS", 0),
-        idle_threshold_seconds: env_u64("AGENT_CONFIG_IDLE_THRESHOLD", 0),
-        activity_heartbeat_seconds: env_u64("AGENT_CONFIG_ACTIVITY_HEARTBEAT", 0),
-        enabled_monitors: Vec::new(),
+    let policy = match crate::domains::administration::effective(&state,query.device_id.as_deref()).await {
+        Ok(policy)=>policy,
+        Err(error)=>{tracing::error!(%error,"Cannot load effective policy");return (StatusCode::SERVICE_UNAVAILABLE,Json(serde_json::json!({"success":false,"error":"Policy unavailable"})));}
     };
 
     let response = PolicyEnvelope {
@@ -151,7 +161,7 @@ async fn pending_commands(
     Query(query): Query<DeviceQuery>,
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
-    if !verify_agent_token(&headers) {
+    if !crate::api::valid_agent_token(&state, &headers).await {
         return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "success": false, "commands": [] })));
     }
 
@@ -164,17 +174,18 @@ async fn pending_commands(
         Ok(cmds) => cmds,
         Err(e) => {
             tracing::error!("Failed to fetch pending commands: {}", e);
-            Vec::new()
+            return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"success":false,"error":"Commands unavailable"})));
         }
     };
 
     let mut items: Vec<serde_json::Value> = Vec::new();
     for c in commands {
         let id = c.id.to_string();
-        if state.db.mark_agent_command_delivered(c.id).await.is_ok() {
+        {
             items.push(serde_json::json!({
                 "id": id,
                 "command": c.command,
+                "expires_at": (c.created_at+chrono::Duration::hours(1)).to_rfc3339(),
                 "payload": c.payload,
             }));
         }
@@ -207,6 +218,9 @@ async fn create_command(
 
     let payload = body.payload.unwrap_or_else(|| serde_json::json!({}));
 
+    if !matches!(body.command.as_str(), "ping" | "status" | "run_diagnostic") || !payload.as_object().is_some_and(|p|p.is_empty()) {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"success":false,"error":"Only ping, status and run_diagnostic with an empty payload are allowed"})));
+    }
     match state.db.insert_agent_command(device_uuid, &body.command, payload).await {
         Ok(command_id) => (StatusCode::CREATED, Json(serde_json::json!({ "success": true, "command_id": command_id, "command": body.command }))),
         Err(e) => {
@@ -222,7 +236,7 @@ async fn ack_command(
     headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    if !verify_agent_token(&headers) {
+    if !crate::api::valid_agent_token(&state, &headers).await {
         return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "success": false })));
     }
 
@@ -234,8 +248,10 @@ async fn ack_command(
     let ack_status = body.get("status").and_then(|v| v.as_str()).unwrap_or("failed");
     let result = body.get("result").cloned().unwrap_or_else(|| serde_json::json!(null));
 
+    if !matches!(ack_status,"ok"|"failed") || result.to_string().len()>65536 {return (StatusCode::BAD_REQUEST,Json(serde_json::json!({"success":false,"error":"Invalid acknowledgement"})));}
     match state.db.ack_agent_command(command_uuid, ack_status, result).await {
-        Ok(_) => (StatusCode::OK, Json(serde_json::json!({ "success": true }))),
+        Ok(true) => (StatusCode::OK, Json(serde_json::json!({ "success": true }))),
+        Ok(false) => (StatusCode::CONFLICT, Json(serde_json::json!({"success":false,"error":"Command expired or acknowledgement conflicts"}))),
         Err(e) => {
             tracing::error!("Failed to ack agent command: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "success": false })))

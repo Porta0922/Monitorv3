@@ -58,15 +58,15 @@ export function ActivityPage() {
     try {
       setIsLoading(true);
       const [devicesData, liveData] = await Promise.all([
-        apiClient.getDevices().catch(() => [] as Device[]),
-        apiClient.getLiveDevices({ limit: 100 }).catch(() => []),
+        apiClient.getDevices(),
+        apiClient.getLiveDevices({ limit: 100 }),
       ]);
       setDevices(devicesData);
       setLiveDevices(liveData as LiveDeviceItem[]);
       setLastUpdatedAt(new Date().toISOString());
       setError('');
     } catch (err) {
-      setError('No se pudo cargar la telemetria en vivo. Revisa conexion API y servicio server.');
+      setError('No se pudo actualizar la actividad. Los datos anteriores pueden estar desactualizados.');
       console.error('Error loading live snapshot:', err);
     } finally {
       setIsLoading(false);
@@ -76,50 +76,50 @@ export function ActivityPage() {
   return (
     <AppShell
       currentPage="activity"
-      title="En Vivo"
-      subtitle="Ultima aplicacion detectada por nodo"
+      title="Actividad reciente"
+      subtitle="Última aplicación reportada por equipo · hasta 100 registros por consulta."
       noScroll
       actions={
         <div className="flex items-center gap-3">
-          <span className="font-mono text-[10px] text-[#5a6a90]">
+          <span className="font-sans text-[12px] text-[var(--palette-53685c)]">
             {lastUpdatedAt ? `Actualizado ${new Date(lastUpdatedAt).toLocaleTimeString()}` : ''}
           </span>
           <button
             onClick={loadLiveSnapshot}
-            className="rounded-full border border-[#00d9ff]/50 bg-[#00d9ff]/10 px-3 py-1.5 font-mono text-[10px] text-[#00d9ff] hover:border-[#00d9ff]"
+            className="rounded-full border border-[var(--palette-dfe7e3)]/50 bg-[var(--palette-17715a)]/10 px-3 py-1.5 font-sans text-[12px] text-[var(--palette-17715a)] hover:border-[var(--palette-dfe7e3)]"
           >
             Actualizar
           </button>
         </div>
       }
     >
-      <div className="h-[calc(100vh-190px)] overflow-hidden rounded-2xl border border-[#1a2748] bg-[linear-gradient(165deg,#0f1d43,#0b1329)] shadow-[0_14px_30px_rgba(0,0,0,0.35)] flex flex-col">
+      <div className="min-h-[calc(100vh-190px)] overflow-hidden rounded-2xl border border-[var(--palette-dfe7e3)] bg-[var(--surface)] shadow-sm flex flex-col">
         {/* Header */}
-        <div className="flex shrink-0 items-center justify-between border-b border-[#20315a] px-5 py-3">
+        <div className="flex shrink-0 items-center justify-between border-b border-[var(--palette-dfe7e3)] px-5 py-3">
           <div className="flex items-center gap-3">
-            <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#8ea0cf]">Nodos activos</p>
-            <span className="rounded-full border border-[#00d9ff]/40 bg-[#00d9ff]/10 px-2.5 py-0.5 font-mono text-[10px] text-[#00d9ff]">
+            <p className="font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">Equipos con actividad reportada</p>
+            <span className="rounded-full border border-[var(--palette-dfe7e3)]/40 bg-[var(--palette-17715a)]/10 px-2.5 py-0.5 font-sans text-[12px] text-[var(--palette-17715a)]">
               {currentByDevice.length} nodos
             </span>
           </div>
-          {error && <p className="font-mono text-[10px] text-red-300">{error}</p>}
+          {error && <p className="font-sans text-[12px] text-red-700">{error}</p>}
         </div>
 
         {/* Table */}
         <div className="flex-1 overflow-auto">
           {isLoading ? (
-            <p className="py-10 text-center font-mono text-[11px] text-[#5a6a90]">Cargando telemetria...</p>
+            <p className="py-10 text-center font-sans text-[12px] text-[var(--palette-53685c)]">Cargando telemetria...</p>
           ) : currentByDevice.length === 0 ? (
-            <p className="py-10 text-center font-mono text-[11px] text-[#5a6a90]">Sin telemetria en vivo. Verifica que el agente este ejecutandose.</p>
+            <p className="py-10 text-center font-sans text-[12px] text-[var(--palette-53685c)]">Sin telemetria en vivo. Verifica que el agente este ejecutandose.</p>
           ) : (
             <table className="w-full border-collapse">
               <thead>
-                <tr className="sticky top-0 z-10 border-b border-[#20315a] bg-[#0a122a]">
-                  <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Nodo</th>
-                  <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Estado</th>
-                  <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Aplicacion</th>
-                  <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Ventana activa</th>
-                  <th className="px-5 py-2.5 text-right font-mono text-[10px] uppercase tracking-[0.18em] text-[#7c90c1]">Hace</th>
+                <tr className="sticky top-0 z-10 border-b border-[var(--palette-dfe7e3)] bg-[var(--palette-f5f7f6)]">
+                  <th className="px-5 py-2.5 text-left font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">Nodo</th>
+                  <th className="px-5 py-2.5 text-left font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">Estado</th>
+                  <th className="px-5 py-2.5 text-left font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">Aplicacion</th>
+                  <th className="px-5 py-2.5 text-left font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">Última ventana reportada</th>
+                  <th className="px-5 py-2.5 text-right font-sans text-[12px] uppercase tracking-normal text-[var(--palette-53685c)]">Hace</th>
                 </tr>
               </thead>
               <tbody>
@@ -127,25 +127,25 @@ export function ActivityPage() {
                   <tr
                     key={live.device_id}
                     onClick={() => navigate(`/devices/${live.device_id}`)}
-                    className="cursor-pointer border-b border-[#1a2748] hover:bg-[#0f1c3a]"
+                    className="cursor-pointer border-b border-[var(--palette-dfe7e3)] hover:bg-[var(--palette-f5f7f6)]"
                   >
                     <td className="px-5 py-2.5">
-                      <p className="font-mono text-[11px] text-[#dce6ff]">{getNodeName(live.device_id)}</p>
+                      <p className="font-sans text-[12px] text-[var(--palette-53685c)]">{getNodeName(live.device_id)}</p>
                     </td>
                     <td className="px-5 py-2.5">
-                      <span className={`inline-flex rounded-full px-2.5 py-0.5 font-mono text-[10px] ${
+                      <span className={`inline-flex rounded-full px-2.5 py-0.5 font-sans text-[12px] ${
                         live.is_stale
-                          ? 'border border-red-500/40 bg-red-500/10 text-red-300'
+                          ? 'border border-red-500/40 bg-red-500/10 text-red-700'
                           : live.is_idle
-                          ? 'border border-[#ff9f1a]/40 bg-[#ff9f1a]/10 text-[#ff9f1a]'
-                          : 'border border-[#00ff88]/40 bg-[#00ff88]/10 text-[#00ff88]'
+                          ? 'border border-[var(--palette-dfe7e3)]/40 bg-[var(--palette-97621b)]/10 text-[var(--palette-97621b)]'
+                          : 'border border-[var(--palette-dfe7e3)]/40 bg-[var(--palette-31764d)]/10 text-[var(--palette-31764d)]'
                       }`}>
-                        {live.is_stale ? 'STALE' : live.is_idle ? 'IDLE' : 'ACTIVE'}
+                        {live.is_stale ? 'Sin señal reciente' : 'Reporte reciente'}
                       </span>
                     </td>
-                    <td className="px-5 py-2.5 font-mono text-[11px] text-[#dce6ff]">{live.app || '—'}</td>
-                    <td className="max-w-[380px] truncate px-5 py-2.5 font-mono text-[10px] text-[#8ea0cf]">{live.title || '(sin titulo)'}</td>
-                    <td className="px-5 py-2.5 text-right font-mono text-[11px] text-[#00d9ff]">{live.ago_sec}s</td>
+                    <td className="px-5 py-2.5 font-sans text-[12px] text-[var(--palette-53685c)]">{live.app || '—'}</td>
+                    <td className="max-w-[380px] truncate px-5 py-2.5 font-sans text-[12px] text-[var(--palette-53685c)]">{live.title || '(sin titulo)'}</td>
+                    <td className="px-5 py-2.5 text-right font-sans text-[12px] text-[var(--palette-17715a)]">{live.ago_sec}s</td>
                   </tr>
                 ))}
               </tbody>

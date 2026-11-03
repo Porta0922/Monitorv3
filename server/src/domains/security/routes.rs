@@ -19,6 +19,8 @@ struct SecurityQuery {
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
+        .route("/investigations", get(super::investigations::list).post(super::investigations::create))
+        .route("/investigations/:id/release", post(super::investigations::release))
         .route("/summary", get(security_summary))
         .route("/alerts", get(list_security_alerts).post(create_security_alert))
         .route("/alerts/:id/resolve", patch(resolve_alert))
@@ -34,12 +36,15 @@ async fn list_security_events(
     State(state): State<Arc<AppState>>,
     Query(q): Query<SecurityQuery>,
 ) -> impl IntoResponse {
-    let device_id = q.device_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
+    let device_id = match q.device_id.as_deref().map(Uuid::parse_str).transpose(){Ok(v)=>v,Err(_)=>return crate::domains::shared::data_response(json!({"error":"invalid device_id"}))};
     let from = parse_opt_datetime(&q.from).await;
     let to = parse_opt_datetime(&q.to).await;
+    if (q.from.is_some() && from.is_none()) || (q.to.is_some() && to.is_none()) || from.zip(to).is_some_and(|(a,b)|a>b) || q.hours.is_some_and(|h|!(1..=720).contains(&h)) {return crate::domains::shared::data_response(json!({"error":"invalid time range"}));}
+    let from=from.or_else(||q.hours.map(|h|Utc::now()-chrono::Duration::hours(h)));
+
     let severity = q.severity.as_deref();
     let mitre = q.mitre_technique.as_deref();
-    let limit = q.limit.unwrap_or(100);
+    let limit = q.limit.unwrap_or(100).clamp(1, 500);
 
     match state.db.get_security_events(device_id, from, to, severity, mitre, limit).await {
         Ok(events) => {
@@ -56,11 +61,11 @@ async fn list_security_events(
                     "created_at": ev.created_at.to_rfc3339()
                 })
             }).collect();
-            Json(json!({ "events": rows }))
+            (StatusCode::OK, crate::domains::shared::data_response(json!({ "events": rows }))).into_response()
         }
         Err(e) => {
             tracing::error!("Failed to fetch security events: {}", e);
-            Json(json!({ "events": [] }))
+            (StatusCode::INTERNAL_SERVER_ERROR, crate::domains::shared::data_response(json!({ "error": "Security events unavailable" }))).into_response()
         }
     }
 }
@@ -72,9 +77,12 @@ async fn list_security_events_for_device(
 ) -> impl IntoResponse {
     let from = parse_opt_datetime(&q.from).await;
     let to = parse_opt_datetime(&q.to).await;
+    if (q.from.is_some() && from.is_none()) || (q.to.is_some() && to.is_none()) || from.zip(to).is_some_and(|(a,b)|a>b) || q.hours.is_some_and(|h|!(1..=720).contains(&h)) {return crate::domains::shared::data_response(json!({"error":"invalid time range"}));}
+    let from=from.or_else(||q.hours.map(|h|Utc::now()-chrono::Duration::hours(h)));
+
     let severity = q.severity.as_deref();
     let mitre = q.mitre_technique.as_deref();
-    let limit = q.limit.unwrap_or(100);
+    let limit = q.limit.unwrap_or(100).clamp(1, 500);
 
     match state.db.get_security_events(Some(device_id), from, to, severity, mitre, limit).await {
         Ok(events) => {
@@ -91,11 +99,11 @@ async fn list_security_events_for_device(
                     "created_at": ev.created_at.to_rfc3339()
                 })
             }).collect();
-            Json(json!({ "events": rows }))
+            (StatusCode::OK, crate::domains::shared::data_response(json!({ "events": rows }))).into_response()
         }
         Err(e) => {
             tracing::error!("Failed to fetch security events for device: {}", e);
-            Json(json!({ "events": [] }))
+            (StatusCode::INTERNAL_SERVER_ERROR, crate::domains::shared::data_response(json!({ "error": "Security events unavailable" }))).into_response()
         }
     }
 }
@@ -104,15 +112,18 @@ async fn security_summary(
     State(state): State<Arc<AppState>>,
     Query(q): Query<SecurityQuery>,
 ) -> impl IntoResponse {
-    let device_id = q.device_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
+    let device_id = match q.device_id.as_deref().map(Uuid::parse_str).transpose(){Ok(v)=>v,Err(_)=>return crate::domains::shared::data_response(json!({"error":"invalid device_id"}))};
     let from = parse_opt_datetime(&q.from).await;
     let to = parse_opt_datetime(&q.to).await;
+    if (q.from.is_some() && from.is_none()) || (q.to.is_some() && to.is_none()) || from.zip(to).is_some_and(|(a,b)|a>b) || q.hours.is_some_and(|h|!(1..=720).contains(&h)) {return crate::domains::shared::data_response(json!({"error":"invalid time range"}));}
+    let from=from.or_else(||q.hours.map(|h|Utc::now()-chrono::Duration::hours(h)));
+
 
     match state.db.get_security_summary(device_id, from, to).await {
-        Ok(summary) => Json(json!(summary)),
+        Ok(summary) => crate::domains::shared::data_response(json!(summary)),
         Err(e) => {
             tracing::error!("Failed to fetch security summary: {}", e);
-            Json(json!({}))
+            crate::domains::shared::data_response(json!({}))
         }
     }
 }
@@ -129,10 +140,10 @@ pub async fn list_security_alerts(
     State(state): State<Arc<AppState>>,
     Query(q): Query<AlertsQuery>,
 ) -> impl IntoResponse {
-    let device_id = q.device_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
+    let device_id = match q.device_id.as_deref().map(Uuid::parse_str).transpose(){Ok(v)=>v,Err(_)=>return crate::domains::shared::data_response(json!({"error":"invalid device_id"}))};
     let severity = q.severity.as_deref();
     let resolved = q.resolved;
-    let limit = q.limit.unwrap_or(100);
+    let limit = q.limit.unwrap_or(100).clamp(1, 500);
 
     match state.db.get_security_alerts(device_id, severity, resolved, limit).await {
         Ok(alerts) => {
@@ -149,11 +160,11 @@ pub async fn list_security_alerts(
                     "created_at": a.created_at.to_rfc3339()
                 })
             }).collect();
-            Json(json!({ "alerts": rows }))
+            crate::domains::shared::data_response(json!({ "alerts": rows }))
         }
         Err(e) => {
             tracing::error!("Failed to fetch security alerts: {}", e);
-            Json(json!({ "alerts": [] }))
+            crate::domains::shared::data_response(json!({ "error":"Data unavailable", "alerts": [] }))
         }
     }
 }
@@ -181,12 +192,12 @@ pub async fn resolve_alert(
                 "resolved": alert.resolved,
                 "created_at": alert.created_at.to_rfc3339()
             });
-            (StatusCode::OK, Json(json!({ "success": true, "alert": json_alert })))
+            (StatusCode::OK, crate::domains::shared::data_response(json!({ "success": true, "alert": json_alert })))
         }
-        Ok(None) => (StatusCode::NOT_FOUND, Json(json!({ "success": false }))),
+        Ok(None) => (StatusCode::NOT_FOUND, crate::domains::shared::data_response(json!({ "success": false }))),
         Err(e) => {
             tracing::error!("Failed to resolve alert: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "success": false })))
+            (StatusCode::INTERNAL_SERVER_ERROR, crate::domains::shared::data_response(json!({ "success": false })))
         }
     }
 }
@@ -207,7 +218,7 @@ pub async fn create_security_alert(
 ) -> impl IntoResponse {
     let device_uuid = match Uuid::parse_str(&body.device_id) {
         Ok(u) => u,
-        Err(_) => return (axum::http::StatusCode::BAD_REQUEST, Json(json!({ "success": false, "error": "invalid device_id" }))),
+        Err(_) => return (axum::http::StatusCode::BAD_REQUEST, crate::domains::shared::data_response(json!({ "success": false, "error": "invalid device_id" }))),
     };
 
     match state.db.insert_security_alert(device_uuid, &body.alert_type, body.app_name.as_deref(), body.exe_hash.as_deref(), &body.description, &body.severity).await {
@@ -223,11 +234,11 @@ pub async fn create_security_alert(
                 "resolved": alert.resolved,
                 "created_at": alert.created_at.to_rfc3339()
             });
-            (StatusCode::OK, Json(json!({ "success": true, "alert": json_alert })))
+            (StatusCode::OK, crate::domains::shared::data_response(json!({ "success": true, "alert": json_alert })))
         }
         Err(e) => {
             tracing::error!("Failed to create security alert: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "success": false })))
+            (StatusCode::INTERNAL_SERVER_ERROR, crate::domains::shared::data_response(json!({ "success": false })))
         }
     }
 }

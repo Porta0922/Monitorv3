@@ -1,0 +1,37 @@
+# Build and exercise the agent without running desktop collectors or installing services.
+FROM rust:1.99.1-slim-bookworm@sha256:86234e857a413004348b471d11a4ebe1aa92d2eae2b6b143cac68fd1ac3c48be AS toolchain
+FROM toolchain AS debian
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config libssl-dev libx11-dev libxi-dev libxtst-dev libxcb1-dev \
+    libxrandr-dev libdbus-1-dev libpipewire-0.3-dev libclang-dev libgbm-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends libwayland-dev libxkbcommon-dev libegl-dev && rm -rf /var/lib/apt/lists/*
+ENV CARGO_BUILD_JOBS=1 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
+WORKDIR /app
+COPY Cargo.toml Cargo.lock rust-toolchain.toml shared_types.rs ./
+COPY agent/Cargo.toml agent/Cargo.toml
+COPY agent/src agent/src
+COPY agent/ui agent/ui
+COPY server/Cargo.toml server/Cargo.toml
+COPY server/src server/src
+COPY server/build.rs server/build.rs
+COPY server/migrations server/migrations
+COPY scripts/production/grants.sql scripts/production/grants.sql
+COPY manager/Cargo.toml manager/Cargo.toml
+COPY manager/src manager/src
+COPY remover/Cargo.toml remover/Cargo.toml
+COPY remover/src remover/src
+COPY tools/agent-transport-probe tools/agent-transport-probe
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    touch agent/src/*.rs agent/src/tasks/*.rs && \
+    cargo test --locked -p activity-monitor-agent --no-run && \
+    cargo test --locked -p activity-monitor-agent lifecycle_tests && \
+    cargo test --locked -p activity-monitor-agent policy_tests && \
+    cargo test --locked -p activity-monitor-agent durability_tests && \
+    cargo test --locked -p activity-monitor-agent ipc_tests && \
+    cargo test --locked -p activity-monitor-agent persistence_tests && \
+    cargo test --locked -p activity-monitor-agent web_lifecycle_tests && \
+    cargo test --locked -p activity-monitor-agent runtime_signal_tests && \
+    cargo build --locked -p activity-monitor-agent && \
+    cp /app/target/debug/activity-monitor-agent /usr/local/bin/activity-monitor-agent

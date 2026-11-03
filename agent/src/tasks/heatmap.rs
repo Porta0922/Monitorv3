@@ -10,29 +10,11 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
     }
 
     tokio::spawn(async move {
+        // Current native workers emit aggregate categories, not coordinates. Do not
+        // publish an empty/fixed-resolution grid as an observed desktop heatmap.
         loop {
+            crate::capture_diagnostics::record("heatmap","capture_error",Some("Coordinate capture is not available in this agent; aggregate input metrics remain available"));
             live_sleep(&context, TaskInterval::Heatmap).await;
-            
-            // Check if heatmap should be uploaded
-            if context.input_tracker.should_upload().await {
-                if let Some(heatmap) = context.input_tracker.get_heatmap_for_upload().await {
-                    tracing::debug!(
-                        "📊 Heatmap ready for upload: {} mouse moves, {} keyboard events",
-                        heatmap.stats.mouse_moves,
-                        heatmap.stats.keyboard_events
-                    );
-                    
-                    let event = context.build_event_envelope(
-                        "input_heatmap",
-                        1,
-                        serde_json::json!({
-                            "heatmap": heatmap,
-                        }),
-                    );
-
-                    context.publish_or_cache("input_heatmaps", event).await;
-                }
-            }
         }
     })
 }

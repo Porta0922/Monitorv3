@@ -1,5 +1,5 @@
 interface LineChartProps {
-  data: any[];
+  data: Record<string, number>[];
   dataKey: string;
   label: string;
   color?: string;
@@ -9,7 +9,7 @@ export function SimpleLineChart({
   data,
   dataKey,
   label,
-  color = '#00d9ff',
+  color = 'var(--palette-17715a)',
 }: LineChartProps) {
   if (!data || data.length === 0) return null;
 
@@ -50,7 +50,7 @@ export function SimpleLineChart({
           y1={y}
           x2={width - padding}
           y2={y}
-          stroke="#1a3a52"
+          stroke="var(--palette-1a3a52)"
           strokeWidth="1"
           strokeDasharray="4"
         />
@@ -59,7 +59,7 @@ export function SimpleLineChart({
           y={y + 4}
           textAnchor="end"
           fontSize="11"
-          fill="#8899bb"
+          fill="var(--palette-8899bb)"
         >
           {Math.round(value)}
         </text>
@@ -69,7 +69,7 @@ export function SimpleLineChart({
 
   return (
     <div className="h-full w-full">
-      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="h-full w-full rounded bg-[#0a122a]/60">
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="h-full w-full rounded bg-[var(--palette-f5f7f6)]/60">
         {/* Grid */}
         {gridLines}
 
@@ -79,7 +79,7 @@ export function SimpleLineChart({
           y1={padding}
           x2={padding}
           y2={height - padding}
-          stroke="#4CAF50"
+          stroke="var(--palette-4caf50)"
           strokeWidth="2"
         />
         <line
@@ -87,7 +87,7 @@ export function SimpleLineChart({
           y1={height - padding}
           x2={width - padding}
           y2={height - padding}
-          stroke="#4CAF50"
+          stroke="var(--palette-4caf50)"
           strokeWidth="2"
         />
 
@@ -110,7 +110,7 @@ export function SimpleLineChart({
           x={15}
           y={padding - 10}
           fontSize="12"
-          fill="#00d9ff"
+          fill="var(--palette-17715a)"
           fontWeight="bold"
         >
           {label}

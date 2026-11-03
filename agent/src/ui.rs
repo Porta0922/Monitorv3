@@ -14,9 +14,8 @@ use winapi::um::wingdi::{
 };
 use winapi::um::winuser::{
     self, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyIcon,
-    DispatchMessageW, GetCursorPos, GetDC, GetMessageW, GetWindowLongPtrW,
-    ICONINFO, IDI_APPLICATION, KillTimer, LoadIconW, MB_ICONINFORMATION,
-    MB_OK, MessageBoxW,
+    DispatchMessageW, GetCursorPos, GetDC, GetWindowLongPtrW,
+    ICONINFO, IDI_APPLICATION, KillTimer, LoadIconW,
     PostQuitMessage, RegisterClassW, ReleaseDC, SetForegroundWindow, SetTimer,
     SetWindowLongPtrW, TrackPopupMenu, TranslateMessage, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
     WNDCLASSW, GWLP_USERDATA, CreateIconIndirect,
@@ -29,7 +28,6 @@ use crate::web::WebState;
 const WM_TRAYICON: UINT = WM_APP + 1;
 const ID_TRAY: UINT = 1;
 const CMD_OPEN_STATUS: usize = 1002;
-const CMD_ABOUT: usize = 1005;
 const TIMER_ICON_UPDATE: usize = 2001;
 
 struct TrayContext {
@@ -100,8 +98,8 @@ fn create_colored_icon(r: u8, g: u8, b: u8) -> HICON {
     }
 }
 
-pub fn spawn_tray(state: Arc<WebState>) {
-    thread::spawn(move || {
+pub fn spawn_tray(state: Arc<WebState>) -> crate::native_worker::NativeWorker {
+    crate::native_worker::NativeWorker::spawn(move |stopping| {
         unsafe {
             let hinstance = GetModuleHandleW(std::ptr::null());
             if hinstance.is_null() {
@@ -167,7 +165,6 @@ pub fn spawn_tray(state: Arc<WebState>) {
             let popup = CreatePopupMenu();
             winuser::AppendMenuW(popup, MF_STRING, CMD_OPEN_STATUS, to_wide("Abrir Estado").as_ptr());
             winuser::AppendMenuW(popup, MF_SEPARATOR, 0, std::ptr::null());
-            winuser::AppendMenuW(popup, MF_STRING, CMD_ABOUT, to_wide("Acerca de").as_ptr());
 
             let ctx = Box::into_raw(Box::new(TrayContext {
                 web_state: state,
@@ -180,9 +177,13 @@ pub fn spawn_tray(state: Arc<WebState>) {
             SetTimer(window, TIMER_ICON_UPDATE, 2000, None);
 
             let mut msg: MSG = std::mem::zeroed();
-            while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) != 0 {
-                TranslateMessage(&msg);
-                DispatchMessageW(&msg);
+            while !stopping.load(std::sync::atomic::Ordering::Acquire) {
+                while winuser::PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, winuser::PM_REMOVE) > 0 {
+                    if msg.message == winuser::WM_QUIT { stopping.store(true, std::sync::atomic::Ordering::Release); break; }
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+                thread::sleep(std::time::Duration::from_millis(20));
             }
 
             KillTimer(window, TIMER_ICON_UPDATE);
@@ -197,8 +198,11 @@ pub fn spawn_tray(state: Arc<WebState>) {
                 DestroyIcon(ctx_box.icon_green);
                 DestroyIcon(ctx_box.icon_red);
             }
+            SetWindowLongPtrW(window, GWLP_USERDATA, 0);
+            winuser::DestroyWindow(window);
+            winuser::UnregisterClassW(class_name.as_ptr(), hinstance);
         }
-    });
+    })
 }
 
 unsafe extern "system" fn tray_wndproc(
@@ -250,16 +254,6 @@ unsafe extern "system" fn tray_wndproc(
             match cmd {
                 CMD_OPEN_STATUS => {
                     let _ = open::that("http://localhost:9876");
-                }
-                CMD_ABOUT => {
-                    let title = to_wide("ActivityMonitor Agent");
-                    let version = env!("CARGO_PKG_VERSION");
-                    let msg_text = format!(
-                        "ActivityMonitor Agent v{}\n\nAgente de monitoreo y seguridad.",
-                        version
-                    );
-                    let msg_wide = to_wide(&msg_text);
-                    MessageBoxW(hwnd, msg_wide.as_ptr(), title.as_ptr(), MB_OK | MB_ICONINFORMATION);
                 }
                 _ => {}
             }

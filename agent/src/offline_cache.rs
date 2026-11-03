@@ -17,60 +17,26 @@ pub struct OfflineCache {
 impl OfflineCache {
     /// Initialize offline cache with WAL connection reuse and encryption
     pub fn new(db_path: &str, encryption_key: &[u8; 32]) -> SqliteResult<Self> {
-        match Self::init_db(db_path) {
-            Ok(conn) => {
-                let key = Key::<Aes256Gcm>::from_slice(encryption_key);
-                let cipher = Aes256Gcm::new(key);
-                Ok(Self {
-                    conn: Arc::new(Mutex::new(conn)),
-                    cipher,
-                })
-            }
-            Err(e) => {
-                eprintln!("[!] Fallo crítico al inicializar base de datos SQLite en '{}': {}. Intentando autocuración...", db_path, e);
-                
-                // Intentar renombrar el archivo corrupto
-                if std::path::Path::new(db_path).exists() {
-                    let timestamp = chrono::Utc::now().timestamp();
-                    let backup_path = format!("{}.corrupt-{}", db_path, timestamp);
-                    eprintln!("[!] Respaldando archivo corrupto de base de datos en '{}'", backup_path);
-                    
-                    // También respaldar archivos WAL y SHM si existen
-                    let _ = std::fs::rename(db_path, &backup_path);
-                    let _ = std::fs::rename(format!("{}-wal", db_path), format!("{}-wal", backup_path));
-                    let _ = std::fs::rename(format!("{}-shm", db_path), format!("{}-shm", backup_path));
-                }
-                
-                // Intentar de nuevo tras la limpieza
-                let conn = Self::init_db(db_path)?;
-                let key = Key::<Aes256Gcm>::from_slice(encryption_key);
-                let cipher = Aes256Gcm::new(key);
-                
-                Ok(Self {
-                    conn: Arc::new(Mutex::new(conn)),
-                    cipher,
-                })
-            }
-        }
+        let conn = Self::init_db(db_path)?;
+        let key = Key::<Aes256Gcm>::from_slice(encryption_key);
+        Ok(Self { conn: Arc::new(Mutex::new(conn)), cipher: Aes256Gcm::new(key) })
     }
 
     fn init_db(db_path: &str) -> SqliteResult<Connection> {
         let conn = Connection::open(db_path)?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         
-        // Optimizar SQLite para velocidad extrema de escritura y concurrencia segura
+        // Durable acknowledgement boundary for local IPC and publisher retries.
         conn.execute_batch("
             PRAGMA journal_mode = WAL;
-            PRAGMA synchronous = NORMAL;
+            PRAGMA synchronous = FULL;
             PRAGMA temp_store = MEMORY;
         ")?;
 
         // Comprobación de integridad rápida de la base de datos
         if db_path != ":memory:" {
-            if let Ok(integrity) = conn.query_row("PRAGMA integrity_check(1);", [], |row| row.get::<_, String>(0)) {
-                if integrity != "ok" {
-                    return Err(rusqlite::Error::InvalidQuery);
-                }
-            }
+            let integrity = conn.query_row("PRAGMA integrity_check(1);", [], |row| row.get::<_, String>(0))?;
+            if integrity != "ok" { return Err(rusqlite::Error::InvalidQuery); }
         }
 
         // Create cache table
@@ -86,12 +52,14 @@ impl OfflineCache {
             [],
         )?;
         
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_events_pending ON cache_events(synced, timestamp)", [])?;
         Ok(conn)
     }
 
     /// Save event to offline cache with encryption
     pub async fn save_event(&self, event_type: &str, payload: &Value) -> SqliteResult<String> {
-        let event_id = Uuid::new_v4().to_string();
+        let event_id = payload.get("event_id").and_then(Value::as_str)
+            .and_then(|id| Uuid::parse_str(id).ok()).unwrap_or_else(Uuid::new_v4).to_string();
         let timestamp = Utc::now().to_rfc3339();
 
         // Generate random nonce
@@ -107,19 +75,14 @@ impl OfflineCache {
         // Reutilizar la conexión persistente con bloqueo thread-safe
         let conn = self.conn.lock().unwrap();
         
-        // Enforce maximum capacity of 20,000 unsynced events to protect disk space
-        if let Ok(count) = conn.query_row::<u64, _, _>("SELECT COUNT(*) FROM cache_events WHERE synced = 0", [], |r| r.get(0)) {
-            if count >= 20000 {
-                // Delete the oldest unsynced event (FIFO)
-                let _ = conn.execute(
-                    "DELETE FROM cache_events WHERE id = (
-                        SELECT id FROM cache_events WHERE synced = 0 ORDER BY timestamp ASC LIMIT 1
-                    )",
-                    [],
-                );
-                // Utilizar warn! a través de tracing si está disponible
-                tracing::warn!("Límite máximo de caché local alcanzado (20,000 eventos). Descartando el evento no sincronizado más antiguo.");
-            }
+        // Retries of an already accepted envelope are idempotent, including synced rows.
+        let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM cache_events WHERE id = ?1)", [&event_id], |r| r.get(0))?;
+        if exists { return Ok(event_id); }
+        let count: u64 = conn.query_row("SELECT COUNT(*) FROM cache_events WHERE synced = 0", [], |r| r.get(0))?;
+        if count >= 20000 {
+            return Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_FULL),
+                Some("Offline queue is full; pending events were preserved".into())));
         }
 
         conn.execute(
@@ -136,7 +99,7 @@ impl OfflineCache {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, event_type, encrypted_payload, nonce FROM cache_events 
-             WHERE synced = 0 ORDER BY timestamp ASC"
+             WHERE synced = 0 ORDER BY timestamp ASC LIMIT 256"
         )?;
 
         let events = stmt.query_map([], |row| {
@@ -146,6 +109,7 @@ impl OfflineCache {
             let nonce_bytes: Vec<u8> = row.get(3)?;
 
             // Decrypt
+            if nonce_bytes.len() != 12 { return Err(rusqlite::Error::InvalidQuery); }
             let nonce = Nonce::from_slice(&nonce_bytes);
             let plaintext = self.cipher.decrypt(nonce, ciphertext.as_ref())
                 .map_err(|_| rusqlite::Error::InvalidQuery)?;
@@ -331,5 +295,45 @@ mod tests {
         let _ = std::fs::remove_file(db_path);
         let _ = std::fs::remove_file(format!("{}-wal", db_path));
         let _ = std::fs::remove_file(format!("{}-shm", db_path));
+    }
+}
+
+#[cfg(test)]
+mod durability_tests {
+    use super::*;
+    #[tokio::test]
+    async fn reopen_preserves_ids_wrong_key_fails_and_full_queue_keeps_pending() {
+        let dir = std::env::temp_dir().join(format!("monitor-cache-{}", Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("queue.sqlite"); let path = path.to_str().unwrap();
+        let key = [7;32];
+        let id = Uuid::new_v4().to_string();
+        let event = serde_json::json!({"event_id":id,"payload":{"cpu":42}});
+        let cache = OfflineCache::new(path, &key).unwrap();
+        assert_eq!(cache.save_event("heartbeat", &event).await.unwrap(), id);
+        drop(cache);
+        let wrong = OfflineCache::new(path, &[8;32]).unwrap();
+        assert!(wrong.get_unsynced_events().await.is_err()); drop(wrong);
+        let cache = OfflineCache::new(path, &key).unwrap();
+        assert_eq!(cache.get_unsynced_events().await.unwrap()[0].2, event);
+        cache.save_event("heartbeat", &event).await.unwrap();
+        assert_eq!(cache.get_stats().await.unwrap(), (1,1));
+        cache.conn.lock().unwrap().execute_batch("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<19999)
+            INSERT INTO cache_events SELECT 'filler-'||x, 'test', x'00', x'00', '2026-01-01', 0 FROM n;").unwrap();
+        let next = serde_json::json!({"event_id":Uuid::new_v4()});
+        assert!(cache.save_event("heartbeat", &next).await.is_err());
+        assert_eq!(cache.get_stats().await.unwrap(), (20000,20000));
+        assert_eq!(cache.save_event("heartbeat", &event).await.unwrap(), id);
+        drop(cache);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn corrupted_cache_is_not_replaced() {
+        let path = std::env::temp_dir().join(format!("monitor-corrupt-{}.sqlite", Uuid::new_v4()));
+        let bytes = b"this is not a sqlite database";
+        std::fs::write(&path, bytes).unwrap();
+        assert!(OfflineCache::new(path.to_str().unwrap(), &[0;32]).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        std::fs::remove_file(path).unwrap();
     }
 }

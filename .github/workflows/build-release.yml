@@ -3,7 +3,10 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*' # El workflow solo se activará si haces un push de un tag que empiece con 'v'
+      - 'agent-v*'
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -21,14 +24,21 @@ jobs:
       - name: Build release
         shell: pwsh
         run: |
-          (Get-Content Cargo.toml -Raw) -replace '"agent", "server"', '"agent"' | Set-Content Cargo.toml
-          cargo build --release -p activity-monitor-agent
+          $manifest = Get-Content agent/Cargo.toml -Raw
+          $version = [regex]::Match($manifest, '(?m)^version\s*=\s*"([^"]+)"').Groups[1].Value
+          if ($env:GITHUB_REF_NAME -ne "agent-v$version") { throw 'Tag and agent version differ.' }
+          cargo build --locked --release -p activity-monitor-agent
+          if ($LASTEXITCODE -ne 0) { throw 'Agent build failed.' }
+          $hash = (Get-FileHash target/release/activity-monitor-agent.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  activity-monitor-agent.exe" | Set-Content target/release/SHA256SUMS -Encoding utf8
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: activity-monitor-agent.exe
-          path: target/release/activity-monitor-agent.exe
+          path: |
+            target/release/activity-monitor-agent.exe
+            target/release/SHA256SUMS
           if-no-files-found: error
 
   release:
@@ -54,5 +64,5 @@ jobs:
             Ver [`README.md`](https://github.com/Porta0922/Monitorv3#instalaci%C3%B3n) para instrucciones.
           files: |
             activity-monitor-agent.exe/*
-          draft: false
-          prerelease: false
+          draft: true
+          prerelease: ${{ startsWith(github.ref_name, 'agent-v0.') }}

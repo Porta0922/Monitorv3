@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use tokio::time::Duration;
 use crate::osquery_runner::OsqueryRunner;
 use super::{TaskContext, TaskInterval, live_sleep};
 
@@ -38,9 +37,7 @@ async fn resolve_osquery_scheduler_seconds(device_id: &str, auth_token: &str) ->
     };
 
     let server_url = raw_server_url.trim_end_matches('/');
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(4))
-        .build();
+    let client = crate::network_identity::client();
 
     let Ok(client) = client else {
         return local_fallback;
@@ -49,7 +46,7 @@ async fn resolve_osquery_scheduler_seconds(device_id: &str, auth_token: &str) ->
     let request = client
         .get(format!("{}/api/agent/osquery-policy", server_url))
         .query(&[("device_id", device_id)])
-        .header("x-agent-token", auth_token);
+        .header("x-agent-token", crate::network_identity::token(auth_token));
 
     let response = match request.send().await {
         Ok(resp) => resp,
