@@ -1370,7 +1370,9 @@ mod migration_tests {
             println!("Migration legacy={legacy}, elapsed={:?}", started.elapsed());
             let count: i64 = sqlx::query_scalar("SELECT count(*) FROM _sqlx_migrations WHERE success")
                 .fetch_one(&pool).await.unwrap();
-            assert_eq!(count, 3);
+            // The legacy fixture has three SQL files; the current application
+            // must apply its entire embedded migration history exactly once.
+            assert_eq!(count as usize, sqlx::migrate!("./migrations").iter().count());
             if legacy {
                 let duration: i64 = sqlx::query_scalar("SELECT SUM(duration_seconds)::bigint FROM activity_logs WHERE device_id=$1")
                     .bind(id).fetch_one(&pool).await.unwrap();

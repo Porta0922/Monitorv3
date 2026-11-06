@@ -183,15 +183,24 @@ mod web_lifecycle_tests {
     }
 
     #[tokio::test]
-    async fn authorization_is_exact_and_body_is_bounded() {
+    async fn authorization_requires_local_origin_and_exact_header() {
         for uri in ["/api/status?x=token=test-token", "/api/status?token=test-token-extra"] {
-            let request = Request::builder().uri(uri).body(Body::empty()).unwrap();
+            let request = Request::builder().uri(uri).header("Host", "localhost").body(Body::empty()).unwrap();
             assert_eq!(handle_request(request, state()).await.status(), StatusCode::UNAUTHORIZED);
         }
-        let request = Request::builder().uri("/api/status?token=test-token").body(Body::empty()).unwrap();
+        let request = Request::builder().uri("/api/status").header("Host", "localhost")
+            .header("Authorization", "Bearer test-token").body(Body::empty()).unwrap();
         assert_eq!(handle_request(request, state()).await.status(), StatusCode::OK);
-        let request = Request::builder().method("POST").uri("/api/help")
+        let request = Request::builder().method("POST").uri("/api/help").header("Host", "localhost")
             .header("Authorization", "Bearer test-token").body(Body::from(vec![b'a'; 16385])).unwrap();
-        assert_eq!(handle_request(request, state()).await.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(handle_request(request, state()).await.status(), StatusCode::METHOD_NOT_ALLOWED);
+        for host in ["attacker.invalid", "localhost.attacker.invalid"] {
+            let request = Request::builder().uri("/api/status").header("Host", host)
+                .header("Authorization", "Bearer test-token").body(Body::empty()).unwrap();
+            assert_eq!(handle_request(request, state()).await.status(), StatusCode::FORBIDDEN);
+        }
+        let request = Request::builder().uri("/api/status").header("Host", "localhost")
+            .header("Authorization", "Bearer test-token-extra").body(Body::empty()).unwrap();
+        assert_eq!(handle_request(request, state()).await.status(), StatusCode::UNAUTHORIZED);
     }
 }

@@ -1,5 +1,12 @@
 # Changelog
 
+## Compatibilidad y regresiones detectadas por CI — 2026-11-06
+
+- Enumeración Linux mediante metadatos XCB, retirando xcap y su dependencia PipeWire incompatible con Ubuntu 22.04; Wayland continúa explícitamente no soportado para captura global.
+- Prueba de vista local verifica Host/origen y Authorization exacto, rechaza tokens en query y escrituras; no reintroduce el contrato antiguo.
+- Fixture Windows conserva PSScriptRoot y permisos reales; prueba de migraciones verifica todas las migraciones embebidas, no solo los tres archivos heredados.
+- No se entrega un agente nuevo ni se declara CI completo aprobado hasta comprobar los destinos afectados.
+
 ## Dependencias Rust — bloque 1 en curso, 2026-11-06
 
 - reqwest 0.11 → 0.12.28 en agente, servidor y probe, habilitando JSON/native-tls sin funciones opcionales no utilizadas; eliminado h2 0.3.27 del lockfile.
