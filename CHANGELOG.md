@@ -1,5 +1,19 @@
 # Changelog
 
+## Dependencias Rust — bloque 1 en curso, 2026-11-06
+
+- reqwest 0.11 → 0.12.28 en agente, servidor y probe, habilitando JSON/native-tls sin funciones opcionales no utilizadas; eliminado h2 0.3.27 del lockfile.
+- dotenv → dotenvy en servidor; retirado env_logger sin uso del agente; async-executor 1.14.0 → 1.14.1.
+- SQLx limitado explícitamente a PostgreSQL, macros, migraciones y runtime/TLS necesarios.
+- Cargo check del workspace Windows aprobado. Auditoría posterior: un aviso de vulnerabilidad rsa en lockfile y cinco de mantenimiento; sin excepciones silenciadas. Cambios sin distribución ni actualización del agente instalado.
+
+## Endurecimiento de seguridad local — 2026-11-06
+
+- Cabeceras API/Nginx, límites por IP, bloqueo de archivos sensibles y registros sin query strings.
+- Auditoría de rechazos CSRF y resumen periódico de accesos denegados; configuración de desarrollo limitada a localhost y rechazo de debug en producción.
+- Avisos npm corregidos y dependencias directas sin uso retiradas. Matriz de autenticación y pruebas Nginx aisladas aprobadas.
+- Auditoría de historial, Rust e imágenes documentada en docs/SECURITY_REVIEW_2026-11-06.md; pendientes críticos explícitos. Cambios sin despliegue; agente sigue 0.1.0.
+
 ## Cierre de implementación UX — 2026-11-03
 
 - Consultas independientes, reintentos locales y conservación de datos por consulta; exportación fallida no oculta el detalle.

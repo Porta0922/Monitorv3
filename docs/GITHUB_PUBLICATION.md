@@ -1,5 +1,9 @@
 # Preparación de GitHub — 2026-11-03
 
+## Autorización permanente — 2026-11-06
+
+El usuario autoriza crear ramas, commits y PR en Monitorv3, publicar avances comprobados y fusionarlos cuando pase el CI. No reescribir historial ni publicar secretos. Mantener las restricciones del repositorio; publicar código no autoriza declarar producción ni distribuir paquetes privados. La conexión GitHub tiene permiso de escritura comprobado. La revocación del token histórico continúa pendiente del titular.
+
 ## Estado
 
 Código piloto 0.1.0 comprobado en Windows y stack local. El 2026-11-03 el usuario autorizó actualizar el repositorio existente Monitorv3 con el árbol limpio y conservar su historial. La revocación de credenciales heredadas queda pendiente por decisión expresa del usuario; no se considera realizada. Producción no aprobada. Publicar como trabajo en desarrollo; no anunciar Ubuntu/Debian, firma o recuperación completa como certificados.

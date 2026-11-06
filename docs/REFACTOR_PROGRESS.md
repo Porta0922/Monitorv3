@@ -369,3 +369,11 @@ Retirados 73 archivos obsoletos y los crates manager/remover. Ajustados Cargo.lo
 ## 2026-11-03 — Bloque 8: implementación UX
 
 Cargas independientes y estados por consulta, filtros persistentes, tablas paginadas, diagnóstico desplegable, ayuda integrada, accesibilidad estructural y permisos comprensibles. Ver [DASHBOARD_UX.md](DASHBOARD_UX.md). Build TypeScript/Vite y ESLint focalizado; regresión Chromium sintética con revisión visual de capturas, ambos temas y tres tamaños. El bloque 9 conserva aceptación humana, lector de pantalla real e integración multiplataforma. No se modificó la versión del agente ni se desplegó el dashboard sobre Docker.
+
+
+## 2026-11-04 — Ventanas del piloto atrasadas por servidor detenido
+
+Docker Desktop estaba sin motor Linux disponible; servicio y sesión del agente seguían activos. Al iniciar Docker se confirmó captura reciente y reenvío FIFO de la cola persistente. Pendientes del servicio: 5.439 → 0; API final: 12 aplicaciones recientes a las 20:03:37 UTC, última instantánea 20:03:05 UTC. No se modificó ni reinstaló el agente. Registrada mejora de tiempo de drenaje en bloque 6 y guía [PILOT_TROUBLESHOOTING.md](PILOT_TROUBLESHOOTING.md). No equivale a certificar todos los escenarios de desconexión prolongada.
+## 2026-11-06 — Seguridad: endurecimiento y revisión focalizada
+
+Matriz aislada de sesiones/MFA/roles/CSRF aprobada, 7 pruebas unitarias de configuración/rutas aprobadas y prueba Nginx ampliada aprobada (HTTPS, archivos sensibles, límite de login, registros sin query). Build frontend/servidor aprobado; lint global conserva un fallo en AdministrationPage.tsx. npm audit sin avisos conocidos después de correcciones. Escaneo Rust e imágenes detectó pendientes; token histórico sin revocación confirmada. Informe completo: [SECURITY_REVIEW_2026-11-06.md](SECURITY_REVIEW_2026-11-06.md). Cambios locales sin despliegue/publicación. Producción no aprobada.

@@ -29,7 +29,7 @@ async fn authorize(State(state): State<Arc<AppState>>, mut request: Request, nex
         Ok(value)=>value,Err(_)=>return (StatusCode::SERVICE_UNAVAILABLE,axum::Json(serde_json::json!({"error":"Authentication unavailable"}))).into_response()
     };
     if let Some(session)=&session {
-        if !matches!(*request.method(),Method::GET|Method::HEAD|Method::OPTIONS) && !crate::human_sessions::csrf_valid(request.headers(),session){return (StatusCode::FORBIDDEN,axum::Json(serde_json::json!({"error":"Invalid request verification"}))).into_response();}
+        if !matches!(*request.method(),Method::GET|Method::HEAD|Method::OPTIONS) && !crate::human_sessions::csrf_valid(request.headers(),session){let _=tokio::time::timeout(std::time::Duration::from_millis(500),crate::human_sessions::audit(&state,&session.claims.sub,"auth.csrf.rejected",&path,"forbidden")).await;return (StatusCode::FORBIDDEN,axum::Json(serde_json::json!({"error":"Invalid request verification"}))).into_response();}
         let internal=match state.auth.issue_role_token(&session.claims.sub,session.claims.role,1){Ok(token)=>token,Err(_)=>return StatusCode::SERVICE_UNAVAILABLE.into_response()};
         request.headers_mut().insert(axum::http::header::AUTHORIZATION,format!("Bearer {internal}").parse().expect("Generated token header"));
         request.extensions_mut().insert(session.clone());
@@ -200,6 +200,12 @@ mod tests {
 
 
 
+async fn security_headers(request:Request,next:Next)->Response {
+    let mut response=next.run(request).await;
+    for (name,value) in [("cache-control","no-store"),("x-content-type-options","nosniff"),("x-frame-options","DENY"),("referrer-policy","no-referrer"),("content-security-policy","default-src 'none'; frame-ancestors 'none'; base-uri 'none'")] {response.headers_mut().insert(axum::http::HeaderName::from_static(name),axum::http::HeaderValue::from_static(value));}
+    response
+}
+
 pub fn create_router(state: Arc<AppState>) -> Router {
     let cors = CorsLayer::new();
     let cors = cors
@@ -263,4 +269,5 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .layer(middleware::from_fn_with_state(state, authorize))
         .layer(axum::extract::DefaultBodyLimit::max(2*1024*1024))
         .layer(cors)
+        .layer(middleware::from_fn(security_headers))
 }

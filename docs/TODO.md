@@ -1,236 +1,142 @@
-# TODO — Preparación para producción
+# TODO — Ruta de cierre hacia producción
 
-Actualizado: 2026-11-03. Plan vigente para Monitor: agente nativo Windows/Ubuntu/Debian, RabbitMQ, servidor Rust, PostgreSQL/TimescaleDB y dashboard Docker.
+Actualizado: **2026-11-06**. Estado: **piloto controlado; producción no aprobada**. Agente **0.1.0**. Este es el único plan activo. El [plan anterior completo](TODO_PRODUCCION_HISTORICO_2026-11-06.md) conserva el detalle y las evidencias para consulta, no como segunda lista de ejecución.
 
-Este documento reemplaza el orden de trabajo anterior. El [TODO histórico](TODO_REFACTOR_HISTORICO_2026-10-28.md) se conserva completo como referencia, no como segunda lista activa. [REFACTOR_PROGRESS.md](REFACTOR_PROGRESS.md) y [P4_VALIDATION.md](P4_VALIDATION.md) conservan la evidencia de cambios y comprobaciones anteriores.
+Base: [informe de seguridad](SECURITY_REVIEW_2026-11-06.md), [progreso](REFACTOR_PROGRESS.md) y [diagnóstico del piloto](PILOT_TROUBLESHOOTING.md). Las correcciones de seguridad del 6 de noviembre están locales, sin publicar ni desplegar.
 
-## Estado de partida
+## Ya completado: conservar, no rehacer
 
-- [x] Limpieza del árbol heredado: 73 archivos retirados, workspace y Docker ajustados; alcance y límites en [REPOSITORY_LAYOUT.md](REPOSITORY_LAYOUT.md). No equivale a certificación productiva.
+- [x] Identidad individual y transporte autenticado de agentes; comprobación aislada.
+- [x] Sesiones, MFA administrativo, roles, CSRF, revocación y auditoría; matriz aislada aprobada.
+- [x] Renovación del dashboard y consistencia de métricas para el alcance UTC del candidato 0.1.
+- [x] Endurecimiento local de Nginx/API, bloqueo de archivos, límites y registros seguros; comprobaciones focalizadas aprobadas.
+- [x] Corrección de avisos npm detectados y build aprobado.
+- [x] Inventario inicial de secretos, dependencias Rust e imágenes; hallazgos pendientes documentados.
 
-- Piloto limpio 0.1.0 instalado y recibiendo recursos, actividad, ventanas y contadores de sesión. Datos anteriores descartados por autorización explícita; ver REFACTOR_PROGRESS.md (2026-11-03).
-- Dashboard renovado: resumen por equipo, actividad agrupada, búsqueda, paginación, secciones separadas y tema oscuro predeterminado.
-- Diecisiete migraciones aplicadas sobre la instalación limpia; no certifica migración de volúmenes heredados.
-- Autenticación, roles, cifrado de caché/IPC, scripts de ciclo de vida y mantenimiento tienen implementación; su presencia no equivale a validación completa.
-- MSI local construido y utilizado, sin firma de producción. No redistribuir el paquete del piloto: contiene credenciales locales.
-- No se dispone de una copia representativa de la base anterior. No bloquear la instalación nueva por ese motivo; no certificar migración de legado sin evidencia.
-- Redis está desplegado, pero no se identificó uso funcional en el servidor revisado: decidir su necesidad antes de convertirlo en requisito operativo.
-- Estado global: **piloto controlado; producción no aprobada**. No hay porcentaje de preparación fiable hasta fijar alcance y cerrar los criterios siguientes.
+Estas marcas acreditan implementación y evidencia acotada, no aceptación productiva del despliegue final.
 
-## Versionado y documentación permanente
+## Orden sugerido
 
-Agente en desarrollo: **0.1.0**, fuente de verdad `agent/Cargo.toml`. Seguir [VERSIONING.md](VERSIONING.md). Actualizar README, TODO y CHANGELOG junto con cambios de comportamiento, instalación, configuración o alcance. Los cambios exclusivos del dashboard no incrementan la versión del agente.
+| Orden | Bloque | Resultado |
+|---|---|---|
+| 1 | Credenciales y dependencias | Riesgos conocidos resueltos y bases compatibles |
+| 2 | Despliegue y alertas | Configuración reproducible y servicios protegidos |
+| 3 | Privacidad, retención y recuperación | Datos acotados y respaldo recuperable |
+| 4 | Agente multiplataforma | Captura, persistencia y recuperación por plataforma |
+| 5 | Instaladores y actualización | Paquetes genéricos verificables y rollback |
+| 6 | Seguridad y aceptación del dashboard | Frontend final comprobado |
+| 7 | Candidato y piloto integrado | Evidencia de todo el sistema sobre una versión concreta |
+| 8 | Publicación y salida gradual | Artefactos aprobados, soporte y reversión |
 
-- [x] Piloto Windows 0.1.0: binario/MSI nuevos, hashes y versión reportada comprobados. Evidencia: REFACTOR_PROGRESS.md (2026-11-03). Paquete privado sin firma; DEB y release pública siguen en bloque 7.
-- [ ] Para equipos que deban conservar datos, diseñar y ensayar transición 3.x a 0.1.x. En este piloto se eligió desinstalación y limpieza autorizada, sin forzar downgrade; no se certifica una migración que conserve identidad/claves/outbox.
+Primero implementar cada bloque y luego ejecutar sus comprobaciones focalizadas. Reservar la campaña completa para el bloque 7 y repetir después solo lo afectado por cambios. La revocación del token se atiende inmediatamente, pero no bloquea trabajo local independiente. Kubernetes queda como evolución posterior.
 
-## Reglas de ejecución y cierre
+## 1. Credenciales y dependencias — siguiente bloque
 
-Primero completar el código y la configuración del bloque; después realizar su validación focalizada. Reservar la campaña completa para el bloque 9 sobre una versión candidata estable. No repetir toda la matriz por cada modificación pequeña.
+- [ ] Confirmar revocación del token GitHub histórico de usb/agent-config.json y revisar su uso; rotar credenciales antiguas todavía activas. Requiere acceso del titular. Borrar archivos o commits no revoca tokens.
+- [ ] Evaluar limpieza posterior del historial/copias accesibles; no reescribir ni hacer force-push automáticamente. Mantener el repositorio existente como destino acordado.
+- [ ] Migrar reqwest/hyper/h2 a una combinación compatible corregida; revisar agente, servidor y probe. Avance 2026-11-06: reqwest 0.12.28 con JSON/native-tls y sin HTTP/2 opcional; h2 0.3.27 eliminado del lockfile. Cargo check Windows y recorrido de identidad/transporte aislado aprobados; Linux pendiente de CI.
+- [ ] Identificar features/targets que incorporan rsa y eliminarlo si no se usa, o documentar exposición y tratamiento del aviso sin parche. No silenciarlo por estar ausente del árbol Windows activo.
+- [ ] Resolver dependencias sin mantenimiento y paquete retirado del registro; revisar Windows/Linux. Avance: dotenv sustituido por dotenvy, env_logger sin uso retirado del agente y async-executor actualizado a 1.14.1. Persisten cinco avisos de mantenimiento en el análisis Rust.
+- [ ] Actualizar bases y servicios Docker soportados, fijar digests y reconstruir. Revisar compatibilidad y ruta de actualización de RabbitMQ/PostgreSQL/Timescale antes de modificar volúmenes. Conservar RabbitMQ.
+- [ ] Retirar dependencias sin uso demostrado. Decidir retiro de Redis, actualmente sin función identificada; si se utiliza, justificarlo y definir ACL/persistencia.
+- [ ] Generar inventario de componentes/SBOM y volver a escanear artefactos nuevos, registrando herramientas, fecha y versiones.
 
-Cada casilla cerrada debe enlazar un cambio o evidencia. Cada bloque requiere implementación, comprobación de su criterio de cierre y documentación operativa. Una prueba histórica solo cubre la revisión y el entorno indicados. Si un alcance se excluye, registrar explícitamente la decisión y el límite visible para el usuario; no marcarlo como implementado.
+**Cierre:** correcciones comprobadas y hallazgos clasificados. Riesgos críticos/altos explotables bloquean producción; cualquier excepción requiere responsable, mitigación, motivo y vencimiento. No confundir avisos de escáner con explotación demostrada ni análisis con corrección.
 
-No publicar ni reemplazar el repositorio remoto, distribuir secretos o desplegar en producción por actualizar este TODO. Se conserva la condición acordada: funcionamiento probado antes de la publicación final.
+## 2. Despliegue seguro y alertas
 
-| Orden | Bloque | Prioridad | Estado |
-|---|---|---|---|
-| 1 | Despliegue y configuración seguros | Bloqueante | En curso; perfil candidato y validación de arranque |
-| 2 | Identidad y transporte de agentes | Bloqueante | Implementación cerrada; recorrido aislado aprobado |
-| 3 | Acceso humano, sesiones y auditoría | Bloqueante | Implementación cerrada; comprobación aislada aprobada |
-| 4 | Exactitud y completitud funcional | Bloqueante | Cerrado para candidato UTC 0.1; evidencia aislada |
-| 5 | Privacidad, retención y restauración | Bloqueante | Parcial, falta validación integrada |
-| 6 | Agente multiplataforma y recuperación | Bloqueante por plataforma | Parcial, Windows en piloto |
-| 7 | Instaladores, actualización y releases | Bloqueante | Paquete local; firma pendiente |
-| 8 | UX, accesibilidad y operación diaria | Necesario para aceptación | Implementación y comprobación focalizada cerradas; aceptación en bloque 9 |
-| 9 | Validación integrada y piloto de aceptación | Puerta de salida | Evidencia parcial |
-| 10 | Operación y autorización de producción | Puerta final | Pendiente |
+- [ ] Arrancar perfil productivo completo desde configuración limpia, sin defaults ni secretos en imágenes, paquetes, repositorio o logs.
+- [ ] Verificar HTTPS/AMQPS, confianza, nombres, renovación y vencimiento; comprobar cookies Secure/HttpOnly/SameSite en el destino real.
+- [ ] Verificar redes/firewall y ausencia de bypass del proxy; DB/Redis internos, broker limitado a agentes y administración restringida.
+- [ ] Comprobar privilegios efectivos de aplicación/migración/mantenimiento DB, permisos de secretos, usuarios de contenedor, capacidades y límites de recursos.
+- [ ] Confirmar debug desactivado, errores sin información sensible y rotación/retención de logs; documentar rotación de secretos y arranque Docker tras reboot.
+- [ ] Configurar alertas externas por abuso, accesos denegados, API/consumidores caídos, cola/DLQ, disco/DB, mantenimiento, backups y certificados; asignar receptor y respuesta.
+- [ ] Ajustar límites para oficinas detrás de NAT. Antes de múltiples réplicas, coordinar límites actualmente mantenidos por instancia.
 
-Regla de seguimiento: cerrar cada bloque con su implementación y las comprobaciones necesarias, informar la evidencia y dejar una lista concreta de lo que sigue pendiente. No presentar un avance parcial como cierre del bloque.
+**Cierre:** despliegue reproducible, inventario de puertos/privilegios y recepción de alertas demostrada. La configuración escrita no acredita su aplicación real.
 
-## 1. Despliegue y configuración seguros
+## 3. Privacidad, retención y recuperación
 
-- [x] Crear configuración candidata separada de desarrollo/piloto, con archivos de secretos sin valores de ejemplo. Ver PRODUCTION_DEPLOYMENT.md; no desplegada ni certificada.
-- [ ] Fallar al arrancar si faltan secretos, son valores de ejemplo o la configuración de producción es incoherente; corregir ejemplos inseguros y variables obsoletas.
-- [ ] Exponer únicamente los accesos necesarios: dashboard/API por proxy; PostgreSQL y Redis internos; RabbitMQ limitado a la red de agentes y administración restringida.
-- [ ] Definir redes, reglas de firewall y accesos administrativos, incluida la ausencia de rutas que eludan el proxy.
-- [ ] Separar cuentas de aplicación, migración y mantenimiento en PostgreSQL y aplicar privilegios mínimos.
-- [ ] Gestionar secretos mediante archivos/mecanismo protegido; excluirlos de imágenes, repositorio, logs, manifiestos y paquetes genéricos. Documentar rotación.
-- [ ] Reducir privilegios de contenedores, capacidades y escrituras; definir límites de recursos, rotación de logs y arranque del motor Docker en el anfitrión.
-- [ ] Revisar imágenes/dependencias soportadas, fijar versiones/digests y definir política de parches y escaneo de vulnerabilidades.
-- [ ] Decidir y documentar el uso de Redis; retirarlo del perfil de producción si no aporta una función, o configurar autenticación, ACL y persistencia según su uso real.
+- [ ] Definir mínimos de captura y exclusión/redacción de títulos, rutas y datos sensibles antes de transmitir; documentar finalidad, acceso y aviso a usuarios.
+- [ ] Aprobar retención por actividad, recursos, sesiones, inventario, USB/WiFi, auditoría y seguridad; separar detalle, resumen, archivo y backup.
+- [ ] Resolver compatibilidad Timescale/columnstore/workers y mantenimiento con chunks comprimidos, lotes, concurrencia, reintentos, datos tardíos y deduplicación.
+- [ ] Decidir archivo histórico adicional; si hace falta, implementar cifrado, catálogo, verificación, recuperación y vencimiento.
+- [ ] Automatizar backups cifrados fuera del anfitrión, incluyendo configuración y claves necesarias; fijar RPO/RTO y alertas.
+- [ ] Restaurar en entorno limpio y comprobar identidades, políticas y datos; medir recuperación y verificar límites antes de activar eliminación productiva.
 
-**Cierre:** despliegue reproducible desde configuración nueva, sin credenciales predeterminadas ni exposición de servicios internos, con inventario de puertos, secretos y privilegios documentado.
+**Cierre:** retención acotada y restauración demostrada. Sin copia heredada representativa, comprobar instalación nueva y fixtures sin certificar una migración real.
 
-Avance 2026-10-29: lectura de secretos desde archivos, validaciones de arranque productivo, cuentas administradas obligatorias, CORS del mismo origen, overlay aislado y generador Linux sin sobreescritura. Incremento de tres puntos: roles DB separados con migrador independiente; servidor/dashboard/mantenimiento sin root; HTTPS/AMQPS configurados en el candidato. Quedan abiertos el arranque completo Linux, certificados reales/renovación, acceso remoto e identidad de agentes, escaneo y validación integrada; el bloque no está cerrado. Ver PRODUCTION_DEPLOYMENT.md.
+## 4. Agente y recuperación multiplataforma
 
-Evidencia acotada de estos tres puntos: configuración Rust (3 casos), Compose renderizado, doce migraciones y diez trabajos de mantenimiento con permisos limitados sobre DB vacía aislada, y Nginx sin root con HTTPS/cabeceras y certificado temporal aprobados. No sustituye la validación completa del perfil ni permite cerrar los criterios compuestos de este bloque.
+- [ ] Fijar versiones Windows/Ubuntu/Debian, incluyendo Ubuntu 22.04 mientras forme parte del alcance; matriz servicio/sesión, X11/Wayland y RDP.
+- [ ] Implementar drenaje adaptativo acotado tras cortes largos, sin pérdida ni snapshots antiguos sobrescribiendo estado actual.
+- [ ] Revisar IPC autenticado, claves, origen/replay, secuencias, permisos locales y separación servicio/usuario; vista local solo loopback/lectura.
+- [ ] Completar recuperación SCM/systemd, reboot, parada intencional, shutdown y cierre de procesos/hooks; usuarios limitados, sesiones múltiples y autostart RDP/XDG.
+- [ ] Cubrir desconexión, cola llena/corrupta, disco lleno, permisos, identidades corruptas y escritura interrumpida, sin pérdida silenciosa.
+- [ ] Medir CPU/RAM/disco/red/caché y definir límites; verificar captura al aparecer/desaparecer escritorio/dispositivos, sin actividad ficticia.
 
-## 2. Identidad y transporte de agentes
+**Cierre:** evidencia nativa de cada plataforma anunciada. Conservar límites visibles de Wayland y alcance UTC; no anunciar captura no implementada ni extrapolar evidencia Windows a Linux.
 
-- [x] Configurar HTTPS y AMQPS con validación de certificados, nombres de servidor y renovación; impedir conexiones inseguras en modo producción.
-- [x] Sustituir el token global compartido por una identidad autenticada y revocable por equipo; definir enrolamiento inicial de uso limitado y su recuperación.
-- [x] Vincular credencial, identidad del equipo y autorización de publicación/consulta: un agente no debe suplantar otro UUID ni leer comandos o políticas ajenos.
-- [x] Aplicar permisos mínimos por agente en RabbitMQ y separar publicación de administración/consumo.
-- [x] Implementar rotación y revocación de credenciales sin perder identidad ni eventos pendientes; definir qué sucede con equipos offline y certificados vencidos.
-- [x] Revisar límites de mensajes/peticiones, tipos, reloj, secuencia, replay y abuso de conexiones; conservar deduplicación entre reintentos.
-- [x] Exigir secreto aleatorio propio para caché/IPC en producción; eliminar fallback derivado de identificadores públicos o constantes de desarrollo. Definir custodia y recuperación de claves.
+## 5. Instaladores y actualización segura
 
-Cierre de implementación 2026-10-29: identidad HTTP/AMQPS, enrolamiento de un solo uso con recuperación idempotente, permisos mínimos del broker por credencial, comprobación del UUID antes de persistir, revocación con cierre/reconciliación, renovación automática, secretos locales cifrados y bloqueo entre procesos. Gestión administrativa en Diagnóstico; herramientas de configuración y renovación TLS con rollback. README y AGENT_IDENTITY.md actualizados.
+- [ ] Generar MSI/DEB desde checkout limpio, con versiones, manifiestos, hashes y análisis de reproducibilidad.
+- [ ] Separar paquete genérico y enrolamiento; excluir credenciales del piloto y secretos compartidos.
+- [ ] Configurar firma Windows y confianza del canal Linux; custodiar claves y verificar publicador.
+- [ ] Validar instalación/reparación/actualización, downgrade rechazado, rollback y desinstalación con sesiones activas; conservar identidad/claves/outbox según política.
+- [ ] Cubrir cortes, journals, WAL, symlinks/reparse/hardlinks, purga explícita y archivos ajenos; definir transición de legado únicamente para escenarios soportados.
+- [ ] Preparar canales piloto/estable y notas. Mantener autoactualización remota deshabilitada hasta completar firma, autorización y rollback.
 
-Evidencia: servidor/agente/publicador compilan; dashboard construye; recorrido aislado con DB/broker nuevos y certificados sintéticos aprobado, incluyendo pérdida de respuestas, reanudación, acceso ajeno, prohibición de consumo/configuración y revocación de conexión abierta. El piloto no fue actualizado. Las marcas de este bloque acreditan implementación y esa evidencia local: no certifican despliegue real. Certificados/emisor, operación de renovación, adopción en servicios Windows/Linux y aceptación global siguen como puertas de los bloques 6, 9 y 10.
+**Cierre:** paquetes firmados sin secretos y ciclo de vida comprobado por destino. Seguir [VERSIONING.md](VERSIONING.md); continuar serie 0.1.x durante piloto y versionar cambios del agente distribuido.
 
-**Cierre:** un agente válido publica solo para su equipo; uno revocado, con certificado inválido o identidad ajena es rechazado. La rotación conserva los pendientes y no abre acceso administrativo.
+## 6. Dashboard: seguridad y aceptación
 
-## 3. Acceso humano, sesiones y auditoría
+- [x] Corregir lint de AdministrationPage.tsx; reinicio del estado trasladado a la acción de actualizar. Lint global aprobado; aceptación final del frontend sigue en los puntos siguientes.
+- [ ] Probar payloads XSS en títulos, nombres, tablas, búsquedas y exportaciones; verificar escape/CSP en navegador, no solo cabeceras.
+- [ ] Inspeccionar assets y almacenamiento: sin API keys, secretos ni sesión accesible a JavaScript; verificar cierre/revocación y errores seguros.
+- [ ] Recorrer roles, datos vacíos/atrasados/error, temas, móvil, teclado y lector de pantalla; completar aceptación humana.
+- [ ] Confirmar que auditoría y pantalla de seguridad no divulgan secretos ni datos fuera del rol; conservar protección de fórmulas CSV.
 
-- [x] Configurar cuentas individuales con Argon2id y eliminar el usuario compartido de bootstrap del uso diario.
-- [x] Completar roles viewer/operator/admin por ruta y acción, incluidos alias `/api`, exportaciones, políticas, comandos, investigaciones y DLQ.
-- [x] Limitar intentos de login y abuso de API, con respuestas que no revelen cuentas válidas y alertas de intentos repetidos.
-- [x] Revisar almacenamiento de JWT en localStorage; implementar sesiones protegidas y revocables. Si se usan cookies, incluir HttpOnly/Secure/SameSite y protección CSRF coherente.
-- [x] Restringir CORS a los orígenes autorizados; configurar CSP, protección de framing, tipo de contenido y HSTS cuando HTTPS esté operativo.
-- [x] Incorporar MFA para administradores o SSO con MFA, definiendo recuperación y cuenta de emergencia protegida.
-- [x] Verificar deshabilitación, reducción de rol, expiración y revocación de sesiones; configuración de cuentas inválida debe fallar de forma cerrada.
-- [x] Auditar login y operaciones sensibles con actor, equipo, acción, resultado y fecha; excluir secretos y definir acceso/retención del registro.
-- [x] Revisar que consultas, búsqueda, respuestas, exportaciones y logs no filtren datos o secretos fuera del permiso concedido; proteger CSV ante fórmulas ejecutables.
+**Cierre:** lint/build y pruebas focalizadas aprobados, aceptación registrada y límites explícitos. No rehacer la renovación UX ya terminada.
 
-**Cierre:** matriz de permisos y revocación comprobada, acceso administrativo reforzado, intentos abusivos limitados y operaciones sensibles trazables.
+## 7. Candidato y piloto integrado
 
-Cierre de implementación 2026-10-30: migración 0015, cookies opacas revocables, CSRF, MFA TOTP administrativo, cuentas con generación de sesiones, límites de login/API, pantalla de sesiones, auditoría y protección CSV/CSP. Procedimientos: [ACCESS_CONTROL.md](ACCESS_CONTROL.md). Evidencia: [P4_VALIDATION.md](P4_VALIDATION.md), recorrido `tests/identity-stack.py --human-only`, vector TOTP, escape CSV, build del dashboard, Nginx HTTPS y helper Linux aislado. El piloto permanece intacto.
+- [ ] Fijar commit, versiones/hashes, plataformas, cantidad de equipos, duración, recursos y criterios de éxito antes del ensayo.
+- [ ] Ejecutar CI por destino y despliegue limpio con artefactos del candidato; migraciones nuevas y escenarios heredados representativos disponibles.
+- [ ] Verificar recorrido agente → RabbitMQ → DB → dashboard: ACK tras commit, duplicados, concurrencia, rollback, DLQ, eventos inválidos/tardíos y recuperación.
+- [ ] Ejecutar matriz final de seguridad: roles, MFA, revocación, suplantación, inyección, XSS, CSRF, límites, archivos/permisos, secretos y dependencias.
+- [ ] Medir carga sostenida, latencia, recursos, crecimiento DB, colas y recuperación con parámetros representativos.
+- [ ] Ejecutar piloto Windows/Ubuntu/Debian con desconexiones, reinicios, políticas, actualización, restauración y aceptación UX.
+- [ ] Registrar defectos y regresión focalizada; emitir informe único con evidencia, límites y riesgos residuales.
 
-Las marcas acreditan implementación y comprobaciones focalizadas, no aprobación productiva. Quedan para los bloques 5, 9 y 10 la política organizativa de privacidad/retención, aceptación en navegador del despliegue completo, custodia real de MFA/emergencia y alertas externas. El alcance de permisos es una organización con lectura de todos sus equipos; no se ofrece separación por tenant/departamento.
+**Cierre:** candidato identificado sin bloqueantes abiertos. No presentar resultados históricos como pruebas de binarios o imágenes nuevos.
 
-## 4. Exactitud y completitud funcional
+## 8. Publicación y operación gradual
 
-Cierre 2026-11-02: implementación y comprobación focalizada completas para el alcance del candidato 0.1. Evidencia y límites: [BLOCK4_CLOSURE.md](BLOCK4_CLOSURE.md). Informes por día UTC; selección de zona IANA/DST, mapas de calor y captura global Wayland quedan expresamente fuera del piloto. No se certifican instaladores ni producción.
+- [ ] Actualizar README, TODO, CHANGELOG y runbooks de instalación, enrolamiento, rotación, backup/restore, mantenimiento, rollback y soporte.
+- [ ] Preparar publicación del código piloto: revisar diff, secretos, archivos expuestos y CI. Un commit de avance no equivale a release estable ni exige esperar a producción.
+- [ ] Publicar releases con artefactos ensayados, hashes, firmas y notas; excluir material privado.
+- [ ] Preparar corte con backup recuperable, credenciales nuevas, umbrales de parada/rollback, responsables y escalamiento.
+- [ ] Obtener aceptación del alcance, privacidad, retención y riesgos residuales; autorizar distribución productiva.
+- [ ] Desplegar gradualmente, confirmar alertas/soporte y ampliar según criterios.
 
-- [x] Consolidar contadores de entrada y tiempos por sesión en resumen, métricas y exportaciones; no sumar horas-persona como tiempo encendido.
-- [x] Unificar contratos de API/frontend, tipos, errores y formato de fechas para eliminar conversiones inseguras o silencios que parezcan listas vacías.
-- [x] Separar claramente actual, último reporte e histórico; identificar datos atrasados y ausencia de muestra, sin reemplazarlos por cero.
-- [x] Resolver snapshots de aplicaciones de sesiones cerradas/reiniciadas, sin presentar ventanas antiguas como actualmente abiertas; conservar atribución por sesión donde corresponda.
-- [x] Revisar fechas locales/UTC, medianoche, zona horaria y cambios de horario; alinear consultas, resumen, exportación y retención.
-- [x] Completar consistencia de inventario actual/cambios, USB, WiFi, investigaciones y alertas reabiertas; evitar duplicados y preservar evidencia asociada.
-- [x] Completar políticas: herencia global/equipo, conflicto de revisión, pausa/reanudación, valores predeterminados, aplicación offline y huella confirmada.
-- [x] Revisar ciclo de comandos: autorización, validación, expiración, entrega repetida, ACK y resultado; acciones permitidas explícitamente, sin ejecución arbitraria implícita.
-- [x] Definir alcance de mapas de calor y Wayland: implementar lo prometido o excluirlo expresamente de la versión, sin pantallas que aparenten disponibilidad.
+**Cierre:** versión aprobada con recuperación y responsables definidos. Publicar código, actualizar el piloto y desplegar producción son acciones distintas.
 
-**Cierre:** los mismos datos producen resultados coherentes entre vistas y exportaciones; las limitaciones se muestran y ningún indicador ausente se presenta como medición real.
+## Decisiones externas
 
-## 5. Privacidad, retención y restauración
+| Recurso o decisión | Cuándo hace falta |
+|---|---|
+| Confirmación de revocación del token | Inmediato, bloque 1 |
+| Infraestructura, dominio, certificados y redes | Destino real, bloque 2 |
+| Receptor de alertas y responsables | Bloque 2 |
+| Política de privacidad/retención y RPO/RTO | Bloque 3 |
+| Versiones SO y acceso a equipos/VMs | Bloques 4–7 |
+| Certificado Windows y claves Linux | Bloque 5 |
+| Tamaño, duración y capacidad objetivo del piloto | Antes del bloque 7 |
 
-- [ ] Definir datos mínimos necesarios, acceso a títulos de ventanas/rutas/usuarios y opción de excluir o redactar información sensible antes de transmitirla.
-- [ ] Documentar finalidad, información a usuarios, responsables, acceso y conservación para la organización; obtener revisión de sus políticas aplicables antes del despliegue.
-- [ ] Aprobar períodos de retención por recurso, actividad, sesión, USB/WiFi, inventario, auditoría y seguridad. Diferenciar detalle, resumen, archivo y backup.
-- [ ] Validar mantenimiento transaccional completo: lotes, exclusión concurrente, retrasos, reintentos, datos tardíos, alertas reabiertas y retención de deduplicación.
-- [ ] Resolver el incidente de columnstore/workers Timescale y comprobar compatibilidad con chunks comprimidos antes de activar políticas afectadas.
-- [ ] Decidir si se necesita archivo histórico adicional; si se implementa, definir cifrado, verificación, catálogo, recuperación y vencimiento. No conservar archivos indefinidamente por defecto.
-- [ ] Automatizar backups cifrados y separados del anfitrión, incluyendo configuración y material de recuperación necesario; definir RPO/RTO y alertas de fallo.
-- [ ] Restaurar un backup en un entorno limpio y comprobar datos, identidades, sesiones, claves, políticas y funcionamiento; medir tiempos reales.
-- [ ] Activar eliminación histórica solo tras comprobar límites y recuperación; eliminar también copias/archivos conforme al plan aprobado.
+Solicitar cada dato cuando bloquee una acción concreta; avanzar con trabajo independiente y configuración parametrizada mientras tanto.
 
-**Cierre:** retención medida y acotada, restauración demostrada dentro de objetivos acordados, sin confundir compactación o archivo con respaldo.
+## Regla de seguimiento
 
-## 6. Agente multiplataforma y recuperación
+Cerrar cada bloque con implementación, evidencia y lista de pendientes. Indicar si los cambios están locales, publicados o desplegados. No marcar una casilla compuesta por completar solo una parte. Actualizar documentación junto con cambios de comportamiento.
 
-- [ ] Fijar versiones soportadas de Windows, Ubuntu y Debian y matriz de escritorio/servicio, X11/Wayland y RDP; incluir Ubuntu 22.04 mientras siga dentro del alcance acordado.
-- [ ] Verificar SCM/systemd: arranque tras reboot, recuperación ante caída, límites de reinicio, parada intencional, shutdown/SIGTERM y cierre de hooks/tray/web/procesos hijos. Evidencia parcial Windows: recuperación automática de SCM en 16 s tras caída, 2026-11-03.
-- [ ] Validar permisos de servicio y usuario dedicado Linux, separación servicio/sesión y captura con usuario interactivo limitado.
-- [ ] Comprobar enrolamiento múltiple, dos usuarios y dos escritorios del mismo usuario, autostart Explorer/RDP/XDG y ausencia de duplicación de identidad/recursos. Piloto de un usuario: diagnóstico con principal y capturas confirmado; el vacío inicial precedía a la consolidación de cinco minutos. Multiusuario/RDP sigue pendiente.
-- [ ] Probar IPC autenticado: claves, origen, replay, reloj/secuencia, límites, expiración y pérdida de respuesta; conservar ID y pendientes.
-- [ ] Probar desconexión prolongada, caída de RabbitMQ/server, reconexión y reenvío; SQLite WAL y cola llena/corrupta no deben descartar eventos pendientes silenciosamente. Evidencia parcial Windows: corte RabbitMQ 75 s, 11 pendientes, drenaje a cero e identidad conservada, 2026-11-03.
-- [ ] Probar disco lleno, permisos insuficientes, configuración/identidad corruptas y apagado durante escritura; mantener persistencia recuperable y errores comprensibles.
-- [ ] Comprobar captura nativa al aparecer/desaparecer el escritorio o dispositivo de entrada, pausa/reanudación y proceso X11 aislado; ausencia de captura no genera actividad ficticia.
-- [ ] Medir CPU, RAM, disco, red y tamaño de caché del agente; fijar límites y comportamiento al alcanzarlos.
-- [ ] Verificar vista local: solo loopback/lectura, origen y permisos efectivos, estados antiguos/vacíos y ausencia de datos de otros equipos.
-
-**Cierre:** cada plataforma anunciada tiene evidencia de instalación nativa, recolección, recuperación y parada correcta. Una plataforma sin esa evidencia no se anuncia como certificada.
-
-## 7. Instaladores, actualización y releases
-
-- [ ] Generar MSI/DEB desde checkout limpio con versiones, dependencias, manifiestos y hashes; comparar construcciones independientes y documentar cualquier diferencia.
-- [ ] Firmar paquetes/binarios Windows y canal de distribución Linux; custodiar las claves de firma y fijar la confianza del publicador.
-- [ ] Separar paquete genérico del enrolamiento: no incrustar secretos compartidos ni credenciales del piloto en instaladores redistribuibles.
-- [ ] Validar instalación, reparación, actualización, downgrade rechazado, rollback y desinstalación con sesiones activas y autostart coordinado.
-- [ ] Ensayar cortes en cada etapa, journals interrumpidos y recuperación; conservar identidad, claves, configuración y outbox.
-- [ ] Validar importación de legado, claves personalizadas, symlinks/reparse/hardlinks y migración con WAL; no adivinar claves ni sobrescribir datos ajenos.
-- [ ] Validar purga explícita, archivos adicionales y advertencia por pendientes; desinstalación normal debe preservar lo documentado.
-- [ ] Definir canal estable y piloto, actualización gradual y reversión. Mantener autoactualización remota deshabilitada hasta completar firma, autorización y rollback seguros.
-- [ ] Preparar notas de versión, requisitos, cambios incompatibles, instrucciones de incorporación y soporte; retirar artefactos privados/de prueba de la distribución.
-
-**Cierre:** artefactos firmados y verificables, sin secretos embebidos, con ciclo de vida probado en cada destino anunciado y recuperación documentada.
-
-## 8. UX, accesibilidad y operación diaria
-
-Implementación completada el 2026-11-03. Evidencia, alcance y límites en [DASHBOARD_UX.md](DASHBOARD_UX.md); regresión focalizada en `tests/dashboard_ux.py`.
-
-- [x] Resumen con contadores de sesión, cobertura explícita, ausencia diferenciada de cero y diagnóstico desplegable.
-- [x] Búsqueda y paginación en aplicaciones, inventario, USB/WiFi, actividad reciente, historial y diagnóstico; límites de consulta visibles.
-- [x] Equipo, sección, fecha, búsqueda, filtros y páginas persistidos en URL; retorno al listado con la consulta original.
-- [x] Cargas y reintentos independientes; conservación explícita de la respuesta anterior solo para la misma consulta.
-- [x] Acciones según rol y aviso de rechazo del servidor; exportación no bloquea el resto del detalle.
-- [x] Estados de carga, consulta vacía, datos ausentes/atrasados y error; WiFi no extrapola duración sin evento posterior.
-- [x] Teclado, foco, semántica de tablas, alternativa textual a gráficos, movimiento reducido y revisión focalizada claro/oscuro a 390/768/1440 px. Contraste comprobado para tokens principales, no auditoría WCAG completa.
-- [x] Nombres y unidades coherentes; fechas agregadas UTC; distinción entre software instalado, ventana reportada y actividad.
-- [x] Ayuda integrada para incorporación, diagnóstico, permisos y Mi equipo sin credenciales reales.
-
-**Estado:** código y comprobación focalizada cerrados. La aceptación con usuarios y lector de pantalla real sigue en bloque 9; no se declara certificación productiva ni accesibilidad completa.
-
-## 9. Validación integrada y piloto de aceptación
-
-- [ ] Aceptación de UX con usuarios representativos y lector de pantalla real; recorrer roles, errores y gráficos en navegadores soportados con datos del piloto. La comprobación sintética del bloque 8 no sustituye esta certificación.
-
-Ejecutar la campaña sobre una versión candidata identificada después de completar los bloques anteriores. Repetir solo casos afectados por cambios posteriores o fallos encontrados.
-
-- [ ] Ejecutar CI de compilación, contratos y pruebas relevantes en las plataformas acordadas, registrando commit, artefacto y entorno.
-- [ ] Validar migraciones en instalación nueva y escenarios heredados representativos, incluidas 0005 y 0009–0012, chunks comprimidos y conservación de datos.
-- [ ] Cuando exista copia real autorizada, repetir migración de legado; mientras no exista, registrar esa limitación y usar fixtures representativos sin certificar el volumen real.
-- [ ] Verificar confirmación RabbitMQ, ACK solo después de commit, duplicados, concurrencia, rollback y recuperación ante caída en puntos críticos.
-- [ ] Ensayar DLQ/reenvío autorizado, rechazo de eventos inválidos, eventos tardíos/offline y ausencia de pérdida silenciosa.
-- [ ] Ejecutar matriz de seguridad: roles, revocación, suplantación, abuso de login, inyección, XSS, exportaciones, origen local y permisos de archivos.
-- [ ] Escanear dependencias, imágenes, secretos y paquetes; resolver hallazgos críticos/altos o documentar aceptación explícita con responsable y vencimiento.
-- [ ] Realizar carga sostenida con cantidad objetivo de equipos e intervalos reales; medir latencia, CPU/RAM, I/O, colas, crecimiento DB y tiempo de recuperación.
-- [ ] Ejecutar piloto de duración y tamaño acordados en las tres plataformas, cubriendo sesiones, política, desconexión, reinicio y ciclo de actualización.
-- [ ] Registrar defectos, severidad, corrección y regresión focalizada; completar aceptación UX y restauración de backup de la versión candidata.
-
-**Cierre:** informe único con evidencias, límites y defectos conocidos; sin bloqueantes abiertos. Definir cantidad de equipos, duración, presupuesto de recursos y objetivos antes del ensayo, no después de ver resultados.
-
-## Preparación de publicación del código piloto
-
-- [x] Retirar ejecutable heredado del índice y credenciales detectadas del árbol actual; añadir preflight y releases en borrador. Ver GITHUB_PUBLICATION.md.
-- [ ] Identificar y revocar el token GitHub histórico; rotar credenciales antiguas de RabbitMQ si siguen activas.
-- [x] Destino acordado 2026-11-03: actualizar Monitorv3/main conservando historial, sin force-push ni repositorio nuevo. Usuario autoriza subir el árbol limpio con revocación histórica aún pendiente. Ver GITHUB_PUBLICATION.md.
-- [ ] Ejecutar CI remoto y revisar resultados después de autorizar la subida. Publicar código piloto no certifica producción.
-
-## 10. Operación y autorización de producción
-
-- [ ] Configurar métricas y alertas externas: caída de API/consumidores, cola pendiente/DLQ, espacio DB/disco, mantenimiento, backups, certificados y agentes sin señal.
-- [ ] Publicar runbooks de instalación, enrolamiento, rotación/revocación, backup/restore, actualización, rollback y diagnóstico, con responsables y escalamiento.
-- [ ] Definir capacidad inicial, crecimiento, infraestructura, dominio/certificados, acceso de soporte y ventanas de mantenimiento; identificar los recursos externos aún necesarios.
-- [ ] Preparar checklist de corte: backup previo, configuración validada, credenciales nuevas, versión firmada y plan/umbral de reversión.
-- [ ] Obtener aceptación del alcance soportado, límites de captura, políticas de acceso/retención, métricas de servicio y defectos no bloqueantes.
-- [ ] Confirmar que la versión candidata coincide con los artefactos ensayados y que ningún archivo privado del piloto se publica.
-- [ ] Autorizar publicación/distribución y despliegue gradual solo después de la aceptación; no borrar o reemplazar el repositorio anterior sin instrucción específica vigente.
-- [ ] Supervisar la primera instalación productiva y ampliar por etapas con criterios de parada; verificar restauración y soporte disponibles.
-
-**Cierre:** aprobación explícita de salida, artefactos identificados, alertas activas, backup recuperable y responsables operativos definidos. “Listo para producción” solo se declara entonces.
-
-## Dependencias y decisiones por resolver durante el trabajo
-
-- Infraestructura de destino, dominio/DNS, certificados y redes de agentes.
-- Organización/usuarios, necesidad de SSO, proveedor de identidad y MFA.
-- Cantidad objetivo de equipos, sistemas/versiones, capacidad y objetivos RPO/RTO.
-- Política de privacidad y retención, exclusiones de captura y necesidad real de archivo histórico.
-- Certificado de firma Windows y custodia de claves; canal Linux de distribución.
-- Acceso a runners/VMs de prueba y eventual copia de base heredada.
-
-Estas decisiones se solicitarán cuando bloqueen un paso concreto. Mientras tanto, se puede avanzar con configuración parametrizada, controles locales y código, sin inventar certificados, infraestructura ni aprobaciones.
-
-## Correspondencia con el plan anterior
-
-- P0 y migraciones pendientes → bloques 1, 5 y 9.
-- P1, contratos, roles, RabbitMQ y almacenamiento → bloques 2, 3, 4, 5 y 9.
-- P2, agente, IPC, enrolamiento, paquetes y recuperación → bloques 2, 6, 7 y 9.
-- P3, dashboard, vista local, políticas y experiencia de uso → bloques 4 y 8.
-- P4, carga, seguridad, plataformas y aceptación → bloque 9; evidencias ya existentes se reutilizan cuando correspondan.
-- Entrega y operación continuada → bloque 10.
-
-Las entradas antiguas “no desplegado” o “instalación pendiente” quedan como hechos históricos, no describen el piloto actual. Los casos todavía no comprobados siguen abiertos en este plan.
+Correspondencia: antiguos 1/2/3 → nuevos 1/2/6; antiguo 5 → nuevo 3; antiguo 6 → nuevo 4; antiguo 7 → nuevo 5; antiguos 4/8 → nuevo 6 y aceptación 7; antiguo 9 → nuevo 7; antiguo 10 → nuevo 8. El archivo histórico conserva el detalle previo.

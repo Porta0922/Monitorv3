@@ -15,7 +15,7 @@ pub mod domains;
 
 use std::sync::Arc;
 use tokio::task;
-use dotenv::dotenv;
+use dotenvy::dotenv;
 
 use api::{AppState, create_router};
 use auth::AuthManager;
@@ -25,7 +25,7 @@ use postgres_db::Database;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load environment variables
-    dotenv().ok();
+    if !human_sessions::production() { dotenv().ok(); }
     let args:Vec<String>=std::env::args().skip(1).collect();
     if args==["--hash-password-stdin"] {
         use std::io::Read;

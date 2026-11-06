@@ -9,6 +9,7 @@ fn validate(values:&HashMap<String,String>)->Result<bool,String> {
  let mode=values.get("MONITOR_ENV").map(String::as_str).unwrap_or("development");
  if !matches!(mode,"development"|"test"|"production") {return Err("MONITOR_ENV must be development, test or production".into());}
  if mode!="production" {return Ok(false);}
+ if values.get("RUST_LOG").is_some_and(|v|v.split(',').any(|directive|matches!(directive.rsplit('=').next().unwrap_or("").trim().to_ascii_lowercase().as_str(),"debug"|"trace"))) || values.get("DEBUG").is_some_and(|v|matches!(v.to_ascii_lowercase().as_str(),"1"|"true"|"yes")) {return Err("Production forbids debug/trace logging and DEBUG mode".into());}
  for key in ["JWT_SECRET","DATABASE_URL","RABBITMQ_URL"] {
   if !values.contains_key(&format!("{key}_FILE")) {return Err(format!("Production requires {key}_FILE"));}
   if values.get(key).is_none_or(|s|s.is_empty()) {return Err(format!("Missing {key}"));}
@@ -63,5 +64,6 @@ mod tests {
  }
  #[test] fn production_requires_files_and_rejects_shared_agent_token(){let mut v=candidate();assert_eq!(validate(&v),Ok(true));v.remove("JWT_SECRET_FILE");assert!(validate(&v).is_err());let mut v=candidate();v.insert("AGENT_AUTH_TOKEN".into(),"b8".repeat(32));assert!(validate(&v).is_err());}
  #[test] fn production_rejects_bootstrap_and_defaults(){for (key,value) in [("ADMIN_PASSWORD","admin"),("JWT_SECRET","change-me-in-production"),("DATABASE_URL","postgresql://postgres:postgres@postgres/db"),("RABBITMQ_URL","amqp://guest:guest@rabbitmq/%2f"),("DATABASE_URL","postgresql://monitor_owner:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@postgres/db")] {let mut v=candidate();v.insert(key.into(),value.into());assert!(validate(&v).is_err(),"{key}");}}
+ #[test] fn production_rejects_debug_logging(){for (key,value) in [("DEBUG","true"),("RUST_LOG","debug"),("RUST_LOG","info,sqlx=trace")] {let mut v=candidate();v.insert(key.into(),value.into());assert!(validate(&v).is_err());}}
  #[test] fn development_unchanged_unknown_mode_rejected(){assert_eq!(validate(&HashMap::new()),Ok(false));let mut v=candidate();v.insert("MONITOR_ENV".into(),"prodution".into());assert!(validate(&v).is_err());}
 }

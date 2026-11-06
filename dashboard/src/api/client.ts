@@ -125,7 +125,7 @@ class ApiClient {
   async logout(){await this.client.post('/auth/logout',{});this.clearAuth();}
   private clearAuth(){this.authenticated=false;this.role='viewer';delete this.client.defaults.headers.common['X-CSRF-Token'];localStorage.removeItem('auth_token');this.changed();}
   isAuthenticated(){return this.authenticated;}
-  async getAuthSecurity():Promise<{failed_logins_15m:number;limited_accounts_24h:number;events:{actor:string;action:string;created_at:string}[]}>{return (await this.client.get('/auth/security')).data;}
+  async getAuthSecurity():Promise<{failed_logins_15m:number;denied_requests_15m?:number;csrf_rejections_15m?:number;limited_accounts_24h:number;events:{actor:string;action:string;created_at:string}[]}>{return (await this.client.get('/auth/security')).data;}
   async getHumanSessions():Promise<{session_id:string;created_at:string;last_seen:string;expires_at:string;current:boolean}[]>{return (await this.client.get('/auth/sessions')).data.sessions;}
   async revokeHumanSession(id:string){await this.client.delete(`/auth/sessions/${encodeURIComponent(id)}`);}
   async revokeMySessions(){await this.client.post('/auth/revoke-all',{});this.clearAuth();}
