@@ -377,3 +377,7 @@ Docker Desktop estaba sin motor Linux disponible; servicio y sesión del agente 
 ## 2026-11-06 — Seguridad: endurecimiento y revisión focalizada
 
 Matriz aislada de sesiones/MFA/roles/CSRF aprobada, 7 pruebas unitarias de configuración/rutas aprobadas y prueba Nginx ampliada aprobada (HTTPS, archivos sensibles, límite de login, registros sin query). Build frontend/servidor aprobado; lint global conserva un fallo en AdministrationPage.tsx. npm audit sin avisos conocidos después de correcciones. Escaneo Rust e imágenes detectó pendientes; token histórico sin revocación confirmada. Informe completo: [SECURITY_REVIEW_2026-11-06.md](SECURITY_REVIEW_2026-11-06.md). Cambios locales sin despliegue/publicación. Producción no aprobada.
+## 2026-11-06 — PR de seguridad y corrección del fixture Windows
+
+Avance publicado en PR #2, commit 59a3842, árbol idéntico al comprobado localmente. Recorrido completo de identidad/transporte aprobado con reqwest nuevo; lint y build dashboard aprobados. Publicación preflight y almacenamiento aprobados en CI. Ciclo de vida Windows detectó un fixture que perdía PSScriptRoot: se reemplazan scriptblocks por copias reales, estado simulado compartido y carpeta con ACL protegida. La prueba requiere administrador porque los permisos son reales; la sesión local no puede asignar propietario Administrators. Validación de esa corrección reservada al runner Windows, sin reducir controles productivos. PR sin fusionar hasta CI satisfactorio; producción y piloto sin actualizar.
+
