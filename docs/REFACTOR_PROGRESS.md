@@ -1,3 +1,11 @@
+## 2026-11-07 — Seguridad fusionada y candidato RabbitMQ validado
+
+PR #2 fusionado en `ba7e3b37af68f005686f953ed0460978bf5aa833`; PR #1 ya estaba fusionado. Los cuatro flujos pasaron sobre `178f16c3`: Stack smoke (42336765435), Publication preflight (42336765482), Storage retention (42336765427) y Agent lifecycle (42336765440). Historial conservado, sin release ni reemplazo del piloto.
+
+RabbitMQ 4.2 candidato pasó el recorrido aislado completo de identidad, MFA/CSRF/roles, enrolamiento, publicación nativa AMQPS, renovación, recuperación, revocación y rechazo de CA no confiable. La prueba permite elegir imagen mediante TEST_RABBITMQ_IMAGE y conserva el mismo código TOTP para verificar replay incluso al cruzar un intervalo temporal. Evidencia privada: `.local-test/security/rabbitmq-4.2-identity.log`. Migración real y durabilidad de colas pendientes; ver [plan](RABBITMQ_MIGRATION.md).
+
+Continúa el bloque 1: revocación del token histórico, tratamiento de rsa y dependencias sin mantenimiento, bases del servidor/DB y decisión sobre Redis. Producción no aprobada; agente instalado 0.1.0 sin cambios.
+
 ## 2026-11-03 — Código publicado en Monitorv3/main
 
 Commit publicado: 721723970d59b3f88451a13d96e0d3e6207fdd84. Árbol remoto verificado idéntico al preparado localmente; historial conservado y copia local sincronizada en main. Preflight remoto aprobado. No se creó release ni tag.

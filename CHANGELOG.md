@@ -1,5 +1,11 @@
 # Changelog
 
+## Validación del broker — 2026-11-07
+
+- Selector TEST_RABBITMQ_IMAGE para validar candidatos sin cambiar Compose ni el piloto. Recorrido aislado aprobado con RabbitMQ 4.2 fijado por digest.
+- Comprobación de replay MFA reutiliza exactamente el código autenticado, evitando falsos fallos al cambiar el intervalo TOTP.
+- PR #2 fusionado tras aprobar los cuatro flujos de CI; plan activo y README actualizados.
+
 ## Dashboard e infraestructura de validación — 2026-11-07
 
 - Base Nginx 1.30.6 fijada por digest; imagen completa del dashboard construida y escaneada sin avisos conocidos, con SBOM CycloneDX.

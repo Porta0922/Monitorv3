@@ -1,10 +1,10 @@
 # TODO — Ruta de cierre hacia producción
 
-Seguimiento **2026-11-07**: tras la pausa temporal solicitada (69f70d8), el usuario autoriza fusionar los PR. Se reactiva Agent lifecycle checks con ejecución única por PR/main y cancelación de ejecuciones obsoletas. Corrección de la prueba Docker: excluir Restarting y exigir un StartedAt nuevo para no aceptar logs del proceso anterior; recorrido local aprobado. El PR #1 ya estaba fusionado; el #2 requiere CI completo satisfactorio antes de su fusión. No hay certificación nueva de producción.
+Seguimiento **2026-11-07**: PR #2 fusionado en `ba7e3b3`, con Publication preflight, Stack smoke, Storage retention y Agent lifecycle checks aprobados para su cabeza `178f16c3`. PR #1 ya estaba fusionado. Se conserva el historial. RabbitMQ 4.2 validado en entorno aislado; piloto sin actualizar. No hay certificación productiva.
 
 Actualizado: **2026-11-06**. Estado: **piloto controlado; producción no aprobada**. Agente **0.1.0**. Este es el único plan activo. El [plan anterior completo](TODO_PRODUCCION_HISTORICO_2026-11-06.md) conserva el detalle y las evidencias para consulta, no como segunda lista de ejecución.
 
-Base: [informe de seguridad](SECURITY_REVIEW_2026-11-06.md), [progreso](REFACTOR_PROGRESS.md) y [diagnóstico del piloto](PILOT_TROUBLESHOOTING.md). Las correcciones de seguridad del 6 de noviembre están locales, sin publicar ni desplegar.
+Base: [informe de seguridad](SECURITY_REVIEW_2026-11-06.md), [progreso](REFACTOR_PROGRESS.md) y [diagnóstico del piloto](PILOT_TROUBLESHOOTING.md). Las correcciones de seguridad del 6 de noviembre están publicadas mediante PR #2; no desplegadas en el piloto.
 
 ## Ya completado: conservar, no rehacer
 
@@ -36,16 +36,16 @@ Primero implementar cada bloque y luego ejecutar sus comprobaciones focalizadas.
 
 - [ ] Confirmar revocación del token GitHub histórico de usb/agent-config.json y revisar su uso; rotar credenciales antiguas todavía activas. Requiere acceso del titular. Borrar archivos o commits no revoca tokens.
 - [ ] Evaluar limpieza posterior del historial/copias accesibles; no reescribir ni hacer force-push automáticamente. Mantener el repositorio existente como destino acordado.
-- [ ] Migrar reqwest/hyper/h2 a una combinación compatible corregida; revisar agente, servidor y probe. Avance 2026-11-06: reqwest 0.12.28 con JSON/native-tls y sin HTTP/2 opcional; h2 0.3.27 eliminado del lockfile. Cargo check Windows y recorrido de identidad/transporte aislado aprobados; Linux pendiente de CI.
+- [x] Migrar reqwest/hyper/h2 a una combinación compatible corregida; revisar agente, servidor y probe. Avance 2026-11-06: reqwest 0.12.28 con JSON/native-tls y sin HTTP/2 opcional; h2 0.3.27 eliminado del lockfile. Cargo check Windows y recorrido de identidad/transporte aislado aprobados; Linux aprobado por CI.
 - [ ] Identificar features/targets que incorporan rsa y eliminarlo si no se usa, o documentar exposición y tratamiento del aviso sin parche. No silenciarlo por estar ausente del árbol Windows activo.
-- [ ] Resolver dependencias sin mantenimiento y paquete retirado del registro; revisar Windows/Linux. Avance: dotenv sustituido por dotenvy, env_logger sin uso retirado del agente y async-executor actualizado a 1.14.1. Persisten cinco avisos de mantenimiento en el análisis Rust.
+- [ ] Resolver dependencias sin mantenimiento y paquete retirado del registro; revisar Windows/Linux. Avance: dotenv sustituido por dotenvy, env_logger sin uso retirado del agente y async-executor actualizado a 1.14.1. Persisten dos avisos de mantenimiento en el análisis Rust tras retirar xcap.
 
-Seguimiento del CI: fixture Windows corregido y aprobado por el runner; prueba de origen/autenticación local ajustada al contrato vigente y aprobada en Windows. Captura Linux sustituye xcap por XCB para evitar incompatibilidad PipeWire con Ubuntu 22.04; validación Linux pendiente. Auditoría tras esa sustitución: rsa sigue abierto y quedan dos avisos de mantenimiento (instant y rustls-pemfile). La prueba de migraciones ahora exige todo el historial embebido, conservando aserciones de integridad de datos.
+Seguimiento del CI: fixture Windows corregido y aprobado por el runner; prueba de origen/autenticación local ajustada al contrato vigente y aprobada en Windows. Captura Linux sustituye xcap por XCB para evitar incompatibilidad PipeWire con Ubuntu 22.04; compilación y comprobaciones Linux aprobadas en CI; aceptación con escritorio real pendiente. Auditoría tras esa sustitución: rsa sigue abierto y quedan dos avisos de mantenimiento (instant y rustls-pemfile). La prueba de migraciones ahora exige todo el historial embebido, conservando aserciones de integridad de datos.
 - [ ] Actualizar bases y servicios Docker soportados, fijar digests y reconstruir. Revisar compatibilidad y ruta de actualización de RabbitMQ/PostgreSQL/Timescale antes de modificar volúmenes. Conservar RabbitMQ.
 - [ ] Retirar dependencias sin uso demostrado. Decidir retiro de Redis, actualmente sin función identificada; si se utiliza, justificarlo y definir ACL/persistencia.
 - [ ] Generar inventario de componentes/SBOM y volver a escanear artefactos nuevos, registrando herramientas, fecha y versiones.
 
-Imágenes: dashboard candidato con Nginx 1.30.6 fijado por digest, build y comprobación HTTPS aprobados, cero avisos conocidos en su escaneo. Script `scripts/security-images.ps1` genera informes privados y SBOM por ID de imagen, con umbral crítico/alto opcional. El resto de imágenes y la adopción productiva siguen pendientes; ver [IMAGE_SECURITY.md](IMAGE_SECURITY.md).
+Imágenes: dashboard candidato con Nginx 1.30.6 fijado por digest, build y comprobación HTTPS aprobados, cero avisos conocidos en su escaneo. Script `scripts/security-images.ps1` genera informes privados y SBOM por ID de imagen, con umbral crítico/alto opcional. RabbitMQ 4.2 candidato también pasó el escaneo y el recorrido aislado de identidad/AMQPS; migración y restantes imágenes siguen pendientes; ver [IMAGE_SECURITY.md](IMAGE_SECURITY.md).
 
 **Cierre:** correcciones comprobadas y hallazgos clasificados. Riesgos críticos/altos explotables bloquean producción; cualquier excepción requiere responsable, mitigación, motivo y vencimiento. No confundir avisos de escáner con explotación demostrada ni análisis con corrección.
 
