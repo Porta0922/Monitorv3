@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID, ExtendedKeyUsageOID
 ROOT=Path(__file__).resolve().parents[1]
+BROKER_IMAGE=os.environ.get('TEST_RABBITMQ_IMAGE','rabbitmq:3.12-management-alpine@sha256:0b44fbcc3a4bf22d00090f1353127577dbe1fcb109c41669733a9d7ecf6c3a78')
 SUFFIX='.exe' if os.name=='nt' else ''
 SERVER=ROOT/'target/debug'/('activity-monitor-server'+SUFFIX)
 PROBE=ROOT/'target/debug'/('agent-transport-probe'+SUFFIX)
@@ -68,7 +69,7 @@ with tempfile.TemporaryDirectory(prefix='monitor-identity-') as tmp:
   definitions['policies']=[{'vhost':'/','name':'bounded-telemetry','pattern':r'^(activity|inventory|heartbeat|usb|wifi|running_apps|security)_queue(\.dead)?$','apply-to':'queues','priority':10,'definition':{'max-length-bytes':67108864,'overflow':'reject-publish'}}]
   (path/'definitions.json').write_text(json.dumps(definitions))
   (path/'rabbitmq.conf').write_text('definitions.import_backend = local_filesystem\ndefinitions.local.path = /test/definitions.json\nlisteners.tcp = none\nlisteners.ssl.default = 5671\nssl_options.cacertfile = /test/ca.crt\nssl_options.certfile = /test/broker.crt\nssl_options.keyfile = /test/broker.key\nssl_options.verify = verify_peer\nssl_options.fail_if_no_peer_cert = false\nmanagement.ssl.port = 15671\nmanagement.ssl.cacertfile = /test/ca.crt\nmanagement.ssl.certfile = /test/broker.crt\nmanagement.ssl.keyfile = /test/broker.key\nmax_message_size = 1048576\nchannel_max = 16\n')
-  docker('run','-d','--name',BROKER,'-p','127.0.0.1::5671','-p','127.0.0.1::15671','-v',str(path)+':/test:ro','-v',str(path/'rabbitmq.conf')+':/etc/rabbitmq/rabbitmq.conf:ro','rabbitmq:3.12-management-alpine@sha256:0b44fbcc3a4bf22d00090f1353127577dbe1fcb109c41669733a9d7ecf6c3a78')
+  docker('run','-d','--name',BROKER,'-p','127.0.0.1::5671','-p','127.0.0.1::15671','-v',str(path)+':/test:ro','-v',str(path/'rabbitmq.conf')+':/etc/rabbitmq/rabbitmq.conf:ro',BROKER_IMAGE)
   amqpport=port(BROKER,5671);adminport=port(BROKER,15671)
   context=ssl.create_default_context(cafile=str(path/'ca.crt'))
   def broker_api(resource):
@@ -122,8 +123,9 @@ with tempfile.TemporaryDirectory(prefix='monitor-identity-') as tmp:
     assert 'token' not in data
     return {'Cookie':cookie.split(';')[0],'X-CSRF-Token':data['csrf_token']}
   login('isolated-test',expected=401)
-  token.update(login('isolated-test',totp(mfa_secret)))
-  login('isolated-test',totp(mfa_secret),expected=401)
+  first_admin_code=totp(mfa_secret)
+  token.update(login('isolated-test',first_admin_code))
+  login('isolated-test',first_admin_code,expected=401)
   humans={role:login(role) for role in ['viewer','operator']}
   api('GET','/api/devices',human=jwt(jwt_secret),expected=401)
   exec((ROOT/'tests/human-session-checks.py').read_text(),globals())

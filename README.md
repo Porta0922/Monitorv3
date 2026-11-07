@@ -6,7 +6,9 @@ Escaneo reproducible de imágenes y generación de SBOM: [procedimiento](docs/IM
 
 Bloque 1 en curso: clientes Rust actualizados a reqwest 0.12 con JSON/TLS nativo y sin HTTP/2 opcional; eliminado h2 vulnerable y comprobación del workspace Windows aprobada. Esta actualización no está instalada en el piloto; el próximo paquete del agente deberá tener una versión nueva conforme a VERSIONING.md.
 
-Compatibilidad Linux en revisión: la enumeración de ventanas pasa a metadatos X11 mediante XCB, sin dependencias de captura de pantalla/PipeWire. Wayland sigue fuera de la captura global admitida. El PR de seguridad permanece sujeto al CI y no certifica todavía el agente Linux.
+Compatibilidad Linux: la enumeración de ventanas pasa a metadatos X11 mediante XCB, sin dependencias de captura de pantalla/PipeWire. Wayland sigue fuera de la captura global admitida. El PR #2 fue fusionado con los cuatro flujos de CI aprobados; queda pendiente la aceptación del agente con escritorios reales.
+
+RabbitMQ 4.2 pasó la validación aislada de identidad y transporte TLS; aún no reemplaza el broker del piloto. Véase el [plan de migración](docs/RABBITMQ_MIGRATION.md).
 
 Plan vigente: [TODO y ruta de cierre hacia producción](docs/TODO.md), reorganizado el 2026-11-06 en ocho bloques con criterios de cierre. Siguiente paso: credenciales y dependencias; después despliegue, datos, agente, paquetes, dashboard y aceptación integrada.
 
