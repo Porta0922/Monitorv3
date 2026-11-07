@@ -5,7 +5,7 @@ COPY --from=toolchain /usr/local/rustup /usr/local/rustup
 COPY --from=toolchain /usr/local/cargo/bin /usr/local/cargo/bin
 ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/cargo/bin:$PATH DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential ca-certificates pkg-config libssl-dev libx11-dev libxi-dev libxtst-dev libxcb1-dev \
+    python3 build-essential ca-certificates pkg-config libssl-dev libx11-dev libxi-dev libxtst-dev libxcb1-dev \
     libxrandr-dev libdbus-1-dev libpipewire-0.3-dev libclang-dev libgbm-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN apt-get update && apt-get install -y --no-install-recommends libwayland-dev libxkbcommon-dev libegl-dev && rm -rf /var/lib/apt/lists/*

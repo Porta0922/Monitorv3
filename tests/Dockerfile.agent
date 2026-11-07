@@ -2,7 +2,7 @@
 FROM rust:1.99.1-slim-bookworm@sha256:86234e857a413004348b471d11a4ebe1aa92d2eae2b6b143cac68fd1ac3c48be AS toolchain
 FROM toolchain AS debian
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    pkg-config libssl-dev libx11-dev libxi-dev libxtst-dev libxcb1-dev \
+    python3 pkg-config libssl-dev libx11-dev libxi-dev libxtst-dev libxcb1-dev \
     libxrandr-dev libdbus-1-dev libpipewire-0.3-dev libclang-dev libgbm-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN apt-get update && apt-get install -y --no-install-recommends libwayland-dev libxkbcommon-dev libegl-dev && rm -rf /var/lib/apt/lists/*

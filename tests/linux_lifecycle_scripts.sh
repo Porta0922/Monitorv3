@@ -16,9 +16,10 @@ esac
 MOCK
 chmod +x /tmp/lifecycle-bin/systemctl
 export PATH=/tmp/lifecycle-bin:$PATH
-printf 'original\n' > /tmp/original
-printf 'candidate\n' > /tmp/candidate
-printf 'broken\n' > /tmp/broken
+# The updater checks ELF magic; execution is simulated by systemctl below.
+printf '\177ELForiginal\n' > /tmp/original
+printf '\177ELFcandidate\n' > /tmp/candidate
+printf '\177ELFbroken\n' > /tmp/broken
 printf 'AGENT_MODE=service\n' > /tmp/config
 sh /repo/packaging/linux/install-service.sh /tmp/original /tmp/config
 test "$(stat -c %a /etc/activity-monitor/.env)" = 640
