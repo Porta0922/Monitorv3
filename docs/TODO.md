@@ -1,6 +1,6 @@
 # TODO — Ruta de cierre hacia producción
 
-Seguimiento **2026-11-07**: PR #2 fusionado en `ba7e3b3`, con Publication preflight, Stack smoke, Storage retention y Agent lifecycle checks aprobados para su cabeza `178f16c3`. PR #1 ya estaba fusionado. Se conserva el historial. RabbitMQ 4.2 validado en entorno aislado; piloto sin actualizar. No hay certificación productiva.
+Seguimiento **2026-11-07**: PR #2, #3 y #4 fusionados tras CI completo. PR #4 (`e15e110`) publica Lapin 4.12.3, retirada de Redis y guía DevOps. Recorridos de identidad/AMQPS aprobados con RabbitMQ 3.12 y 4.2. El piloto conserva agente/servidor/dashboard actuales; solo se retiró el contenedor Redis sin uso. Producción no aprobada.
 
 Actualizado: **2026-11-06**. Estado: **piloto controlado; producción no aprobada**. Agente **0.1.0**. Este es el único plan activo. El [plan anterior completo](TODO_PRODUCCION_HISTORICO_2026-11-06.md) conserva el detalle y las evidencias para consulta, no como segunda lista de ejecución.
 
@@ -38,9 +38,9 @@ Primero implementar cada bloque y luego ejecutar sus comprobaciones focalizadas.
 - [ ] Evaluar limpieza posterior del historial/copias accesibles; no reescribir ni hacer force-push automáticamente. Mantener el repositorio existente como destino acordado.
 - [x] Migrar reqwest/hyper/h2 a una combinación compatible corregida; revisar agente, servidor y probe. Avance 2026-11-06: reqwest 0.12.28 con JSON/native-tls y sin HTTP/2 opcional; h2 0.3.27 eliminado del lockfile. Cargo check Windows y recorrido de identidad/transporte aislado aprobados; Linux aprobado por CI.
 - [x] Identificar features/targets que incorporan rsa y eliminarlo si no se usa, o documentar exposición y tratamiento del aviso sin parche. Clasificación 2026-11-07: presente en Cargo.lock por sqlx-mysql opcional, sin ruta activa en `cargo tree --locked --target all -i rsa` con las funciones PostgreSQL actuales. Aviso conservado, sin excepción; reevaluar al cambiar funciones o artefactos.
-- [ ] Resolver dependencias sin mantenimiento y paquete retirado del registro; revisar Windows/Linux. Avance: dotenv sustituido por dotenvy, env_logger sin uso retirado del agente y async-executor actualizado a 1.14.1. Actualización local Lapin 4.12.3 elimina los avisos de mantenimiento; build Windows y AMQPS con RabbitMQ 4.2 aprobados. CI Linux del nuevo incremento pendiente.
+- [x] Resolver dependencias sin mantenimiento y paquete retirado del registro; revisar Windows/Linux. Avance: dotenv sustituido por dotenvy, env_logger sin uso retirado del agente y async-executor actualizado a 1.14.1. Actualización local Lapin 4.12.3 elimina los avisos de mantenimiento; build Windows y AMQPS con RabbitMQ 4.2 aprobados. CI Windows/Linux del PR #4 aprobado.
 
-Seguimiento del CI: fixture Windows corregido y aprobado por el runner; prueba de origen/autenticación local ajustada al contrato vigente y aprobada en Windows. Captura Linux sustituye xcap por XCB para evitar incompatibilidad PipeWire con Ubuntu 22.04; compilación y comprobaciones Linux aprobadas en CI; aceptación con escritorio real pendiente. Auditoría tras esa sustitución: rsa sigue abierto y quedan dos avisos de mantenimiento (instant y rustls-pemfile). Los dos avisos de mantenimiento se eliminaron posteriormente con Lapin 4.12.3; rsa queda clasificado como dependencia opcional no activa. La prueba de migraciones ahora exige todo el historial embebido, conservando aserciones de integridad de datos.
+Seguimiento del CI: fixture Windows corregido y aprobado por el runner; prueba de origen/autenticación local ajustada al contrato vigente y aprobada en Windows. Captura Linux sustituye xcap por XCB para evitar incompatibilidad PipeWire con Ubuntu 22.04; compilación y comprobaciones Linux aprobadas en CI; aceptación con escritorio real pendiente. Auditoría histórica tras esa sustitución: rsa seguía abierto y quedaban dos avisos de mantenimiento (instant y rustls-pemfile). Los dos avisos de mantenimiento se eliminaron posteriormente con Lapin 4.12.3; rsa queda clasificado como dependencia opcional no activa. La prueba de migraciones ahora exige todo el historial embebido, conservando aserciones de integridad de datos.
 - [ ] Actualizar bases y servicios Docker soportados, fijar digests y reconstruir. Revisar compatibilidad y ruta de actualización de RabbitMQ/PostgreSQL/Timescale antes de modificar volúmenes. Conservar RabbitMQ.
 - [ ] Retirar dependencias sin uso demostrado. Redis retirado de Compose base/local/producción y del ensayo; contenedor del piloto detenido y eliminado, volumen conservado. No hay consumidores de Redis en el código.
 - [ ] Generar inventario de componentes/SBOM y volver a escanear artefactos nuevos, registrando herramientas, fecha y versiones.
@@ -75,7 +75,7 @@ Imágenes: dashboard candidato con Nginx 1.30.6 fijado por digest, build y compr
 ## 4. Agente y recuperación multiplataforma
 
 - [ ] Fijar versiones Windows/Ubuntu/Debian, incluyendo Ubuntu 22.04 mientras forme parte del alcance; matriz servicio/sesión, X11/Wayland y RDP.
-- [ ] Implementar drenaje adaptativo acotado tras cortes largos, sin pérdida ni snapshots antiguos sobrescribiendo estado actual.
+- [ ] Implementar drenaje adaptativo acotado tras cortes largos, sin pérdida ni snapshots antiguos sobrescribiendo estado actual. Avance local: servicio reenvía lotes de 256 con presupuesto de 5 s y pausa de 250 ms entre lotes completos; confirmaciones SQLite atómicas, IDs/timestamps conservados. Regresión de 5000 eventos en caché y recorrido aislado AMQPS→PostgreSQL aprobados, con 5000 registros y broker vacío; aceptación instalada por destino y carga sostenida pendientes.
 - [ ] Revisar IPC autenticado, claves, origen/replay, secuencias, permisos locales y separación servicio/usuario; vista local solo loopback/lectura.
 - [ ] Completar recuperación SCM/systemd, reboot, parada intencional, shutdown y cierre de procesos/hooks; usuarios limitados, sesiones múltiples y autostart RDP/XDG.
 - [ ] Cubrir desconexión, cola llena/corrupta, disco lleno, permisos, identidades corruptas y escritura interrumpida, sin pérdida silenciosa.
@@ -97,7 +97,7 @@ Imágenes: dashboard candidato con Nginx 1.30.6 fijado por digest, build y compr
 ## 6. Dashboard: seguridad y aceptación
 
 - [x] Corregir lint de AdministrationPage.tsx; reinicio del estado trasladado a la acción de actualizar. Lint global aprobado; aceptación final del frontend sigue en los puntos siguientes.
-- [ ] Probar payloads XSS en títulos, nombres, tablas, búsquedas y exportaciones; verificar escape/CSP en navegador, no solo cabeceras.
+- [ ] Probar payloads XSS en títulos, nombres, tablas, búsquedas y exportaciones; verificar escape/CSP en navegador, no solo cabeceras. Avance: Chromium aprobó nombres de equipos/aplicaciones, títulos, búsqueda, USB/WiFi sin ejecutar HTML, tanto sin CSP como con la política productiva; comprobado bloqueo de script inline. Regresión añadida a CI. Exportaciones y aceptación del destino final siguen pendientes.
 - [ ] Inspeccionar assets y almacenamiento: sin API keys, secretos ni sesión accesible a JavaScript; verificar cierre/revocación y errores seguros.
 - [ ] Recorrer roles, datos vacíos/atrasados/error, temas, móvil, teclado y lector de pantalla; completar aceptación humana.
 - [ ] Confirmar que auditoría y pantalla de seguridad no divulgan secretos ni datos fuera del rol; conservar protección de fórmulas CSV.

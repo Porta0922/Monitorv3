@@ -1,5 +1,9 @@
 # Revisión de seguridad — 2026-11-06
 
+## Comprobación de navegador — 2026-11-07
+
+`tests/dashboard_security.py` ejecutado sobre build actual con Playwright 1.60.0/Chromium y API sintética. Payload HTML con manejador de evento en hostname, aplicación, título de ventana, búsqueda, USB y SSID: visibles como texto, sin nodos inyectados ni ejecución incluso sin CSP. Segundo recorrido aplica la política extraída de nginx.production.conf y comprueba que un script inline sea bloqueado. No usa cuentas del piloto ni valida cookies o autorización real; esas evidencias corresponden a los ensayos de identidad/HTTPS. Exportaciones y revisión final en el destino siguen pendientes.
+
 ## Seguimiento 2026-11-07
 
 PR #2 y PR #3 fusionados tras CI completo satisfactorio. Actualización local Lapin 4.12.3: auditoría Rust sin avisos de mantenimiento; permanece RUSTSEC-2023-0071 de rsa en el lockfile por sqlx-mysql opcional. `cargo tree --locked --target all -i rsa` no muestra ruta activa para las funciones PostgreSQL actuales. No se silencia ni se declara eliminado: reevaluar en cada cambio de features, lockfile o artefacto. El escaneo del lockfile sigue informando el aviso.

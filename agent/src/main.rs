@@ -8,6 +8,7 @@ pub mod session_policy;
 pub mod session_relay;
 pub mod monitoring;
 pub mod offline_cache;
+mod outbox_drain;
 pub mod inventory;
 pub mod inventory_snapshot;
 pub mod device_id;

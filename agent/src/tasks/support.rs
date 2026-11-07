@@ -99,40 +99,30 @@ pub fn spawn_shutdown_listener(context: Arc<TaskContext>) {
 }
 
 pub fn spawn_retry_synchronizer(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
-    let publisher_clone = context.publisher.clone();
-    let cache_clone = context.cache.clone();
     tokio::spawn(async move {
-        let mut retry_interval = super::skip_interval(Duration::from_secs(20));
+        use crate::outbox_drain::{drain_batch, DrainStatus};
+        let idle_delay = Duration::from_secs(20);
+        let mut delay = Duration::ZERO;
+        let mut next_cleanup = tokio::time::Instant::now() + Duration::from_secs(300);
         loop {
-            retry_interval.tick().await;
-
-            let publisher_snapshot = { publisher_clone.read().await.clone() };
-            let Some(pub_) = publisher_snapshot else {
-                continue;
-            };
-
-            match cache_clone.get_unsynced_events().await {
-                Ok(events) if !events.is_empty() => {
-                    let mut synced_ids = Vec::new();
-
-                    for (event_id, event_type, payload) in events {
-                        match pub_.publish_event(&event_type, payload).await {
-                            Ok(_) => synced_ids.push(event_id),
-                            Err(e) => {
-                                tracing::warn!("Retry publish failed for {}: {}", event_type, e);
-                                break;
-                            }
-                        }
-                    }
-
-                    if !synced_ids.is_empty() {
-                        let _ = cache_clone.mark_synced(&synced_ids).await;
-                    }
-
-                      let _ = cache_clone.cleanup_synced(3).await;
+            tokio::time::sleep(delay).await;
+            delay = idle_delay;
+            let publisher = { context.publisher.read().await.clone() };
+            if let Some(publisher) = publisher {
+                match drain_batch(&context.cache, |route, payload| {
+                    let publisher = publisher.clone();
+                    async move { publisher.publish_event(&route, payload).await.map_err(|e| e.to_string()) }
+                }).await {
+                    Ok(DrainStatus::More) => delay = Duration::from_millis(250),
+                    Ok(DrainStatus::Idle | DrainStatus::Interrupted) => {},
+                    Err(error) => tracing::error!(%error, "Outbox replay storage failure; pending data retained"),
                 }
-                Ok(_) => {}
-                Err(e) => tracing::warn!("Failed reading offline cache: {}", e),
+            }
+            if tokio::time::Instant::now() >= next_cleanup {
+                if let Err(error) = context.cache.cleanup_synced(3).await {
+                    tracing::warn!(%error, "Confirmed outbox cleanup failed");
+                }
+                next_cleanup = tokio::time::Instant::now() + Duration::from_secs(300);
             }
         }
     })

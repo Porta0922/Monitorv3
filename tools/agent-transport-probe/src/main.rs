@@ -6,6 +6,9 @@ mod rabbitmq_publisher;
 #[path = "../../../agent/src/offline_cache.rs"]
 mod offline_cache;
 #[allow(dead_code)]
+#[path = "../../../agent/src/outbox_drain.rs"]
+mod outbox_drain;
+#[allow(dead_code)]
 #[path = "../../../agent/src/usb_detection.rs"]
 mod usb_detection;
 #[allow(dead_code)]
@@ -84,6 +87,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let deadline = Instant::now() + Duration::from_secs(seconds);
     let mut produced = 0u64;
     let mut cached = 0u64;
+    let backlog: u64 = std::env::var("PROBE_BACKLOG").unwrap_or("0".into()).parse()?;
+    if backlog > 5000 { return Err("Probe backlog limit is 5000".into()); }
+    for sequence in 0..backlog {
+        cache.save_event("heartbeat", &json!({
+            "event_id":uuid::Uuid::new_v4(),"event_type":"input_summary","schema_version":1,
+            "boot_id":uuid::Uuid::new_v4(),"sequence":sequence+1,"device_id":device,
+            "hostname":"agent-transport-probe","timestamp":chrono::Utc::now().to_rfc3339(),
+            "payload":{"status":"active","active_seconds":2,"idle_seconds":0,
+                "cpu_percent":42.5,"memory_used_mb":1024,"memory_percent":25}
+        })).await?;
+        produced += 1;
+    }
+    cached = cached.max(cache.get_unsynced_event_count().await?);
     println!("{}", json!({"probe_ready":true,"device_id":device}));
     loop {
         let active = Instant::now() < deadline;
@@ -101,13 +117,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if publisher.is_none() {
             publisher = RabbitMQPublisher::connect(&url).await.ok();
         }
+        let mut delay = Duration::from_secs(2);
         if let Some(publisher) = publisher.as_ref() {
-            let mut sent = Vec::new();
-            for (id, kind, event) in cache.get_unsynced_events().await? {
-                if publisher.publish_event(&kind, event).await.is_err() { break; }
-                sent.push(id);
-            }
-            cache.mark_synced(&sent).await?;
+            let status = outbox_drain::drain_batch(&cache, |kind, event| async move {
+                publisher.publish_event(&kind, event).await.map_err(|error| error.to_string())
+            }).await?;
+            if matches!(status, outbox_drain::DrainStatus::More) { delay = Duration::from_millis(250); }
         }
         let pending = cache.get_unsynced_event_count().await?;
         cached = cached.max(pending);
@@ -116,7 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if Instant::now() > deadline + Duration::from_secs(120) {
             return Err("broker recovery deadline exceeded; cache retained".into());
         }
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(delay).await;
     }
     println!("{}", json!({"probe_passed":true,"device_id":device,"produced":produced,"max_pending":cached}));
     Ok(())

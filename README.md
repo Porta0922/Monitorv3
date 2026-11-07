@@ -18,7 +18,7 @@ Revisión de seguridad actualizada al **2026-11-06**: [hallazgos, correcciones y
 
 **Agente piloto instalado: 0.1.0, sin publicación estable.** Actualizado: 2026-11-03.
 
-Monitor reúne recursos, actividad de aplicaciones, inventario y eventos de computadoras de oficina. El agente se instala en cada equipo; el servidor central recibe la información y el dashboard permite consultarla. RabbitMQ se mantiene como transporte de eventos.
+Monitor reúne recursos, actividad de aplicaciones, inventario y eventos de computadoras de oficina. El agente se instala en cada equipo; el servidor central recibe la información y el dashboard permite consultarla. RabbitMQ se mantiene como transporte de eventos. La recuperación offline del servicio usa lotes acotados y acelera el reenvío mientras haya pendientes; conserva IDs para deduplicación. [Garantías y límites](docs/TELEMETRY_DELIVERY.md).
 
 La nueva numeración comienza en 0.1.0. El piloto local fue reinstalado desde cero por autorización del usuario, descartando los datos 3.4.0. El MSI nuevo es privado y sin firma; los artefactos antiguos 3.x no deben reutilizarse. Esto no valida la migración que conserva datos de otras instalaciones. Consulta [versionado](docs/VERSIONING.md).
 

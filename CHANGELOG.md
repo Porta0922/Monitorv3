@@ -1,5 +1,12 @@
 # Changelog
 
+## Recuperación de pendientes — 2026-11-07
+
+- Drenaje del servicio acotado a 256 eventos y cinco segundos por pasada; pausa de 250 ms tras un lote completo confirmado.
+- Confirmaciones de caché guardadas en una transacción; IDs y eventos inciertos se conservan ante timeout, desconexión o error de almacenamiento.
+- Pruebas de 5000 eventos, fallos parciales, timeout y rollback de escritura; probe de transporte comparte la misma implementación.
+- Regresión Chromium de escape de metadatos y CSP de producción incorporada al CI.
+
 ## Preparación operativa y dependencias — 2026-11-07
 
 - Cliente RabbitMQ Lapin 4.12.3 con Tokio, raíces nativas y ring explícitos; adaptada API de protocolo y rechazo de confirmaciones no enviadas. Retiradas dependencias sin mantenimiento del grafo resuelto.
