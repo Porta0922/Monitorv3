@@ -9,7 +9,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U monitor_user -d activity_monitor" ]
       interval: 5s
@@ -28,8 +28,8 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
     healthcheck:
       test: [ "CMD-SHELL", "rabbitmq-diagnostics -q check_running && rabbitmq-diagnostics -q check_port_connectivity" ]
       interval: 5s
@@ -44,7 +44,7 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
@@ -84,7 +84,7 @@ services:
       DATABASE_URL: postgresql://monitor_user:monitor_password@postgres:5432/activity_monitor
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2f
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -105,7 +105,7 @@ services:
       context: ./dashboard
       dockerfile: Dockerfile
     ports:
-      - "5173:80"
+      - "127.0.0.1:5173:80"
     depends_on:
       server:
         condition: service_healthy

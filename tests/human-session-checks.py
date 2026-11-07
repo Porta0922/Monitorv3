@@ -17,6 +17,8 @@ api('POST','/auth/logout',{},human={**token,'Origin':'https://attacker.invalid'}
 api('GET','/auth/session',human={'Cookie':'__Host-monitor_session='+'0'*64},expected=401)
 api('GET','/auth/session',human={'Cookie':token['Cookie']+'; '+token['Cookie']},expected=401)
 security=api('GET','/auth/security');assert security['failed_logins_15m']>=2
+assert security['csrf_rejections_15m']>=2
+assert security['denied_requests_15m']>=4
 for _ in range(5):login('unknown-account',expected=401)
 login('unknown-account',expected=429)
 assert api('GET','/auth/security')['limited_accounts_24h']>=1
@@ -70,3 +72,20 @@ for prefix in ['', '/api']:
 assert int(sql("SELECT count(*) FROM audit_events WHERE target LIKE '%"+audit_device+"%' AND details::jsonb->>'result'='status_201'"))>=2
 assert sql("SELECT count(*) FROM audit_events WHERE details LIKE '%sensitive reason%'")=='0'
 print('PASS: operator export/investigation execution and actor/device/result audit with private request content excluded',flush=True)
+
+# A dedicated account keeps this budget test from throttling later role checks.
+budget_user=login('rate-budget')
+limited=False
+for _ in range(605):
+ request=urllib.request.Request(f'http://127.0.0.1:{httpport}/api/auth/session',headers=budget_user)
+ try:
+  with urllib.request.urlopen(request,timeout=10) as response:
+   assert response.headers['Cache-Control']=='no-store'
+   assert response.headers['X-Content-Type-Options']=='nosniff'
+ except urllib.error.HTTPError as error:
+  assert error.code==429,error.code
+  assert error.headers['Retry-After']=='60'
+  assert error.headers['Cache-Control']=='no-store'
+  limited=True;break
+assert limited,'API budget did not reject excessive requests'
+print('PASS: per-account request budget and security headers on denied responses',flush=True)

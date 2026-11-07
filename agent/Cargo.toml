@@ -21,8 +21,7 @@ futures = "0.3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
-env_logger = "0.11"
-reqwest = { version = "0.11", features = ["json", "blocking"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
 hostname = "0.4"
 dotenvy = "0.15"
 hyper = { version = "0.14", features = ["server", "http1", "tcp"] }
@@ -38,7 +37,8 @@ windows-service = "0.6"
 libc = "0.2"
 signal-hook = "0.3"
 rdev = "0.5"
-xcap = "0.9.4"
+# Window metadata only; avoid screenshot/recording and PipeWire dependencies.
+xcb = "1.7"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"

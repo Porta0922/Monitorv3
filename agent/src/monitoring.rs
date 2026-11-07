@@ -154,19 +154,9 @@ impl MonitoringLoop {
         crate::capture_diagnostics::record("running_apps","no_observation",None);
         #[cfg(target_os="windows")] let apps=capture_open_apps_windows(&mut self.sys);
         #[cfg(target_os="macos")] let apps=capture_open_apps_macos(&mut self.sys);
-        #[cfg(target_os="linux")] let apps={
-            let mut apps=Vec::new();
-            match xcap::Window::all() {
-                Ok(windows)=>for window in windows {
-                    match (window.app_name(),window.title()) {
-                        (Ok(app_name),Ok(title)) if !app_name.is_empty() && !title.is_empty()=>apps.push(OpenAppSnapshot{app_name,primary_title:title,window_count:1,exe_path:None,exe_hash:None}),
-                        (Err(error),_)=>crate::capture_diagnostics::record("running_apps","capture_error",Some(&error.to_string())),
-                        (_,Err(error))=>crate::capture_diagnostics::record("running_apps","capture_error",Some(&error.to_string())),
-                        _=>{}
-                    }
-                },
-                Err(error)=>crate::capture_diagnostics::record("running_apps","capture_error",Some(&error.to_string()))
-            } apps
+        #[cfg(target_os="linux")] let apps=match capture_open_apps_linux() {
+            Ok(apps)=>apps,
+            Err(error)=>{crate::capture_diagnostics::record("running_apps","capture_error",Some(&error.to_string()));Vec::new()}
         };
         #[cfg(not(any(target_os="linux",target_os="windows",target_os="macos")))] let apps=Vec::new();
         if !apps.is_empty() && crate::capture_diagnostics::latest("running_apps")["state"]!="capture_error" {crate::capture_diagnostics::record("running_apps","capture_ok",None);}
@@ -551,6 +541,54 @@ fn capture_active_window_windows() -> Option<WindowCapture> {
             timestamp: Utc::now(),
         })
     }
+}
+
+// EWMH window metadata only: no image capture or PipeWire runtime requirement.
+#[cfg(target_os = "linux")]
+fn capture_open_apps_linux() -> Result<Vec<OpenAppSnapshot>, Box<dyn std::error::Error>> {
+    use xcb::x;
+    if std::env::var_os("WAYLAND_DISPLAY").is_some()
+        || std::env::var("XDG_SESSION_TYPE").as_deref() == Ok("wayland") {
+        return Err("Global window enumeration is not supported on Wayland".into());
+    }
+    let (connection, _) = xcb::Connection::connect(None)?;
+    let atom = |name: &[u8]| -> Result<x::Atom, xcb::Error> {
+        connection.wait_for_reply(connection.send_request(&x::InternAtom { only_if_exists: false, name }))
+            .map(|reply| reply.atom())
+    };
+    let clients = atom(b"_NET_CLIENT_LIST")?;
+    let title_atom = atom(b"_NET_WM_NAME")?;
+    let utf8 = atom(b"UTF8_STRING")?;
+    let property = |window, property, r#type| {
+        connection.wait_for_reply(connection.send_request(&x::GetProperty {
+            delete: false, window, property, r#type, long_offset: 0, long_length: 4096,
+        }))
+    };
+    let mut apps = Vec::new();
+    for screen in connection.get_setup().roots() {
+        let list = property(screen.root(), clients, x::ATOM_WINDOW)?;
+        if list.format() != 32 { return Err("Window manager does not expose an EWMH client list".into()); }
+        if list.bytes_after() != 0 { return Err("Window list exceeds capture limit".into()); }
+        for &window in list.value::<x::Window>() {
+            // A window can close between enumeration and reading its properties.
+            let Ok(class) = property(window, x::ATOM_WM_CLASS, x::ATOM_STRING) else { continue; };
+            if class.format() != 8 { continue; }
+            let names = String::from_utf8_lossy(class.value::<u8>());
+            let app_name = names.split('\0').nth(1).unwrap_or("").to_owned();
+            let Ok(title) = property(window, title_atom, utf8) else { continue; };
+            let primary_title = if title.format() == 8 && !title.value::<u8>().is_empty() {
+                String::from_utf8_lossy(title.value::<u8>()).into_owned()
+            } else {
+                let Ok(legacy) = property(window, x::ATOM_WM_NAME, x::ATOM_STRING) else { continue; };
+                if legacy.format() != 8 { continue; }
+                legacy.value::<u8>().iter().map(|byte| char::from(*byte)).collect()
+            };
+            if !app_name.is_empty() && !primary_title.is_empty() {
+                apps.push(OpenAppSnapshot { app_name, primary_title, window_count: 1, exe_path: None, exe_hash: None });
+            }
+        }
+    }
+    Ok(apps)
 }
 
 // Linux implementation (uses xprop to query X11/XWayland active window properties)

@@ -2,6 +2,16 @@
 
 **Estado: piloto controlado; todavía no aprobado para producción.**
 
+Escaneo reproducible de imágenes y generación de SBOM: [procedimiento](docs/IMAGE_SECURITY.md). Dashboard candidato con base Nginx actualizada y escaneo sin avisos conocidos; los servicios restantes siguen pendientes.
+
+Bloque 1 en curso: clientes Rust actualizados a reqwest 0.12 con JSON/TLS nativo y sin HTTP/2 opcional; eliminado h2 vulnerable y comprobación del workspace Windows aprobada. Esta actualización no está instalada en el piloto; el próximo paquete del agente deberá tener una versión nueva conforme a VERSIONING.md.
+
+Compatibilidad Linux en revisión: la enumeración de ventanas pasa a metadatos X11 mediante XCB, sin dependencias de captura de pantalla/PipeWire. Wayland sigue fuera de la captura global admitida. El PR de seguridad permanece sujeto al CI y no certifica todavía el agente Linux.
+
+Plan vigente: [TODO y ruta de cierre hacia producción](docs/TODO.md), reorganizado el 2026-11-06 en ocho bloques con criterios de cierre. Siguiente paso: credenciales y dependencias; después despliegue, datos, agente, paquetes, dashboard y aceptación integrada.
+
+Revisión de seguridad actualizada al **2026-11-06**: [hallazgos, correcciones y pruebas](docs/SECURITY_REVIEW_2026-11-06.md). Incluye endurecimiento local de sesiones, registros, Nginx y configuración. Quedan abiertos el token histórico, dependencias Rust, imágenes Docker y validación del despliegue final. Estos cambios todavía no están desplegados en el piloto.
+
 **Agente piloto instalado: 0.1.0, sin publicación estable.** Actualizado: 2026-11-03.
 
 Monitor reúne recursos, actividad de aplicaciones, inventario y eventos de computadoras de oficina. El agente se instala en cada equipo; el servidor central recibe la información y el dashboard permite consultarla. RabbitMQ se mantiene como transporte de eventos.
@@ -82,6 +92,8 @@ docs/                     Plan, operación, arquitectura y evidencia
 ```
 
 ## Ejecutar el piloto local
+
+Si las ventanas aparecen antiguas, consulta el [diagnóstico del piloto y recuperación de eventos](docs/PILOT_TROUBLESHOOTING.md).
 
 Requisitos: Docker Engine/Compose v2 con soporte para `!override` y construcción de imágenes Linux. En Windows, Docker Desktop debe estar en ejecución. Las versiones de Rust y dependencias se fijan en `rust-toolchain.toml`, Cargo.lock, Dockerfiles y el lockfile del dashboard.
 

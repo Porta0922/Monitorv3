@@ -369,3 +369,15 @@ Retirados 73 archivos obsoletos y los crates manager/remover. Ajustados Cargo.lo
 ## 2026-11-03 — Bloque 8: implementación UX
 
 Cargas independientes y estados por consulta, filtros persistentes, tablas paginadas, diagnóstico desplegable, ayuda integrada, accesibilidad estructural y permisos comprensibles. Ver [DASHBOARD_UX.md](DASHBOARD_UX.md). Build TypeScript/Vite y ESLint focalizado; regresión Chromium sintética con revisión visual de capturas, ambos temas y tres tamaños. El bloque 9 conserva aceptación humana, lector de pantalla real e integración multiplataforma. No se modificó la versión del agente ni se desplegó el dashboard sobre Docker.
+
+
+## 2026-11-04 — Ventanas del piloto atrasadas por servidor detenido
+
+Docker Desktop estaba sin motor Linux disponible; servicio y sesión del agente seguían activos. Al iniciar Docker se confirmó captura reciente y reenvío FIFO de la cola persistente. Pendientes del servicio: 5.439 → 0; API final: 12 aplicaciones recientes a las 20:03:37 UTC, última instantánea 20:03:05 UTC. No se modificó ni reinstaló el agente. Registrada mejora de tiempo de drenaje en bloque 6 y guía [PILOT_TROUBLESHOOTING.md](PILOT_TROUBLESHOOTING.md). No equivale a certificar todos los escenarios de desconexión prolongada.
+## 2026-11-06 — Seguridad: endurecimiento y revisión focalizada
+
+Matriz aislada de sesiones/MFA/roles/CSRF aprobada, 7 pruebas unitarias de configuración/rutas aprobadas y prueba Nginx ampliada aprobada (HTTPS, archivos sensibles, límite de login, registros sin query). Build frontend/servidor aprobado; lint global conserva un fallo en AdministrationPage.tsx. npm audit sin avisos conocidos después de correcciones. Escaneo Rust e imágenes detectó pendientes; token histórico sin revocación confirmada. Informe completo: [SECURITY_REVIEW_2026-11-06.md](SECURITY_REVIEW_2026-11-06.md). Cambios locales sin despliegue/publicación. Producción no aprobada.
+## 2026-11-06 — PR de seguridad y corrección del fixture Windows
+
+Avance publicado en PR #2, commit 59a3842, árbol idéntico al comprobado localmente. Recorrido completo de identidad/transporte aprobado con reqwest nuevo; lint y build dashboard aprobados. Publicación preflight y almacenamiento aprobados en CI. Ciclo de vida Windows detectó un fixture que perdía PSScriptRoot: se reemplazan scriptblocks por copias reales, estado simulado compartido y carpeta con ACL protegida. La prueba requiere administrador porque los permisos son reales; la sesión local no puede asignar propietario Administrators. Validación de esa corrección reservada al runner Windows, sin reducir controles productivos. PR sin fusionar hasta CI satisfactorio; producción y piloto sin actualizar.
+

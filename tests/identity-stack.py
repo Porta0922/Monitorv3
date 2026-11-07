@@ -85,7 +85,7 @@ with tempfile.TemporaryDirectory(prefix='monitor-identity-') as tmp:
   password=secrets.token_hex(24)
   password_hash=run([str(SERVER),'--hash-password-stdin'],input=password)
   mfa_secret=base64.b32encode(secrets.token_bytes(20)).decode().rstrip('=')
-  accounts=[{'username':name,'password_hash':password_hash,'role':role,'disabled':False,**({'totp_secret':mfa_secret} if role=='admin' else {})} for name,role in [('isolated-test','admin'),('viewer','viewer'),('operator','operator')]]
+  accounts=[{'username':name,'password_hash':password_hash,'role':role,'disabled':False,**({'totp_secret':mfa_secret} if role=='admin' else {})} for name,role in [('isolated-test','admin'),('viewer','viewer'),('operator','operator'),('rate-budget','viewer')]]
   (path/'users.json').write_text(json.dumps(accounts))
   with socket.socket() as sock:sock.bind(('127.0.0.1',0));httpport=sock.getsockname()[1]
   for key in ['JWT_SECRET','DATABASE_URL','RABBITMQ_URL','AGENT_AUTH_TOKEN','AGENT_AUTH_TOKEN_FILE','ADMIN_PASSWORD']:env.pop(key,None)
