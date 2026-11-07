@@ -2,6 +2,8 @@
 
 **Estado: piloto controlado; todavía no aprobado para producción.**
 
+Escaneo reproducible de imágenes y generación de SBOM: [procedimiento](docs/IMAGE_SECURITY.md). Dashboard candidato con base Nginx actualizada y escaneo sin avisos conocidos; los servicios restantes siguen pendientes.
+
 Bloque 1 en curso: clientes Rust actualizados a reqwest 0.12 con JSON/TLS nativo y sin HTTP/2 opcional; eliminado h2 vulnerable y comprobación del workspace Windows aprobada. Esta actualización no está instalada en el piloto; el próximo paquete del agente deberá tener una versión nueva conforme a VERSIONING.md.
 
 Compatibilidad Linux en revisión: la enumeración de ventanas pasa a metadatos X11 mediante XCB, sin dependencias de captura de pantalla/PipeWire. Wayland sigue fuera de la captura global admitida. El PR de seguridad permanece sujeto al CI y no certifica todavía el agente Linux.

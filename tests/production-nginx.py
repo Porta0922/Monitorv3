@@ -1,5 +1,5 @@
 """Check rootless HTTPS config using disposable certificates. Requires cryptography."""
-import datetime, ipaddress, secrets, ssl, subprocess, tempfile, time, urllib.request, urllib.error
+import datetime, ipaddress, os, secrets, ssl, subprocess, tempfile, time, urllib.request, urllib.error
 from pathlib import Path
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -7,6 +7,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 ROOT=Path(__file__).resolve().parents[1]
 NAME='monitor-nginx-check-'+secrets.token_hex(4)
+IMAGE=os.environ.get('NGINX_TEST_IMAGE','monitorv32-local-dashboard:latest')
 def docker(*args):
  r=subprocess.run(['docker',*args],capture_output=True,text=True)
  if r.returncode: raise RuntimeError(r.stderr[-2000:])
@@ -22,8 +23,8 @@ with tempfile.TemporaryDirectory(prefix='monitor-tls-check-') as directory:
  (path/'stub.conf').write_text('events {} http { server { listen 3000; location / { return 200 "{}"; } } }')
  try:
   docker('network','create',NAME)
-  docker('run','--rm','-d','--name',NAME+'-stub','--network',NAME,'--network-alias','server','-v',str(path/'stub.conf')+':/etc/nginx/stub.conf:ro','--entrypoint','nginx','monitorv32-local-dashboard:latest','-c','/etc/nginx/stub.conf','-g','daemon off;')
-  docker('run','--rm','-d','--name',NAME,'--network',NAME,'--user','65532:65532','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges:true','--tmpfs','/tmp','-p','127.0.0.1::8443','-v',str(ROOT/'dashboard/nginx.production.conf')+':/etc/nginx/check.conf:ro','-v',str(path)+':/run/tls:ro','-v',str(ROOT/'dashboard/dist')+':/usr/share/nginx/html:ro','--entrypoint','nginx','monitorv32-local-dashboard:latest','-c','/etc/nginx/check.conf','-g','daemon off;')
+  docker('run','--rm','-d','--name',NAME+'-stub','--network',NAME,'--network-alias','server','-v',str(path/'stub.conf')+':/etc/nginx/stub.conf:ro','--entrypoint','nginx',IMAGE,'-c','/etc/nginx/stub.conf','-g','daemon off;')
+  docker('run','--rm','-d','--name',NAME,'--network',NAME,'--user','65532:65532','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges:true','--tmpfs','/tmp','-p','127.0.0.1::8443','-v',str(ROOT/'dashboard/nginx.production.conf')+':/etc/nginx/check.conf:ro','-v',str(path)+':/run/tls:ro','-v',str(ROOT/'dashboard/dist')+':/usr/share/nginx/html:ro','--entrypoint','nginx',IMAGE,'-c','/etc/nginx/check.conf','-g','daemon off;')
   docker('exec',NAME,'nginx','-c','/etc/nginx/check.conf','-t')
   port=docker('port',NAME,'8443/tcp').rsplit(':',1)[1]
   context=ssl.create_default_context(cafile=str(path/'web.crt'))

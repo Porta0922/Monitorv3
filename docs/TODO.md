@@ -1,5 +1,7 @@
 # TODO — Ruta de cierre hacia producción
 
+Seguimiento **2026-11-07**: tras la pausa temporal solicitada (69f70d8), el usuario autoriza fusionar los PR. Se reactiva Agent lifecycle checks con ejecución única por PR/main y cancelación de ejecuciones obsoletas. Corrección de la prueba Docker: excluir Restarting y exigir un StartedAt nuevo para no aceptar logs del proceso anterior; recorrido local aprobado. El PR #1 ya estaba fusionado; el #2 requiere CI completo satisfactorio antes de su fusión. No hay certificación nueva de producción.
+
 Actualizado: **2026-11-06**. Estado: **piloto controlado; producción no aprobada**. Agente **0.1.0**. Este es el único plan activo. El [plan anterior completo](TODO_PRODUCCION_HISTORICO_2026-11-06.md) conserva el detalle y las evidencias para consulta, no como segunda lista de ejecución.
 
 Base: [informe de seguridad](SECURITY_REVIEW_2026-11-06.md), [progreso](REFACTOR_PROGRESS.md) y [diagnóstico del piloto](PILOT_TROUBLESHOOTING.md). Las correcciones de seguridad del 6 de noviembre están locales, sin publicar ni desplegar.
@@ -42,6 +44,8 @@ Seguimiento del CI: fixture Windows corregido y aprobado por el runner; prueba d
 - [ ] Actualizar bases y servicios Docker soportados, fijar digests y reconstruir. Revisar compatibilidad y ruta de actualización de RabbitMQ/PostgreSQL/Timescale antes de modificar volúmenes. Conservar RabbitMQ.
 - [ ] Retirar dependencias sin uso demostrado. Decidir retiro de Redis, actualmente sin función identificada; si se utiliza, justificarlo y definir ACL/persistencia.
 - [ ] Generar inventario de componentes/SBOM y volver a escanear artefactos nuevos, registrando herramientas, fecha y versiones.
+
+Imágenes: dashboard candidato con Nginx 1.30.6 fijado por digest, build y comprobación HTTPS aprobados, cero avisos conocidos en su escaneo. Script `scripts/security-images.ps1` genera informes privados y SBOM por ID de imagen, con umbral crítico/alto opcional. El resto de imágenes y la adopción productiva siguen pendientes; ver [IMAGE_SECURITY.md](IMAGE_SECURITY.md).
 
 **Cierre:** correcciones comprobadas y hallazgos clasificados. Riesgos críticos/altos explotables bloquean producción; cualquier excepción requiere responsable, mitigación, motivo y vencimiento. No confundir avisos de escáner con explotación demostrada ni análisis con corrección.
 

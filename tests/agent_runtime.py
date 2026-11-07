@@ -37,11 +37,16 @@ def run(image):
     snapshot_index = 0
     def inspect():
         return json.loads(docker("inspect", name))[0]
-    def ready():
+    def ready(previous_start=None):
         info = inspect()
-        if not info["State"]["Running"]:
+        state = info["State"]
+        # Docker can report Running while Restarting, before replacing StartedAt.
+        # Old startup logs must not certify readiness of the next process.
+        if not state["Running"] or state.get("Restarting", False):
             return False
-        return "Agent started successfully" in docker("logs", "--since", info["State"]["StartedAt"], name)
+        if previous_start is not None and state["StartedAt"] == previous_start:
+            return False
+        return "Agent started successfully" in docker("logs", "--since", state["StartedAt"], name)
     def snapshot():
         nonlocal snapshot_index
         snapshot_index += 1
@@ -78,12 +83,14 @@ def run(image):
         time.sleep(11)
         children = docker("exec", name, "cat", "/proc/1/task/1/children").split()
         assert len(children) == 1 and children[0].isdigit(), "Expected only the agent under container init"
+        previous_start = inspect()["State"]["StartedAt"]
         docker("exec", name, "sh", "-c", 'kill -KILL "$1"', "sh", children[0])
         wait_for(lambda: inspect()["RestartCount"] >= 1)
-        wait_for(ready)
+        wait_for(lambda: ready(previous_start))
         restart_count = inspect()["RestartCount"]
         docker("stop", "--time", "10", name)
-        assert inspect()["State"]["ExitCode"] == 0
+        stopped = inspect()["State"]
+        assert stopped["ExitCode"] == 0, stopped
         new_identity, new_pending = snapshot()
         assert identity == new_identity, "Restart changed device identity"
         assert pending <= new_pending, "Restart lost unacknowledged events"

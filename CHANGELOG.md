@@ -1,5 +1,12 @@
 # Changelog
 
+## Dashboard e infraestructura de validación — 2026-11-07
+
+- Base Nginx 1.30.6 fijada por digest; imagen completa del dashboard construida y escaneada sin avisos conocidos, con SBOM CycloneDX.
+- Escáner reproducible en scripts/security-images.ps1, informes privados por ejecución y umbral crítico/alto opcional.
+- CI sin duplicación entre push de rama y PR; cancelación de ejecuciones obsoletas. Control del agente reactivado tras corregir la sincronización de reinicio en la prueba Docker.
+- Instalador y servicios del piloto no reemplazados; la fusión de código no certifica producción.
+
 ## Compatibilidad y regresiones detectadas por CI — 2026-11-06
 
 - Enumeración Linux mediante metadatos XCB, retirando xcap y su dependencia PipeWire incompatible con Ubuntu 22.04; Wayland continúa explícitamente no soportado para captura global.
