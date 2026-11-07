@@ -14,7 +14,8 @@ serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["postgres", "runtime-tokio-rustls", "chrono", "uuid", "macros", "migrate"] }
-lapin = "2"
+# Native roots honor SSL_CERT_FILE; select ring without generic rustls defaults.
+lapin = { version = "4.12.3", default-features = false, features = ["tokio", "rustls-native-certs", "rustls--ring"] }
 futures = "0.3"
 tracing = "0.1"
 tracing-subscriber = "0.3"

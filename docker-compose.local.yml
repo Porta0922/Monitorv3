@@ -14,9 +14,6 @@ services:
     ports: !override
       - "127.0.0.1:5673:5672"
       - "127.0.0.1:15675:15672"
-  redis:
-    ports: !override
-      - "127.0.0.1:63790:6379"
   server:
     environment:
       DATABASE_URL: postgresql://monitor_user:${LOCAL_DB_PASSWORD}@postgres:5432/activity_monitor

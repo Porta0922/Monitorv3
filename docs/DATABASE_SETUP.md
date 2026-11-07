@@ -15,7 +15,6 @@ docker-compose up -d
 This starts:
 - **PostgreSQL 15** + TimescaleDB on port 5432
 - **RabbitMQ 3.12** on ports 5672 (AMQP) and 15672 (Management)
-- **Redis 7** on port 6379 (optional, for caching)
 
 ### Verify Services
 ```bash

@@ -150,13 +150,13 @@ impl RabbitMQConsumer {
         headers.insert("x-monitor-attempts".into(), AMQPValue::LongUInt(attempts.saturating_add(1)));
         if destination == queue { tokio::time::sleep(std::time::Duration::from_secs(2)).await; }
         let properties = crate::broker_identity::retry_properties(delivery,headers);
-        let confirmation = channel.basic_publish("", &destination,
+        let confirmation = channel.basic_publish("".into(), destination.as_str().into(),
             lapin::options::BasicPublishOptions { mandatory: true, ..Default::default() },
             &delivery.data, properties).await?.await?;
-        if !matches!(confirmation, lapin::publisher_confirm::Confirmation::Ack(None)) {
+        if !matches!(confirmation, lapin::Confirmation::Ack(None)) {
             return Err("Retry/dead-letter publication was not confirmed or was returned".into());
         }
-        delivery.ack(Default::default()).await?;
+        if !delivery.ack(Default::default()).await? { return Err("Delivery acknowledgement was not sent".into()); }
         Ok(())
     }
 
@@ -200,7 +200,7 @@ impl RabbitMQConsumer {
         println!("Declarando exchange 'monitoring' (tipo: Topic, durable: true)...");
         info!("📢 Declaring 'monitoring' exchange (Topic, Durable)");
         channel.exchange_declare(
-            "monitoring",
+            "monitoring".into(),
             lapin::ExchangeKind::Topic,
             lapin::options::ExchangeDeclareOptions {
                 durable: true,
@@ -245,7 +245,7 @@ impl RabbitMQConsumer {
                 e
             })?;
 
-        channel.queue_bind("heartbeat_queue", "monitoring", "monitoring.health",
+        channel.queue_bind("heartbeat_queue".into(), "monitoring".into(), "monitoring.health".into(),
             Default::default(), Default::default()).await?;
 
         Self::setup_queue(&channel, "usb_queue", "monitoring.usb", db.clone(), config.clone(), error_tx.clone()).await
@@ -284,7 +284,7 @@ impl RabbitMQConsumer {
 
         CONSUMER_READY.store(true, std::sync::atomic::Ordering::Release);
         let stopped = error_rx.recv().await;
-        let _ = connection.close(200, "consumer recovery").await;
+        let _ = connection.close(200, "consumer recovery".into()).await;
         CONSUMER_READY.store(false, std::sync::atomic::Ordering::Release);
         if let Some(err_msg) = stopped {
             return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, err_msg)));
@@ -309,7 +309,7 @@ impl RabbitMQConsumer {
         println!("Intentando declarar cola {}...", queue_name);
         info!("  📋 Creating queue '{}' (Durable: true, Exclusive: false, AutoDelete: false)", queue_name);
         channel.queue_declare(
-            queue_name,
+            queue_name.into(),
             QueueDeclareOptions {
                 durable: true,
                 exclusive: false,
@@ -328,8 +328,8 @@ impl RabbitMQConsumer {
         println!("Cola {} declarada con éxito", queue_name);
         if std::env::var("MONITOR_ENV").as_deref()==Ok("production") {
             let scoped=routing_key.replacen("monitoring.","monitoring.*.",1);
-            channel.queue_bind(queue_name,"monitoring",&scoped,Default::default(),Default::default()).await?;
-            if queue_name=="heartbeat_queue" {channel.queue_bind(queue_name,"monitoring","monitoring.*.health",Default::default(),Default::default()).await?;}
+            channel.queue_bind(queue_name.into(),"monitoring".into(),scoped.as_str().into(),Default::default(),Default::default()).await?;
+            if queue_name=="heartbeat_queue" {channel.queue_bind(queue_name.into(),"monitoring".into(),"monitoring.*.health".into(),Default::default(),Default::default()).await?;}
         }
         info!("    ✅ Queue '{}' created successfully", queue_name);
 
@@ -337,9 +337,9 @@ impl RabbitMQConsumer {
         println!("Vinculando cola {} a exchange 'monitoring' con routing key '{}'", queue_name, routing_key);
         info!("  🔗 Binding '{}' to exchange 'monitoring' with routing key '{}'", queue_name, routing_key);
         channel.queue_bind(
-            queue_name,
-            "monitoring",
-            routing_key,
+            queue_name.into(),
+            "monitoring".into(),
+            routing_key.into(),
             Default::default(),
             Default::default(),
         )
@@ -354,14 +354,14 @@ impl RabbitMQConsumer {
         info!("    ✅ Queue '{}' bound successfully to 'monitoring' with routing key '{}'", queue_name, routing_key);
 
         channel.basic_qos(16, Default::default()).await?;
-        channel.queue_declare(&format!("{queue_name}.dead"), QueueDeclareOptions { durable: true, ..Default::default() }, Default::default()).await?;
+        channel.queue_declare(format!("{queue_name}.dead").into(), QueueDeclareOptions { durable: true, ..Default::default() }, Default::default()).await?;
         channel.confirm_select(Default::default()).await?;
         let retry_channel = channel.clone();
 
         // Start consuming
         let consumer = channel.basic_consume(
-            queue_name,
-            "",
+            queue_name.into(),
+            "".into(),
             BasicConsumeOptions::default(),
             Default::default(),
         )
@@ -406,7 +406,7 @@ impl RabbitMQConsumer {
                             _ => Err("Malformed telemetry".into()),
                         };
                         let settled = match result {
-                            Ok(()) => delivery.ack(Default::default()).await.map_err(|e| e.to_string()),
+                            Ok(()) => delivery.ack(Default::default()).await.map_err(|e| e.to_string()).and_then(|sent| if sent { Ok(()) } else { Err("Delivery acknowledgement was not sent".into()) }),
                             Err(error) => {
                                 warn!(queue = %queue_name_str, %error, "Telemetry transaction failed; retaining message in retry/dead queue");
                                 Self::transfer_failed(&retry_channel, &delivery, &queue_name_str, malformed).await.map_err(|e| e.to_string())
@@ -929,12 +929,12 @@ mod broker_tests {
         let event = serde_json::json!({"event_id":id,"device_id":uuid::Uuid::new_v4(),"hostname":"retry-test",
             "event_type":"input_summary","timestamp":Utc::now(),"payload":{"active_seconds":30,"cpu_percent":42.5,"memory_used_mb":1024,"memory_percent":25}});
         let body = serde_json::to_vec(&event).unwrap();
-        let confirmed = channel.basic_publish("monitoring","monitoring.heartbeat", BasicPublishOptions { mandatory:true,..Default::default() },
+        let confirmed = channel.basic_publish("monitoring".into(),"monitoring.heartbeat".into(), BasicPublishOptions { mandatory:true,..Default::default() },
             &body,BasicProperties::default().with_delivery_mode(2)).await.unwrap().await.unwrap();
-        assert!(matches!(confirmed,lapin::publisher_confirm::Confirmation::Ack(None)));
+        assert!(matches!(confirmed,lapin::Confirmation::Ack(None)));
         let dead = tokio::time::timeout(std::time::Duration::from_secs(40), async {
             loop {
-                if let Some(message) = channel.basic_get("heartbeat_queue.dead",BasicGetOptions::default()).await.unwrap() { break message; }
+                if let Some(message) = channel.basic_get("heartbeat_queue.dead".into(),BasicGetOptions::default()).await.unwrap() { break message; }
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         }).await.unwrap();
@@ -945,7 +945,7 @@ mod broker_tests {
         }
         sqlx::query("ALTER TABLE node_resource_metrics DROP CONSTRAINT injected_failure").execute(&db.pool).await.unwrap();
         for _ in 0..8 {
-            channel.basic_publish("monitoring","monitoring.heartbeat",Default::default(), &body,BasicProperties::default().with_delivery_mode(2)).await.unwrap().await.unwrap();
+            channel.basic_publish("monitoring".into(),"monitoring.heartbeat".into(),Default::default(), &body,BasicProperties::default().with_delivery_mode(2)).await.unwrap().await.unwrap();
         }
         dead.delivery.ack(Default::default()).await.unwrap();
         tokio::time::timeout(std::time::Duration::from_secs(20), async {
@@ -956,16 +956,16 @@ mod broker_tests {
             }
         }).await.unwrap();
         // Malformed input is retained in dead-letter storage, not silently acknowledged.
-        channel.basic_publish("monitoring","monitoring.heartbeat",Default::default(), b"not-json",BasicProperties::default().with_delivery_mode(2)).await.unwrap().await.unwrap();
+        channel.basic_publish("monitoring".into(),"monitoring.heartbeat".into(),Default::default(), b"not-json",BasicProperties::default().with_delivery_mode(2)).await.unwrap().await.unwrap();
         let malformed = tokio::time::timeout(std::time::Duration::from_secs(20), async {
             loop {
-                if let Some(message)=channel.basic_get("heartbeat_queue.dead",Default::default()).await.unwrap() { break message; }
+                if let Some(message)=channel.basic_get("heartbeat_queue.dead".into(),Default::default()).await.unwrap() { break message; }
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         }).await.unwrap();
         assert_eq!(malformed.delivery.data,b"not-json"); malformed.delivery.ack(Default::default()).await.unwrap();
         let count:i64=sqlx::query_scalar("SELECT count(*) FROM node_resource_metrics").fetch_one(&db.pool).await.unwrap(); assert_eq!(count,1);
-        conn.close(200,"test complete").await.unwrap();
+        conn.close(200,"test complete".into()).await.unwrap();
         worker.abort(); let _ = worker.await;
         db.pool.close().await;
         http.delete(&vhost_url).basic_auth("guest",Some("guest")).send().await.unwrap().error_for_status().unwrap();

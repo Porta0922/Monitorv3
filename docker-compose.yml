@@ -38,21 +38,6 @@ services:
     networks:
       - activity-monitor
 
-  redis:
-    restart: unless-stopped
-    image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
-    volumes:
-      - redis_data:/data
-    ports:
-      - "127.0.0.1:6379:6379"
-    healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
-      interval: 5s
-      timeout: 10s
-      retries: 8
-    networks:
-      - activity-monitor
-
   server:
     init: true
     restart: unless-stopped
@@ -144,7 +129,6 @@ services:
 volumes:
   postgres_data:
   rabbitmq_data:
-  redis_data:
 
 networks:
   activity-monitor:

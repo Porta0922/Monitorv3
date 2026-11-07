@@ -28,7 +28,7 @@ assert dashboard['Config']['Labels']['com.docker.compose.project'] == PROJECT
 assert ready(), 'Proxy must be ready before disruption'
 old_ip = server['NetworkSettings']['Networks'][NETWORK]['IPAddress']
 holder = PROJECT + '-ip-reservation-' + uuid.uuid4().hex[:8]
-image = inspect(PROJECT + '-redis-1')['Image']
+image = dashboard['Image']
 created = False
 removed = False
 try:

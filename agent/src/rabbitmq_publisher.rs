@@ -72,7 +72,7 @@ impl RabbitMQPublisher {
         tracing::info!("📢 Agent declaring 'monitoring' exchange (Topic, Durable)");
         channel
             .exchange_declare(
-                "monitoring",
+                "monitoring".into(),
                 lapin::ExchangeKind::Topic,
                 lapin::options::ExchangeDeclareOptions {
                     durable: true,
@@ -224,8 +224,8 @@ impl RabbitMQPublisher {
                 async {
                     let confirmation = channel
                         .basic_publish(
-                            "monitoring",
-                            &routing_key,
+                            "monitoring".into(),
+                            routing_key.as_str().into(),
                             BasicPublishOptions { mandatory: true, ..Default::default() },
                             &body,
                             properties.clone(),
@@ -233,7 +233,7 @@ impl RabbitMQPublisher {
                         .await?
                         .await?;
                     match confirmation {
-                        lapin::publisher_confirm::Confirmation::Ack(None) => Ok(()),
+                        lapin::Confirmation::Ack(None) => Ok(()),
                         _ => Err(Self::boxed_error("Broker did not confirm a routed message".into())),
                     }
                 }
@@ -297,7 +297,7 @@ impl RabbitMQPublisher {
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
             channel.exchange_declare(
-                "monitoring",
+                "monitoring".into(),
                 lapin::ExchangeKind::Topic,
                 lapin::options::ExchangeDeclareOptions {
                     durable: true,
@@ -327,17 +327,17 @@ mod tests {
         let publisher = RabbitMQPublisher::connect(&url).await.unwrap();
         let connection = Connection::connect(&url, ConnectionProperties::default()).await.unwrap();
         let channel = connection.create_channel().await.unwrap();
-        let queue = channel.queue_declare("", lapin::options::QueueDeclareOptions {
+        let queue = channel.queue_declare("".into(), lapin::options::QueueDeclareOptions {
             exclusive: true, auto_delete: true, ..Default::default()
         }, Default::default()).await.unwrap();
         let event_type = format!("probe_{}", Uuid::new_v4().simple());
         let key = format!("monitoring.{event_type}");
-        channel.queue_bind(queue.name().as_str(), "monitoring", &key, Default::default(), Default::default()).await.unwrap();
+        channel.queue_bind(queue.name().as_str().into(), "monitoring".into(), key.as_str().into(), Default::default(), Default::default()).await.unwrap();
         let payload = json!({"test_id":Uuid::new_v4().to_string()});
         publisher.publish_event(&event_type, payload.clone()).await.unwrap();
-        let received = channel.basic_get(queue.name().as_str(), lapin::options::BasicGetOptions { no_ack: true }).await.unwrap().unwrap();
+        let received = channel.basic_get(queue.name().as_str().into(), lapin::options::BasicGetOptions { no_ack: true }).await.unwrap().unwrap();
         assert_eq!(serde_json::from_slice::<serde_json::Value>(&received.delivery.data).unwrap(), payload);
-        channel.queue_delete(queue.name().as_str(), Default::default()).await.unwrap();
+        channel.queue_delete(queue.name().as_str().into(), Default::default()).await.unwrap();
         assert!(publisher.publish_event(&event_type, payload).await.is_err());
     }
 }

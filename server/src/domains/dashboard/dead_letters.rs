@@ -16,15 +16,15 @@ pub async fn status(State(state): State<Arc<AppState>>) -> Response {
         let mut rows=Vec::new();
         for name in QUEUES {
             let channel=conn.create_channel().await?;
-            match channel.queue_declare(&format!("{name}.dead"),QueueDeclareOptions{passive:true,..Default::default()},Default::default()).await {
+            match channel.queue_declare(format!("{name}.dead").into(),QueueDeclareOptions{passive:true,..Default::default()},Default::default()).await {
                 Ok(q)=>rows.push(json!({"queue":name,"ready":q.message_count(),"consumers":q.consumer_count(),"available":true})),
                 Err(_)=>rows.push(json!({"queue":name,"ready":null,"available":false}))
             }
-            let _=channel.close(200,"Status read complete").await;
+            let _=channel.close(200,"Status read complete".into()).await;
         }
         Ok::<_,Error>(rows)
     }).await;
-    let _=tokio::time::timeout(Duration::from_secs(1),conn.close(200,"Request complete")).await;
+    let _=tokio::time::timeout(Duration::from_secs(1),conn.close(200,"Request complete".into())).await;
     match result {Ok(Ok(rows))=>(StatusCode::OK,Json(json!({"queues":rows,"observed_at":chrono::Utc::now(),"replay_days":30}))),
         _=>(StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"Cannot read dead-letter queues"})))}
 }
@@ -52,9 +52,9 @@ pub async fn replay(State(state): State<Arc<AppState>>,Path(queue):Path<String>,
             let channel=conn.create_channel().await?;
             channel.confirm_select(Default::default()).await?;
             // Never silently create a destination that has lost its consumer configuration.
-            channel.queue_declare(&queue,QueueDeclareOptions{passive:true,..Default::default()},Default::default()).await?;
+            channel.queue_declare(queue.as_str().into(),QueueDeclareOptions{passive:true,..Default::default()},Default::default()).await?;
             for _ in 0..body.limit {
-                let Some(message)=channel.basic_get(&format!("{queue}.dead"),BasicGetOptions{no_ack:false}).await? else {break;};
+                let Some(message)=channel.basic_get(format!("{queue}.dead").into(),BasicGetOptions{no_ack:false}).await? else {break;};
                 let delivery=&message.delivery;
                 let event=serde_json::from_slice::<Value>(&delivery.data);
                 let eligible=event.as_ref().ok().is_some_and(|e| crate::replay_policy::validate(e).is_ok()
@@ -66,16 +66,16 @@ pub async fn replay(State(state): State<Arc<AppState>>,Path(queue):Path<String>,
                 }
                 let mut headers=delivery.properties.headers().clone().unwrap_or_default();
                 headers.insert("x-monitor-attempts".into(),AMQPValue::LongUInt(0));
-                let confirm=channel.basic_publish("",&queue,BasicPublishOptions{mandatory:true,..Default::default()},&delivery.data,
+                let confirm=channel.basic_publish("".into(),queue.as_str().into(),BasicPublishOptions{mandatory:true,..Default::default()},&delivery.data,
                     crate::broker_identity::retry_properties(&delivery,headers)).await?.await?;
-                if !matches!(confirm,lapin::publisher_confirm::Confirmation::Ack(None)) {return Err("Replay publication not confirmed".into());}
-                delivery.ack(Default::default()).await?;
+                if !matches!(confirm,lapin::Confirmation::Ack(None)) {return Err("Replay publication not confirmed".into());}
+                if !delivery.ack(Default::default()).await? { return Err("Delivery acknowledgement was not sent".into()); }
                 moved+=1;
             }
             Ok(None)
         }).await;
         // Closing requeues any original for which publish/ack completion is uncertain.
-        let _=tokio::time::timeout(Duration::from_secs(1),conn.close(200,"Replay complete")).await;
+        let _=tokio::time::timeout(Duration::from_secs(1),conn.close(200,"Replay complete".into())).await;
         result?
     }.await;
     let (status,detail)=match result {

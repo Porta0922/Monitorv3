@@ -1,5 +1,13 @@
 # Changelog
 
+## Preparación operativa y dependencias — 2026-11-07
+
+- Cliente RabbitMQ Lapin 4.12.3 con Tokio, raíces nativas y ring explícitos; adaptada API de protocolo y rechazo de confirmaciones no enviadas. Retiradas dependencias sin mantenimiento del grafo resuelto.
+- Redis eliminado de Compose base, piloto y producción; prueba de renovación de IP independiente de Redis.
+- Guía detallada de release para DevOps; credenciales reales se incorporan en destino.
+- Renovación y rollback TLS conservan proyecto, archivo de variables y overlays indicados por el operador; regresión automatizada en CI.
+- Agente instalado y demás contenedores del piloto sin reemplazar; volumen Redis conservado. No constituye release estable.
+
 ## Validación del broker — 2026-11-07
 
 - Selector TEST_RABBITMQ_IMAGE para validar candidatos sin cambiar Compose ni el piloto. Recorrido aislado aprobado con RabbitMQ 4.2 fijado por digest.

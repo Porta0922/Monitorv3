@@ -7,9 +7,6 @@ services:
     ports: !override
       - "127.0.0.1:15673:5672"
       - "127.0.0.1:15674:15672"
-  redis:
-    ports: !override
-      - "127.0.0.1:16379:6379"
   server:
     environment:
       MONITOR_ENV: development
