@@ -39,8 +39,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let connection=lapin::Connection::connect(&url,lapin::ConnectionProperties::default()).await?;
         let channel=connection.create_channel().await?;
         let denied=match operation.as_str(){
-            "consume"=>channel.basic_get("heartbeat_queue",Default::default()).await.is_err(),
-            "configure"=>channel.queue_declare("unauthorized_probe",Default::default(),Default::default()).await.is_err(),
+            "consume"=>channel.basic_get("heartbeat_queue".into(),Default::default()).await.is_err(),
+            "configure"=>channel.queue_declare("unauthorized_probe".into(),Default::default(),Default::default()).await.is_err(),
             _=>return Err("Unknown permission probe".into())
         };
         if !denied{return Err("Forbidden broker operation succeeded".into());}println!("Broker denied forbidden operation");return Ok(());
@@ -50,8 +50,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let channel=connection.create_channel().await?;channel.confirm_select(Default::default()).await?;
         let user=reqwest::Url::parse(&url)?.username().to_string();
         let data=serde_json::to_vec(&json!({"device_id":foreign,"event_id":uuid::Uuid::new_v4(),"boot_id":uuid::Uuid::new_v4(),"sequence":1,"schema_version":1,"event_type":"input_summary","timestamp":chrono::Utc::now().to_rfc3339(),"payload":{"status":"active","active_seconds":2,"idle_seconds":0}}))?;
-        let confirm=channel.basic_publish("monitoring",&format!("monitoring.{device}.heartbeat"),lapin::options::BasicPublishOptions{mandatory:true,..Default::default()},&data,lapin::BasicProperties::default().with_user_id(user.into()).with_delivery_mode(2)).await?.await?;
-        if !matches!(confirm,lapin::publisher_confirm::Confirmation::Ack(None)){return Err("Spoof probe was not routed".into());}
+        let confirm=channel.basic_publish("monitoring".into(),format!("monitoring.{device}.heartbeat").into(),lapin::options::BasicPublishOptions{mandatory:true,..Default::default()},&data,lapin::BasicProperties::default().with_user_id(user.into()).with_delivery_mode(2)).await?.await?;
+        if !matches!(confirm,lapin::Confirmation::Ack(None)){return Err("Spoof probe was not routed".into());}
         println!("Forged payload delivered for consumer authorization check");return Ok(());
     }
     if std::env::var("PROBE_HOLD_FOR_REVOCATION").as_deref()==Ok("true") {

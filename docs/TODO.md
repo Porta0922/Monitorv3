@@ -32,17 +32,17 @@ Estas marcas acreditan implementación y evidencia acotada, no aceptación produ
 
 Primero implementar cada bloque y luego ejecutar sus comprobaciones focalizadas. Reservar la campaña completa para el bloque 7 y repetir después solo lo afectado por cambios. La revocación del token se atiende inmediatamente, pero no bloquea trabajo local independiente. Kubernetes queda como evolución posterior.
 
-## 1. Credenciales y dependencias — siguiente bloque
+## 1. Credenciales y dependencias — en curso
 
 - [ ] Confirmar revocación del token GitHub histórico de usb/agent-config.json y revisar su uso; rotar credenciales antiguas todavía activas. Requiere acceso del titular. Borrar archivos o commits no revoca tokens.
 - [ ] Evaluar limpieza posterior del historial/copias accesibles; no reescribir ni hacer force-push automáticamente. Mantener el repositorio existente como destino acordado.
 - [x] Migrar reqwest/hyper/h2 a una combinación compatible corregida; revisar agente, servidor y probe. Avance 2026-11-06: reqwest 0.12.28 con JSON/native-tls y sin HTTP/2 opcional; h2 0.3.27 eliminado del lockfile. Cargo check Windows y recorrido de identidad/transporte aislado aprobados; Linux aprobado por CI.
-- [ ] Identificar features/targets que incorporan rsa y eliminarlo si no se usa, o documentar exposición y tratamiento del aviso sin parche. No silenciarlo por estar ausente del árbol Windows activo.
-- [ ] Resolver dependencias sin mantenimiento y paquete retirado del registro; revisar Windows/Linux. Avance: dotenv sustituido por dotenvy, env_logger sin uso retirado del agente y async-executor actualizado a 1.14.1. Persisten dos avisos de mantenimiento en el análisis Rust tras retirar xcap.
+- [x] Identificar features/targets que incorporan rsa y eliminarlo si no se usa, o documentar exposición y tratamiento del aviso sin parche. Clasificación 2026-11-07: presente en Cargo.lock por sqlx-mysql opcional, sin ruta activa en `cargo tree --locked --target all -i rsa` con las funciones PostgreSQL actuales. Aviso conservado, sin excepción; reevaluar al cambiar funciones o artefactos.
+- [ ] Resolver dependencias sin mantenimiento y paquete retirado del registro; revisar Windows/Linux. Avance: dotenv sustituido por dotenvy, env_logger sin uso retirado del agente y async-executor actualizado a 1.14.1. Actualización local Lapin 4.12.3 elimina los avisos de mantenimiento; build Windows y AMQPS con RabbitMQ 4.2 aprobados. CI Linux del nuevo incremento pendiente.
 
-Seguimiento del CI: fixture Windows corregido y aprobado por el runner; prueba de origen/autenticación local ajustada al contrato vigente y aprobada en Windows. Captura Linux sustituye xcap por XCB para evitar incompatibilidad PipeWire con Ubuntu 22.04; compilación y comprobaciones Linux aprobadas en CI; aceptación con escritorio real pendiente. Auditoría tras esa sustitución: rsa sigue abierto y quedan dos avisos de mantenimiento (instant y rustls-pemfile). La prueba de migraciones ahora exige todo el historial embebido, conservando aserciones de integridad de datos.
+Seguimiento del CI: fixture Windows corregido y aprobado por el runner; prueba de origen/autenticación local ajustada al contrato vigente y aprobada en Windows. Captura Linux sustituye xcap por XCB para evitar incompatibilidad PipeWire con Ubuntu 22.04; compilación y comprobaciones Linux aprobadas en CI; aceptación con escritorio real pendiente. Auditoría tras esa sustitución: rsa sigue abierto y quedan dos avisos de mantenimiento (instant y rustls-pemfile). Los dos avisos de mantenimiento se eliminaron posteriormente con Lapin 4.12.3; rsa queda clasificado como dependencia opcional no activa. La prueba de migraciones ahora exige todo el historial embebido, conservando aserciones de integridad de datos.
 - [ ] Actualizar bases y servicios Docker soportados, fijar digests y reconstruir. Revisar compatibilidad y ruta de actualización de RabbitMQ/PostgreSQL/Timescale antes de modificar volúmenes. Conservar RabbitMQ.
-- [ ] Retirar dependencias sin uso demostrado. Decidir retiro de Redis, actualmente sin función identificada; si se utiliza, justificarlo y definir ACL/persistencia.
+- [ ] Retirar dependencias sin uso demostrado. Redis retirado de Compose base/local/producción y del ensayo; contenedor del piloto detenido y eliminado, volumen conservado. No hay consumidores de Redis en el código.
 - [ ] Generar inventario de componentes/SBOM y volver a escanear artefactos nuevos, registrando herramientas, fecha y versiones.
 
 Imágenes: dashboard candidato con Nginx 1.30.6 fijado por digest, build y comprobación HTTPS aprobados, cero avisos conocidos en su escaneo. Script `scripts/security-images.ps1` genera informes privados y SBOM por ID de imagen, con umbral crítico/alto opcional. RabbitMQ 4.2 candidato también pasó el escaneo y el recorrido aislado de identidad/AMQPS; migración y restantes imágenes siguen pendientes; ver [IMAGE_SECURITY.md](IMAGE_SECURITY.md).
@@ -128,6 +128,8 @@ Imágenes: dashboard candidato con Nginx 1.30.6 fijado por digest, build y compr
 **Cierre:** versión aprobada con recuperación y responsables definidos. Publicar código, actualizar el piloto y desplegar producción son acciones distintas.
 
 ## Decisiones externas
+
+Decisión del usuario (2026-11-07): credenciales y destino real se completarán al desplegar en producción. DevOps dispone de [RELEASE_DEVOPS.md](RELEASE_DEVOPS.md), con rutas y procedimiento. Esto no impide continuar código/validaciones aisladas ni acredita aceptación del destino real.
 
 | Recurso o decisión | Cuándo hace falta |
 |---|---|

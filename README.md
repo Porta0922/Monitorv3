@@ -2,6 +2,8 @@
 
 **Estado: piloto controlado; todavía no aprobado para producción.**
 
+[Guía paso a paso de release para DevOps](docs/RELEASE_DEVOPS.md): dónde configurar cuentas, MFA, secretos, certificados, red, enrolamiento, actualización y reversión. Las credenciales reales se incorporan en el servidor de destino.
+
 Escaneo reproducible de imágenes y generación de SBOM: [procedimiento](docs/IMAGE_SECURITY.md). Dashboard candidato con base Nginx actualizada y escaneo sin avisos conocidos; los servicios restantes siguen pendientes.
 
 Bloque 1 en curso: clientes Rust actualizados a reqwest 0.12 con JSON/TLS nativo y sin HTTP/2 opcional; eliminado h2 vulnerable y comprobación del workspace Windows aprobada. Esta actualización no está instalada en el piloto; el próximo paquete del agente deberá tener una versión nueva conforme a VERSIONING.md.
@@ -44,7 +46,6 @@ Computadora supervisada
 | PostgreSQL/TimescaleDB | Estado actual, eventos y resúmenes históricos | Servidor, volumen persistente |
 | Dashboard React/TypeScript | Consulta y administración mediante Nginx | Servidor, Docker |
 | Mantenimiento | Compactación y eliminación por lotes configurables | Servidor, Docker |
-| Redis | Incluido en Compose; uso funcional por confirmar | No tratar aún como requisito de la aplicación |
 
 El servicio no captura el escritorio desde la sesión de sistema. Esa función corresponde al componente de usuario enrolado. Los tiempos de varias personas/sesiones no representan horas de encendido de una máquina.
 
@@ -126,7 +127,6 @@ docker compose --project-name monitorv32-local --env-file .local-test/.env -f do
 | RabbitMQ administración | http://127.0.0.1:15675 |
 | RabbitMQ AMQP | 127.0.0.1:5673 |
 | PostgreSQL | Interno a Docker: `postgres:5432`, sin puerto publicado |
-| Redis | 127.0.0.1:63790 |
 
 Credenciales nuevas del dashboard en `.local-test/ACCESO-LOCAL.md`, archivo privado que no se distribuye. La cuenta bootstrap de este piloto local no tiene MFA: dejar vacío el código de autenticación. Las cuentas productivas con MFA siguen exigiendo el código. El paquete usado está en `.local-test/candidate-0.1.0/`; no redistribuirlo porque contiene configuración privada.
 
@@ -144,7 +144,7 @@ El Compose base contiene configuración de desarrollo y no debe exponerse direct
 
 ## Perfil candidato de producción
 
-Existe un [overlay de producción en preparación](docs/PRODUCTION_DEPLOYMENT.md), separado del piloto: roles PostgreSQL separados, trabajo de migraciones independiente, servidor/dashboard sin root, HTTPS en loopback 18443 y AMQPS en loopback 25671. Usa secretos desde archivos y validación estricta al arrancar. Redis queda excluido por defecto. El generador requiere Linux, cuentas Argon2id y certificados válidos; ver la guía para nombres, CA y permisos.
+Existe un [overlay de producción en preparación](docs/PRODUCTION_DEPLOYMENT.md), separado del piloto: roles PostgreSQL separados, trabajo de migraciones independiente, servidor/dashboard sin root, HTTPS en loopback 18443 y AMQPS en loopback 25671. Usa secretos desde archivos y validación estricta al arrancar. Redis fue retirado: no lo utiliza la aplicación. El generador requiere Linux, cuentas Argon2id y certificados válidos; ver la guía para nombres, CA y permisos.
 
 **No está listo para exposición real:** faltan certificados reales y su renovación operativa, aceptación multiplataforma y validación funcional completa del perfil, entre otros criterios del TODO. No aplicar el overlay sobre los volúmenes del piloto ni regenerar sus credenciales.
 

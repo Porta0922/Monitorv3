@@ -303,4 +303,9 @@ with tempfile.TemporaryDirectory(prefix='monitor-identity-') as tmp:
    try:process.wait(timeout=10)
    except subprocess.TimeoutExpired:process.kill();process.wait()
   if 'log' in locals():log.close()
-  for name in [BROKER,PG]:subprocess.run(['docker','rm','-f',name],capture_output=True)
+  # Optional private diagnostic output; never copied into published CI artifacts by default.
+  try:
+   if os.environ.get('TEST_IDENTITY_LOG') and (path/'server.log').is_file():
+    Path(os.environ['TEST_IDENTITY_LOG']).write_bytes((path/'server.log').read_bytes())
+  finally:
+   for name in [BROKER,PG]:subprocess.run(['docker','rm','-f',name],capture_output=True)

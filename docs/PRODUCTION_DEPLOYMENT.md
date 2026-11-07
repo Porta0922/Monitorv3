@@ -15,7 +15,6 @@ Actualizado: 2026-10-29. Preparación implementada; producción no aprobada. El 
 | Dashboard HTTPS | 127.0.0.1:18443 → 8443 |
 | RabbitMQ AMQPS | 127.0.0.1:25671 → 5671 |
 | API, PostgreSQL, administración RabbitMQ | Ninguna |
-| Redis | Excluido por defecto, perfil `unused-redis` |
 
 Los dos puertos publicados solo permiten acceso local o por un túnel autorizado. No se habilita todavía la conexión de equipos remotos. No cambiar el bind a todas las interfaces para saltarse los criterios pendientes.
 

@@ -24,9 +24,6 @@ services:
       - ./.production/tls/broker.key:/run/tls/broker.key:ro
       - ./.production/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
       - ./.production/rabbit-definitions.json:/etc/rabbitmq/definitions.json:ro
-  redis:
-    profiles: [unused-redis]
-    ports: !reset []
   server:
     env_file: [./.production/endpoint.env]
     build:

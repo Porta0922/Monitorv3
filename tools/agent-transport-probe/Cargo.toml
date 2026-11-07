@@ -6,7 +6,8 @@ publish = false
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-lapin = "2.3.1"
+# Native roots honor SSL_CERT_FILE; select ring without generic rustls defaults.
+lapin = { version = "4.12.3", default-features = false, features = ["tokio", "rustls-native-certs", "rustls--ring"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

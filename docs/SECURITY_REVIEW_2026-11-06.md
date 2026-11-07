@@ -1,5 +1,11 @@
 # Revisión de seguridad — 2026-11-06
 
+## Seguimiento 2026-11-07
+
+PR #2 y PR #3 fusionados tras CI completo satisfactorio. Actualización local Lapin 4.12.3: auditoría Rust sin avisos de mantenimiento; permanece RUSTSEC-2023-0071 de rsa en el lockfile por sqlx-mysql opcional. `cargo tree --locked --target all -i rsa` no muestra ruta activa para las funciones PostgreSQL actuales. No se silencia ni se declara eliminado: reevaluar en cada cambio de features, lockfile o artefacto. El escaneo del lockfile sigue informando el aviso.
+
+Redis retirado de los despliegues activos por ausencia de consumidores; se conserva el detector de URLs Redis en el escáner de secretos para identificar credenciales históricas. El recorrido de identidad/AMQPS con el cliente nuevo pasó contra RabbitMQ 4.2; compilación y build Windows aprobados. CI Linux del incremento sigue pendiente. La revisión inicial que sigue es evidencia histórica.
+
 ## Seguimiento del bloque 1
 
 Actualización posterior a la revisión inicial: reqwest 0.12.28 con funciones explícitas JSON/native-tls elimina h2 0.3.27. El servidor usa dotenvy y se retiró env_logger sin uso del agente; async-executor pasa a 1.14.1. `cargo check --locked --workspace` aprobado en Windows. La elección de funciones sigue la [documentación de reqwest](https://docs.rs/reqwest/0.12.28/reqwest/).

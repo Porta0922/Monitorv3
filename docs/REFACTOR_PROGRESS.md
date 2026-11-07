@@ -1,3 +1,9 @@
+## 2026-11-07 — PR #3 fusionado y preparación de release
+
+PR #3 fusionado en `15a87c72b7cec92f74c17a995d30bf485aee2fa9` tras cuatro flujos de CI aprobados. Nuevo incremento local: Lapin 4.12.3 compila en Windows y pasó identidad/AMQPS contra RabbitMQ 4.2. Configuración TLS selecciona raíces nativas y ring sin activar defaults incompatibles. Auditoría sin avisos de mantenimiento; rsa sigue en lockfile opcional, sin ruta activa con `--target all`. CI Linux del nuevo incremento pendiente.
+
+Redis retirado del código de despliegue y del contenedor del piloto; volumen conservado. El resto del piloto continúa saludable. Guía [RELEASE_DEVOPS.md](RELEASE_DEVOPS.md) preparada por pedido del usuario, con credenciales/destino a completar por DevOps. Renovación y rollback TLS preservan overlays, env-file y proyecto; dos regresiones focalizadas aprobadas.
+
 ## 2026-11-07 — Seguridad fusionada y candidato RabbitMQ validado
 
 PR #2 fusionado en `ba7e3b37af68f005686f953ed0460978bf5aa833`; PR #1 ya estaba fusionado. Los cuatro flujos pasaron sobre `178f16c3`: Stack smoke (42336765435), Publication preflight (42336765482), Storage retention (42336765427) y Agent lifecycle (42336765440). Historial conservado, sin release ni reemplazo del piloto.
