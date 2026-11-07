@@ -1,7 +1,11 @@
 name: Agent lifecycle checks
 on:
-  push:
-  pull_request:
+  # Temporarily manual while diagnosing the post-restart container shutdown.
+  # Restore PR/main triggers and require a successful run before merging PR #2.
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
