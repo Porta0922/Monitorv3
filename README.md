@@ -4,6 +4,8 @@
 
 [Guía paso a paso de release para DevOps](docs/RELEASE_DEVOPS.md): dónde configurar cuentas, MFA, secretos, certificados, red, enrolamiento, actualización y reversión. Las credenciales reales se incorporan en el servidor de destino.
 
+[Respaldos cifrados](docs/ENCRYPTED_BACKUPS.md): herramientas para cifrar DB/configuración y verificar integridad sin guardar el dump en claro. Recuperación PostgreSQL aislada comprobada; recuperación completa Timescale y copia externa pendientes de aceptación.
+
 Escaneo reproducible de imágenes y generación de SBOM: [procedimiento](docs/IMAGE_SECURITY.md). Dashboard candidato con base Nginx actualizada y escaneo sin avisos conocidos; los servicios restantes siguen pendientes.
 
 Bloque 1 en curso: clientes Rust actualizados a reqwest 0.12 con JSON/TLS nativo y sin HTTP/2 opcional; eliminado h2 vulnerable y comprobación del workspace Windows aprobada. Esta actualización no está instalada en el piloto; el próximo paquete del agente deberá tener una versión nueva conforme a VERSIONING.md.

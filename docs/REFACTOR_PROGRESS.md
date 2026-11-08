@@ -1,3 +1,9 @@
+## 2026-11-07 — Respaldos cifrados y CI de navegador
+
+Scripts age para DB/configuración, verificación de integridad y plantillas systemd implementados. Ensayos aislados aprobados: PostgreSQL 16 y Timescale/PostgreSQL 15, 5000 filas, chunks comprimidos, clave incorrecta, alteración, rutas inseguras, productor fallido y timeout. Guía ENCRYPTED_BACKUPS.md enlazada desde README/release. Copia externa, recuperación integral y RPO/RTO siguen pendientes.
+
+PR #5 abierto: corregido runner del navegador a Ubuntu 24.04, Publication y retención aprobados; ciclo del agente y stack todavía en ejecución. No se fusiona hasta que todo el CI pase.
+
 ## 2026-11-07 — PR #4 fusionado; recuperación offline en curso
 
 PR #4 fusionado en `e15e1103967b5c0fbd7cc497668d48551a0d4ec4`, cabeza `18154cbe9503bf683b80b2cde4f0bef134507014`, después de Publication preflight, Storage retention, Agent lifecycle y Stack smoke aprobados. Lapin 4.12.3 validado además con identidad/AMQPS aislados en RabbitMQ 3.12 y 4.2. Sin avisos de mantenimiento Rust; rsa opcional clasificado, sin supresión. Guía DevOps publicada; configuración/secretos reales se incorporan en destino.

@@ -1,0 +1,15 @@
+[Unit]
+Description=Monitor encrypted database and configuration backup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/monitor
+UMask=0077
+ExecStart=/usr/bin/python3 /opt/monitor/scripts/production/backup.py --output-dir /var/backups/monitor --recipients-file /etc/monitor-backup/recipients.txt --project-name monitor-production-candidate
+TimeoutStartSec=2h
+PrivateTmp=true
+# Add OnFailure in a unit drop-in connected to your alert receiver.
+# Add the deployed --env-file/--compose-file options to ExecStart when needed.

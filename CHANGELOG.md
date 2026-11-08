@@ -1,5 +1,11 @@
 # Changelog
 
+## Respaldos cifrados — 2026-11-07
+
+- Dump PostgreSQL y configuración cifrados con age, sin dump en claro en disco y sin clave privada de recuperación en el host de origen.
+- Verificación de integridad/autenticidad del cifrado, manifiesto de finalización, permisos y exclusión de respaldos/claves age de publicación.
+- Plantillas systemd y guía DevOps; recuperación aislada PostgreSQL/Timescale y regresión CI. Copia externa y aceptación integral pendientes.
+
 ## Recuperación de pendientes — 2026-11-07
 
 - Drenaje del servicio acotado a 256 eventos y cinco segundos por pasada; pausa de 250 ms tras un lote completo confirmado.
