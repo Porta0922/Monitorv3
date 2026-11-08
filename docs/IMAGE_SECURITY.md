@@ -20,3 +20,6 @@ python tests/production-nginx.py
 ```
 
 La prueba crea certificados, backend y red temporales, y elimina sus contenedores al terminar. No utiliza cuentas del piloto.
+
+
+Seguimiento 2026-11-08: runtime candidato Debian trixie construido localmente; no sustituye DockerServer/Dockerfile ni el piloto. Base fijada a `a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2`: escaneo registró 0 críticos, 48 altos y 184 hallazgos totales. Varios avisos no tienen versión corregida reportada. No se aprueba esta base automáticamente; faltan análisis de exposición y escaneo del runtime completo.

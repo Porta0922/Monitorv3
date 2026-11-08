@@ -892,7 +892,9 @@ mod transaction_tests {
         let count: i64 = sqlx::query_scalar("SELECT count(*) FROM node_resource_metrics").fetch_one(&db.pool).await.unwrap();
         assert_eq!(count, 2);
         db.pool.close().await;
-        sqlx::query(&format!("DROP DATABASE {name}")).execute(&admin).await.unwrap();
+        // Timescale background workers may reconnect after the pool closes.
+        // Only this UUID-named database was created by the fixture above.
+        sqlx::query(&format!("DROP DATABASE {name} WITH (FORCE)")).execute(&admin).await.unwrap();
         admin.close().await;
     }
 }

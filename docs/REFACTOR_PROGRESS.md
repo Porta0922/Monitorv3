@@ -2,7 +2,7 @@
 
 Scripts age para DB/configuración, verificación de integridad y plantillas systemd implementados. Ensayos aislados aprobados: PostgreSQL 16 y Timescale/PostgreSQL 15, 5000 filas, chunks comprimidos, clave incorrecta, alteración, rutas inseguras, productor fallido y timeout. Guía ENCRYPTED_BACKUPS.md enlazada desde README/release. Copia externa, recuperación integral y RPO/RTO siguen pendientes.
 
-PR #5 abierto: corregido runner del navegador a Ubuntu 24.04, Publication y retención aprobados; ciclo del agente y stack todavía en ejecución. No se fusiona hasta que todo el CI pase.
+PR #5 fusionado tras los cuatro flujos aprobados (`c9efebb50be1e13541878fb74adfe113a7538b1c`). PR #6 publica los respaldos; navegador, backups, retención y agente aprobados. Corregida limpieza de la DB temporal del ensayo concurrente: Timescale podía conservar una conexión después del cierre del pool; eliminación forzada solo de la DB UUID creada por el fixture. CI completo de esta corrección pendiente.
 
 ## 2026-11-07 — PR #4 fusionado; recuperación offline en curso
 
