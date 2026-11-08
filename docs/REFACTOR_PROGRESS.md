@@ -1,3 +1,9 @@
+## 2026-11-07 — PR #4 fusionado; recuperación offline en curso
+
+PR #4 fusionado en `e15e1103967b5c0fbd7cc497668d48551a0d4ec4`, cabeza `18154cbe9503bf683b80b2cde4f0bef134507014`, después de Publication preflight, Storage retention, Agent lifecycle y Stack smoke aprobados. Lapin 4.12.3 validado además con identidad/AMQPS aislados en RabbitMQ 3.12 y 4.2. Sin avisos de mantenimiento Rust; rsa opcional clasificado, sin supresión. Guía DevOps publicada; configuración/secretos reales se incorporan en destino.
+
+Incremento local de recuperación: lotes de 256, presupuesto de 5 s, pausa corta mientras hay progreso y confirmaciones SQLite atómicas. Cinco regresiones de durabilidad aprobadas; ensayo final de 5000 eventos por AMQPS aprobado: mismos 5000 efectos y marcadores en PostgreSQL, cola vacía. Chromium también aprobó escape de metadatos no confiables y bloqueo de scripts inline con la CSP productiva. Nuevo incremento pendiente de publicación/CI. El servicio instalado continúa en 0.1.0; no se entrega paquete nuevo ni se modifica su ejecución.
+
 ## 2026-11-07 — PR #3 fusionado y preparación de release
 
 PR #3 fusionado en `15a87c72b7cec92f74c17a995d30bf485aee2fa9` tras cuatro flujos de CI aprobados. Nuevo incremento local: Lapin 4.12.3 compila en Windows y pasó identidad/AMQPS contra RabbitMQ 4.2. Configuración TLS selecciona raíces nativas y ring sin activar defaults incompatibles. Auditoría sin avisos de mantenimiento; rsa sigue en lockfile opcional, sin ruta activa con `--target all`. CI Linux del nuevo incremento pendiente.

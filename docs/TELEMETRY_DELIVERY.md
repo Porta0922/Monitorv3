@@ -48,3 +48,13 @@ no permiten reconstruir eventos ya confirmados y perdidos; este cambio no los re
 
 Pendientes: prueba de corte exacto entre confirmación y ACK, observabilidad/replay de DLQ,
 ventana máxima de reenvío y limpieza compatible de processed_events.
+
+## Drenaje del agente tras desconexiones — 2026-11-07
+
+El servicio reenvía hasta 256 pendientes por lote, con orden de inserción estable y un presupuesto de publicación de cinco segundos. Si completa un lote lleno o agota el presupuesto después de confirmar algún evento, espera 250 ms antes del siguiente; sin pendientes, sin conexión, sin progreso o tras un error de publicación espera veinte segundos. No cambia IDs, timestamps ni cuerpos para hacer pasar mensajes antiguos como recientes. Los eventos fuera del horizonte permitido siguen sujetos a la política de replay del servidor.
+
+Solo se marca como sincronizado lo que recibió confirmación del publicador. Un timeout puede ocurrir después de que el broker haya recibido el evento: el agente conserva su ID y permite un reenvío deduplicable. Las confirmaciones locales se guardan juntas en una transacción SQLite; si falla alguna escritura se conserva todo el lote. La limpieza de confirmados se ejecuta cada cinco minutos, conservando la ventana de tres días existente.
+
+El presupuesto limita la espera de red por pasada; no es un límite estricto para el acceso SQLite o la planificación del sistema operativo. Esta implementación corresponde al drenaje servicio → broker; la sesión → servicio mantiene su bucle independiente. El estado actual del servidor compara timestamps observados antes de reemplazar recursos/salud; el inventario conserva su control de snapshots atrasados.
+
+Regresión focalizada: 5000 eventos cifrados, lotes acotados, mismos IDs y orden, corte parcial, timeout y rollback de confirmaciones por error de escritura. Además, recorrido aislado por AMQPS aprobado con 5000 eventos: 5000 muestras y marcadores en PostgreSQL, sin duplicar efectos y con cola del broker vacía. Los reenvíos de confirmación incierta produjeron copias de transporte que fueron deduplicadas. Evidencia privada en `.local-test/security/outbox-backlog.log`. No equivale a carga sostenida de una oficina ni a aceptación del agente instalado en cada sistema operativo.

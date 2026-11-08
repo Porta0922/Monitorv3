@@ -128,7 +128,8 @@ with tempfile.TemporaryDirectory(prefix='monitor-identity-') as tmp:
   login('isolated-test',first_admin_code,expected=401)
   humans={role:login(role) for role in ['viewer','operator']}
   api('GET','/api/devices',human=jwt(jwt_secret),expected=401)
-  exec((ROOT/'tests/human-session-checks.py').read_text(),globals())
+  if '--backlog' not in sys.argv:
+   exec((ROOT/'tests/human-session-checks.py').read_text(),globals())
   if '--human-only' in sys.argv:raise SystemExit(0)
   print('Server ready; checking enrollment',flush=True)
   device,other=str(uuid.uuid4()),str(uuid.uuid4())
@@ -216,6 +217,18 @@ with tempfile.TemporaryDirectory(prefix='monitor-identity-') as tmp:
   probe_env=env.copy();probe_env.update(RABBITMQ_URL=identity['rabbitmq_url'],PROBE_DEVICE_ID=device,PROBE_SECONDS='1',PROBE_CACHE=str(path/'probe.db'))
   wait_for(lambda:api('GET','/ready',human=None))
   print('Publishing with native agent transport',flush=True)
+  if '--backlog' in sys.argv:
+   run([str(PROBE)],env={**probe_env,'PROBE_SECONDS':'0','PROBE_BACKLOG':'5000'},timeout=180)
+   deadline=time.monotonic()+180
+   while True:
+    counts=json.loads(sql("SELECT json_build_object('input_activity_metrics',(SELECT count(*) FROM input_activity_metrics WHERE device_id='"+device+"'),'processed_events',(SELECT count(*) FROM processed_events WHERE device_id='"+device+"'))"))
+    queue=broker_api('queues/%2F/heartbeat_queue')
+    if all(value==5000 for value in counts.values()) and queue.get('messages_ready')==0 and queue.get('messages_unacknowledged')==0:break
+    print(json.dumps({'backlog_persisted':counts,'broker_ready':queue.get('messages_ready'),'broker_unacknowledged':queue.get('messages_unacknowledged')}),flush=True)
+    assert time.monotonic()<deadline, 'Backlog reconciliation timed out: '+json.dumps(counts)
+    time.sleep(5)
+   print('PASS: 5000 encrypted cached events drained through native AMQPS and persisted exactly once',flush=True)
+   raise SystemExit(0)
   run([str(PROBE)],env=probe_env,timeout=40)
   wait_for(lambda:int(sql("SELECT count(*) FROM input_activity_metrics WHERE device_id='"+device+"'"))>0)
   run([str(PROBE)],env={**probe_env,'PROBE_DEVICE_ID':other,'PROBE_EXPECT_REJECTION':'true'},timeout=25)

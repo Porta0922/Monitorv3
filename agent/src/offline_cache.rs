@@ -9,6 +9,8 @@ use uuid::Uuid;
 use std::sync::{Arc, Mutex};
 use sha2::Digest;
 
+pub const REPLAY_BATCH_SIZE: usize = 256;
+
 pub struct OfflineCache {
     conn: Arc<Mutex<Connection>>,
     cipher: Aes256Gcm,
@@ -99,10 +101,10 @@ impl OfflineCache {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, event_type, encrypted_payload, nonce FROM cache_events 
-             WHERE synced = 0 ORDER BY timestamp ASC LIMIT 256"
+             WHERE synced = 0 ORDER BY timestamp ASC, rowid ASC LIMIT ?1"
         )?;
 
-        let events = stmt.query_map([], |row| {
+        let events = stmt.query_map([REPLAY_BATCH_SIZE as i64], |row| {
             let id: String = row.get(0)?;
             let event_type: String = row.get(1)?;
             let ciphertext: Vec<u8> = row.get(2)?;
@@ -126,16 +128,16 @@ impl OfflineCache {
 
     /// Mark events as synced
     pub async fn mark_synced(&self, event_ids: &[String]) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
-        
+        let mut conn = self.conn.lock().unwrap();
+        let transaction = conn.transaction()?;
         for id in event_ids {
-            conn.execute(
+            transaction.execute(
                 "UPDATE cache_events SET synced = 1 WHERE id = ?1",
                 rusqlite::params![id],
             )?;
         }
 
-        Ok(())
+        transaction.commit()
     }
 
     /// Get cache statistics
@@ -301,6 +303,20 @@ mod tests {
 #[cfg(test)]
 mod durability_tests {
     use super::*;
+    #[tokio::test]
+    async fn confirmation_batch_rolls_back_if_any_write_fails() {
+        let cache = OfflineCache::new(":memory:", &[7; 32]).unwrap();
+        let first = cache.save_event("heartbeat", &serde_json::json!({"event_id":Uuid::new_v4()})).await.unwrap();
+        let second = cache.save_event("heartbeat", &serde_json::json!({"event_id":Uuid::new_v4()})).await.unwrap();
+        cache.conn.lock().unwrap().execute_batch(&format!(
+            "CREATE TRIGGER reject_confirmation BEFORE UPDATE ON cache_events WHEN NEW.id='{second}' BEGIN SELECT RAISE(ABORT,'injected failure'); END;"
+        )).unwrap();
+        assert!(cache.mark_synced(&[first.clone(), second.clone()]).await.is_err());
+        assert_eq!(cache.get_unsynced_event_count().await.unwrap(), 2);
+        cache.conn.lock().unwrap().execute_batch("DROP TRIGGER reject_confirmation;").unwrap();
+        cache.mark_synced(&[first, second]).await.unwrap();
+        assert_eq!(cache.get_unsynced_event_count().await.unwrap(), 0);
+    }
     #[tokio::test]
     async fn reopen_preserves_ids_wrong_key_fails_and_full_queue_keeps_pending() {
         let dir = std::env::temp_dir().join(format!("monitor-cache-{}", Uuid::new_v4()));
