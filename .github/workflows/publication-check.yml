@@ -22,7 +22,8 @@ jobs:
       - name: Preserve deployment configuration during TLS renewal and rollback
         run: python tests/tls_maintenance_config.py
   browser-security:
-    runs-on: ubuntu-latest
+    # Keep the browser runtime on an OS supported by the pinned Playwright.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
