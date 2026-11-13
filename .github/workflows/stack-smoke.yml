@@ -19,6 +19,10 @@ jobs:
         run: docker build --target validation -f DockerServer/Dockerfile -t monitor-validation .
       - name: Build and start isolated stack
         run: docker compose -p monitor-refactor-test -f docker-compose.yml -f tests/compose.smoke.yml up -d --build --wait --wait-timeout 180
+      - name: Minimal production runtime and native readiness
+        run: |
+          docker build --target production -f DockerServer/Dockerfile -t monitor-production-validation .
+          python3 tests/production_server_image.py --image monitor-production-validation --network monitor-refactor-test_activity-monitor
       - name: Fresh and legacy database migrations
         run: >-
           docker run --rm --network monitor-refactor-test_activity-monitor

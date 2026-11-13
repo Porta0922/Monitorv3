@@ -45,15 +45,11 @@ Crear un directorio privado **fuera del checkout**. En estos ejemplos se utiliza
 
 ```bash
 install -d -m 0700 /root/monitor-release /root/monitor-release/tls
-docker run -d --name monitor-account-bootstrap --network none --read-only \
-  --cap-drop ALL --security-opt no-new-privileges:true \
-  --entrypoint /bin/sleep "monitor-server:$RELEASE_SHA" infinity
 python3 scripts/manage-accounts.py \
   --users-file /root/monitor-release/users.json \
-  --docker-container monitor-account-bootstrap \
+  --docker-image "monitor-server:$RELEASE_SHA" \
   create administrador --role admin \
   --provisioning-file /root/monitor-release/administrador-mfa.txt
-docker rm -f monitor-account-bootstrap
 ```
 
 La herramienta solicita la contraseña de forma interactiva, guarda Argon2id y genera el material de alta MFA en el archivo privado indicado. Entregarlo al administrador mediante el canal seguro de la organización y registrarlo en su autenticador. Nunca incorporarlo al README, GitHub, ticket ni navegador como una API key. Custodiar la recuperación y retirar la copia de provisión según la política de secretos.

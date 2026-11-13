@@ -19,9 +19,9 @@ Estas marcas acreditan implementación y evidencia acotada, no aceptación produ
 
 ## Qué falta programar y qué falta validar
 
-- Privacidad de escritorio: implementada en este incremento (política global/equipo, títulos, aplicaciones, rutas, caché e IPC); pendiente CI/publicación y entrega del agente compatible. Ver [DESKTOP_PRIVACY.md](DESKTOP_PRIVACY.md).
-- Operación: copia externa verificable implementada con rclone e integrada al respaldo programado; configurar destino real y alertas. Los backups cifrados y plantillas de programación ya existen.
-- Imágenes: resolver/mitigar hallazgos y preparar la migración de servicios; no equivale a repetir las pruebas de la misma imagen.
+- Privacidad de escritorio: publicada y fusionada en PR #7 (política global/equipo, títulos, aplicaciones, rutas, caché e IPC); pendiente entrega del agente compatible. Ver [DESKTOP_PRIVACY.md](DESKTOP_PRIVACY.md).
+- Operación: copia externa verificable fusionada en PR #8 con rclone e integrada al respaldo programado; configurar destino real y alertas. Los backups cifrados y plantillas de programación ya existen.
+- Imágenes: servidor mínimo candidato con cero críticos/altos en el escaneo completo del 2026-11-13; clasificar hallazgos menores, validar CI y preparar la migración de servicios; no equivale a repetir las pruebas de la misma imagen.
 - Agente/instaladores: existen recuperación, enrolamiento y scripts de ciclo de vida; quedan paquetes nuevos versionados/firmados, aceptación por SO y correcciones que surjan de esa matriz.
 - Validación final: recuperación integral, carga, aceptación del dashboard y piloto con los artefactos definitivos. No marcan nuevas funcionalidades por sí mismas.
 - Decisiones de DevOps/organización: credenciales, certificados, destino externo, alertas, retención y alcance. Se completan en destino según lo acordado.
