@@ -13,10 +13,12 @@ import tarfile
 import tempfile
 import time
 import uuid
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts/production'))
 from backup import FILES, digest, encrypt_dump, encrypt_configuration
 from verify_backup import verify, authenticate
+from publish_backup import publish
 
 
 def run(*args, **kwargs):
@@ -71,6 +73,24 @@ def main():
             (root / 'manifest.json').write_text(json.dumps(manifest))
             verify(root, identity)
             rejected(lambda: verify(root, other))
+            # Real rclone local backend exercises the transfer protocol without
+            # external credentials. It does not certify a production destination.
+            remote_root = root / 'remote-fixture'
+            remote_root.mkdir()
+            remote_config = root / 'rclone.conf'
+            remote_config.write_text('[fixture]\ntype = local\n')
+            command = ['rclone', '--config', str(remote_config), '--log-level', 'ERROR']
+            remote = 'fixture:' + str(remote_root)
+            publish(root, remote, command, 60)
+            uploaded = remote_root / root.name
+            assert sorted(p.name for p in uploaded.iterdir()) == sorted([*FILES, 'manifest.json'])
+            for name in [*FILES, 'manifest.json']: assert digest(uploaded / name) == digest(root / name)
+            # A destination returning altered bytes must not receive a completion
+            # manifest, even when its copy command reports success.
+            with patch('publish_backup.remote_digest', return_value='incorrect'):
+                rejected(lambda: publish(root, remote + '/corrupt', command, 60))
+            assert not (remote_root / 'corrupt' / root.name / 'manifest.json').exists()
+            rejected(lambda: publish(root, 'fixture:../escape', command, 60))
             decrypt = subprocess.Popen(['age', '-d', '-i', str(identity), str(root / FILES[0])], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             try:
                 restore = subprocess.run(['pg_restore', '-U', 'postgres', '-d', target, '--exit-on-error'], stdin=decrypt.stdout, capture_output=True, timeout=60)
@@ -105,6 +125,7 @@ def main():
             rejected(lambda: encrypt_dump([sys.executable, '-c', 'raise SystemExit(1)'], recipients, root / 'failed.age', 60))
             rejected(lambda: encrypt_dump([sys.executable, '-c', 'import time; time.sleep(30)'], recipients, root / 'timeout.age', 0.1))
             print('PASS: encrypted backup, 5000-row PostgreSQL restore, wrong key, tamper, unsafe archive, failed producer, timeout')
+            print('PASS: rclone transfer allowlist, remote digest verification and manifest-last failure handling')
             if timescale: print('PASS: Timescale compressed hypertable restored with 5000 rows and compressed chunks preserved')
         finally:
             for name in (source, target): run('dropdb', '-U', 'postgres', '--if-exists', name)

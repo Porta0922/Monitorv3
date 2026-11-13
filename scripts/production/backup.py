@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import stat
 import subprocess
+import sys
 import tarfile
 import threading
 import uuid
@@ -141,9 +142,12 @@ def main():
     parser.add_argument('--env-file', type=Path)
     parser.add_argument('--compose-file', type=Path, action='append', default=[])
     parser.add_argument('--timeout-seconds', type=int, default=1800)
+    parser.add_argument('--publish-remote', help='Optional named rclone remote:path for verified external copy')
+    parser.add_argument('--rclone-config', type=Path)
     args = parser.parse_args()
     if os.name != 'posix' or os.geteuid() != 0: parser.error('Run as root on the Linux deployment host')
     if not 60 <= args.timeout_seconds <= 21600: parser.error('timeout-seconds must be 60..21600')
+    if bool(args.publish_remote) != bool(args.rclone_config): parser.error('Use publish-remote and rclone-config together')
     if not args.output_dir.is_absolute() or not args.recipients_file.is_absolute(): parser.error('Use absolute paths')
     private_directory(args.output_dir)
     regular(args.recipients_file)
@@ -192,10 +196,15 @@ def main():
     directory = os.open(output, os.O_DIRECTORY)
     try: os.fsync(directory)
     finally: os.close(directory)
+    if args.publish_remote:
+        subprocess.run([sys.executable, str(ROOT / 'scripts/production/publish_backup.py'),
+                        '--backup-dir', str(output), '--remote', args.publish_remote,
+                        '--rclone-config', str(args.rclone_config), '--timeout-seconds', str(args.timeout_seconds)],
+                       check=True, timeout=args.timeout_seconds * 6, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     print('Encrypted backup complete: ' + str(output))
 
 
 if __name__ == '__main__':
     try: main()
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError, tarfile.TarError):
-        raise SystemExit('Backup failed; incomplete directories have no complete manifest. Check private configuration and tool availability. No secrets printed.')
+        raise SystemExit('Backup workflow failed. A complete local backup may remain if external transfer failed; preserve it and investigate privately. No secrets printed.')
