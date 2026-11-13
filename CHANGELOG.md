@@ -1,5 +1,11 @@
 # Changelog
 
+## Privacidad del escritorio — 2026-11-13
+
+- Políticas de títulos, rutas y aplicaciones en Administración; validación acotada y compatibilidad de políticas anteriores.
+- Filtrado previo a persistencia e IPC y al reenviar pendientes; conservación de identidad y duración. Logs de actividad sin nombres de aplicaciones.
+- Fuente candidata únicamente; el piloto conserva 0.1.0 y el próximo paquete debe versionarse antes de distribuirse.
+
 ## Respaldos cifrados — 2026-11-07
 
 - Dump PostgreSQL y configuración cifrados con age, sin dump en claro en disco y sin clave privada de recuperación en el host de origen.

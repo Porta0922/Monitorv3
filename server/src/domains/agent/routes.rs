@@ -98,6 +98,10 @@ pub struct AgentConfigPolicy {
     enabled_monitors: Vec<String>,
     disabled_monitors: Vec<String>,
     monitoring_paused: bool,
+    privacy_hide_titles: bool,
+    privacy_hide_paths: bool,
+    privacy_excluded_apps: Vec<String>,
+    privacy_title_filters: Vec<String>,
 }
 
 fn env_u64(key: &str, default: u64) -> u64 {
@@ -125,6 +129,8 @@ pub fn default_policy()->AgentConfigPolicy {
             .split(',').map(str::trim).filter(|v| !v.is_empty()).map(str::to_owned).collect(),
         disabled_monitors: std::env::var("AGENT_CONFIG_DISABLED_MONITORS").unwrap_or_default()
             .split(',').map(str::trim).filter(|v| !v.is_empty()).map(str::to_owned).collect(),
+        privacy_hide_titles: false, privacy_hide_paths: false,
+        privacy_excluded_apps: Vec::new(), privacy_title_filters: Vec::new(),
         monitoring_paused: std::env::var("AGENT_CONFIG_MONITORING_PAUSED").as_deref() == Ok("true"),
     }
 }

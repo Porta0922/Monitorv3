@@ -22,11 +22,7 @@ fn sanitize_activity_fields(app_name: &str, window_title: &str) -> (String, Stri
     };
 
     let clean_app = if is_unknown_like(app_name) {
-        if clean_window != "Sin titulo" {
-            clean_window.clone()
-        } else {
-            "Sin identificar".to_string()
-        }
+        "Sin identificar".to_string()
     } else {
         app_name.trim().to_string()
     };
@@ -84,11 +80,7 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
                                     }),
                                 );
                                 context.publish_or_cache("activity", activity_payload).await;
-                                tracing::info!(
-                                    "[ACTIVITY] Finalized before sleep: {} (Duration: {}s)",
-                                    last_app,
-                                    duration_seconds
-                                );
+                                tracing::info!("Activity interval queued");
                             }
                         }
                     }
@@ -156,7 +148,7 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
                             );
 
                             context.publish_or_cache("activity", activity_payload).await;
-                            tracing::info!("[ACTIVITY] Window change: {} -> {} (Duration: {}s)", last_app, current_app, duration_seconds);
+                            tracing::info!("Activity interval queued");
                         }
 
                         last_window = Some((current_app.clone(), current_title.clone(), now_instant));
@@ -184,7 +176,7 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
                                 );
 
                                 context.publish_or_cache("activity", activity_payload).await;
-                                tracing::info!("[ACTIVITY] Heartbeat: {} (Duration: {}s)", last_app, duration_seconds);
+                                tracing::info!("Activity interval queued");
                             }
                             last_report_instant = Some(now_instant);
                         }
@@ -218,7 +210,7 @@ pub fn spawn(context: Arc<TaskContext>) -> tokio::task::JoinHandle<()> {
                                 }),
                             );
                             context.publish_or_cache("activity", activity_payload).await;
-                            tracing::info!("[ACTIVITY] Focus lost: finalized {} (Duration: {}s)", last_app, duration_seconds);
+                            tracing::info!("Activity interval queued");
                         }
                     }
                 }

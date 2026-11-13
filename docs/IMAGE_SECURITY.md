@@ -23,3 +23,5 @@ La prueba crea certificados, backend y red temporales, y elimina sus contenedore
 
 
 Seguimiento 2026-11-08: runtime candidato Debian trixie construido localmente; no sustituye DockerServer/Dockerfile ni el piloto. Base fijada a `a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2`: escaneo registró 0 críticos, 48 altos y 184 hallazgos totales. Varios avisos no tienen versión corregida reportada. No se aprueba esta base automáticamente; faltan análisis de exposición y escaneo del runtime completo.
+
+Resultado adicional del 2026-11-08: runtime completo `monitor-security-server:trixie-candidate`, ID `sha256:35c32b39916b6142ef63e159fb7587b5bfba5c34fa523b5d4603f48a23eb0153`, registró 0 críticos, 52 altos y 302 hallazgos totales. Informe y SBOM privados conservados; candidato no adoptado. Cifras históricas, no un escaneo nuevo del 13 de noviembre ni una evaluación de explotabilidad.

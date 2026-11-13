@@ -22,6 +22,7 @@ pub mod process_protection;
 pub mod osquery_runner;
 pub mod tasks;
 pub mod config_manager;
+mod privacy;
 pub mod task_supervisor;
 pub mod health_reporter;
 mod session_health;

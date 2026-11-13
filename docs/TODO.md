@@ -1,8 +1,8 @@
 # TODO — Ruta de cierre hacia producción
 
-Seguimiento **2026-11-07**: PR #2, #3 y #4 fusionados tras CI completo. PR #4 (`e15e110`) publica Lapin 4.12.3, retirada de Redis y guía DevOps. Recorridos de identidad/AMQPS aprobados con RabbitMQ 3.12 y 4.2. El piloto conserva agente/servidor/dashboard actuales; solo se retiró el contenedor Redis sin uso. Producción no aprobada.
+Seguimiento **2026-11-13**: PR #5 y #6 fusionados tras CI completo; respaldo cifrado y recuperación aislada PostgreSQL/Timescale aprobados. Copia externa, recuperación integral y aceptación del destino siguen pendientes. Historial previo: PR #2, #3 y #4 fusionados tras CI completo. PR #4 (`e15e110`) publica Lapin 4.12.3, retirada de Redis y guía DevOps. Recorridos de identidad/AMQPS aprobados con RabbitMQ 3.12 y 4.2. El piloto conserva agente/servidor/dashboard actuales; solo se retiró el contenedor Redis sin uso. Producción no aprobada.
 
-Actualizado: **2026-11-06**. Estado: **piloto controlado; producción no aprobada**. Agente **0.1.0**. Este es el único plan activo. El [plan anterior completo](TODO_PRODUCCION_HISTORICO_2026-11-06.md) conserva el detalle y las evidencias para consulta, no como segunda lista de ejecución.
+Actualizado: **2026-11-13**. Estado: **piloto controlado; producción no aprobada**. Agente **0.1.0**. Este es el único plan activo. El [plan anterior completo](TODO_PRODUCCION_HISTORICO_2026-11-06.md) conserva el detalle y las evidencias para consulta, no como segunda lista de ejecución.
 
 Base: [informe de seguridad](SECURITY_REVIEW_2026-11-06.md), [progreso](REFACTOR_PROGRESS.md) y [diagnóstico del piloto](PILOT_TROUBLESHOOTING.md). Las correcciones de seguridad del 6 de noviembre están publicadas mediante PR #2; no desplegadas en el piloto.
 
@@ -16,6 +16,17 @@ Base: [informe de seguridad](SECURITY_REVIEW_2026-11-06.md), [progreso](REFACTOR
 - [x] Inventario inicial de secretos, dependencias Rust e imágenes; hallazgos pendientes documentados.
 
 Estas marcas acreditan implementación y evidencia acotada, no aceptación productiva del despliegue final.
+
+## Qué falta programar y qué falta validar
+
+- Privacidad de escritorio: implementada en este incremento (política global/equipo, títulos, aplicaciones, rutas, caché e IPC); pendiente CI/publicación y entrega del agente compatible. Ver [DESKTOP_PRIVACY.md](DESKTOP_PRIVACY.md).
+- Operación: completar integración de copia externa y alertas con el destino elegido; los backups locales cifrados y plantillas de programación ya existen.
+- Imágenes: resolver/mitigar hallazgos y preparar la migración de servicios; no equivale a repetir las pruebas de la misma imagen.
+- Agente/instaladores: existen recuperación, enrolamiento y scripts de ciclo de vida; quedan paquetes nuevos versionados/firmados, aceptación por SO y correcciones que surjan de esa matriz.
+- Validación final: recuperación integral, carga, aceptación del dashboard y piloto con los artefactos definitivos. No marcan nuevas funcionalidades por sí mismas.
+- Decisiones de DevOps/organización: credenciales, certificados, destino externo, alertas, retención y alcance. Se completan en destino según lo acordado.
+
+Las casillas siguientes combinan implementación y aceptación: abiertas no significa que todo su código falte. No se declara terminado lo que todavía necesita evidencia de entrega.
 
 ## Orden sugerido
 
@@ -63,11 +74,11 @@ Imágenes: dashboard candidato con Nginx 1.30.6 fijado por digest, build y compr
 
 ## 3. Privacidad, retención y recuperación
 
-- [ ] Definir mínimos de captura y exclusión/redacción de títulos, rutas y datos sensibles antes de transmitir; documentar finalidad, acceso y aviso a usuarios.
+- [ ] Aprobar mínimos, finalidad y aviso a usuarios. Controles de escritorio implementados en agente/servidor/dashboard: ocultar títulos/rutas, excluir aplicaciones y filtrar frases antes de almacenar y reenviar. Pendientes entrega instalada y aceptación; USB/inventario/osquery tienen alcance separado.
 - [ ] Aprobar retención por actividad, recursos, sesiones, inventario, USB/WiFi, auditoría y seguridad; separar detalle, resumen, archivo y backup.
 - [ ] Resolver compatibilidad Timescale/columnstore/workers y mantenimiento con chunks comprimidos, lotes, concurrencia, reintentos, datos tardíos y deduplicación.
 - [ ] Decidir archivo histórico adicional; si hace falta, implementar cifrado, catálogo, verificación, recuperación y vencimiento.
-- [ ] Automatizar backups cifrados fuera del anfitrión, incluyendo configuración y claves necesarias; fijar RPO/RTO y alertas. Avance: scripts de cifrado age y verificación, manifiesto, permisos y guía [ENCRYPTED_BACKUPS.md](ENCRYPTED_BACKUPS.md); ensayo PostgreSQL de 5000 filas aprobado. Pendientes Timescale, transferencia externa, programación y alertas en destino.
+- [ ] Automatizar backups cifrados fuera del anfitrión, incluyendo configuración y claves necesarias; fijar RPO/RTO y alertas. Avance: scripts de cifrado age y verificación, manifiesto, permisos y guía [ENCRYPTED_BACKUPS.md](ENCRYPTED_BACKUPS.md); ensayos PostgreSQL y Timescale con 5000 filas y chunks comprimidos aprobados. Pendientes recuperación integral, transferencia externa, programación y alertas en destino.
 - [ ] Restaurar en entorno limpio y comprobar identidades, políticas y datos; medir recuperación y verificar límites antes de activar eliminación productiva.
 
 **Cierre:** retención acotada y restauración demostrada. Sin copia heredada representativa, comprobar instalación nueva y fixtures sin certificar una migración real.

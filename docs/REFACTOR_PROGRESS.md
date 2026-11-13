@@ -1,3 +1,9 @@
+## 2026-11-13 — Cierre del PR #6
+
+PR #6 fusionado en `c6a4b45acb6b97f95ccbe67798875f1302e60445`, cabeza comprobada `c89d185bc79b150a60422aff80cc272e91c22913`. Los cuatro flujos finalizaron correctamente: Publication preflight (incluye navegador y respaldos PostgreSQL/Timescale), Storage retention, Agent lifecycle checks y Stack smoke test. Corregida y validada la limpieza de conexiones Timescale del fixture. No se desplegaron cambios en el piloto ni se publicó instalador nuevo.
+
+Pendientes: imágenes y riesgos conocidos; copia externa y recuperación integral con RPO/RTO; configuración/alertas del destino; aceptación instalada Windows/Linux; firma y ciclo de instaladores; campaña del candidato integrado y aprobación de release. Credenciales reales a cargo de DevOps en destino, según lo acordado. Producción no aprobada.
+
 ## 2026-11-07 — Respaldos cifrados y CI de navegador
 
 Scripts age para DB/configuración, verificación de integridad y plantillas systemd implementados. Ensayos aislados aprobados: PostgreSQL 16 y Timescale/PostgreSQL 15, 5000 filas, chunks comprimidos, clave incorrecta, alteración, rutas inseguras, productor fallido y timeout. Guía ENCRYPTED_BACKUPS.md enlazada desde README/release. Copia externa, recuperación integral y RPO/RTO siguen pendientes.

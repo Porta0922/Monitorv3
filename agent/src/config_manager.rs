@@ -22,6 +22,15 @@ pub struct AgentConfig {
     pub disabled_monitors: Vec<String>,
     #[serde(default)]
     pub monitoring_paused: bool,
+    #[serde(default)]
+    pub privacy_hide_titles: bool,
+    #[serde(default)]
+    pub privacy_hide_paths: bool,
+    #[serde(default)]
+    pub privacy_excluded_apps: Vec<String>,
+    #[serde(default)]
+    pub privacy_title_filters: Vec<String>,
+
 }
 
 impl Default for AgentConfig {
@@ -42,6 +51,8 @@ impl Default for AgentConfig {
             enabled_monitors: Vec::new(),
             disabled_monitors: Vec::new(),
             monitoring_paused: false,
+            privacy_hide_titles: false, privacy_hide_paths: false,
+            privacy_excluded_apps: Vec::new(), privacy_title_filters: Vec::new(),
         }
     }
 }
@@ -64,6 +75,8 @@ impl AgentConfig {
             enabled_monitors: Vec::new(),
             disabled_monitors: Vec::new(),
             monitoring_paused: false,
+            privacy_hide_titles: false, privacy_hide_paths: false,
+            privacy_excluded_apps: Vec::new(), privacy_title_filters: Vec::new(),
         }
     }
 
@@ -72,6 +85,11 @@ impl AgentConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        for list in [&self.privacy_excluded_apps, &self.privacy_title_filters] {
+            if list.len() > 100 || list.iter().any(|v| v.trim().is_empty() || v.len() > 256 || v.chars().any(char::is_control)) {
+                return Err("Invalid desktop privacy rules".into());
+            }
+        }
         for (name, value, minimum, maximum) in [
             ("window_activity_interval_secs", self.window_activity_interval_secs, 2, 60),
             ("heartbeat_interval_secs", self.heartbeat_interval_secs, 1, 86400),

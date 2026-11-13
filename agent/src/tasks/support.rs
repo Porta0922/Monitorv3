@@ -111,7 +111,12 @@ pub fn spawn_retry_synchronizer(context: Arc<TaskContext>) -> tokio::task::JoinH
             if let Some(publisher) = publisher {
                 match drain_batch(&context.cache, |route, payload| {
                     let publisher = publisher.clone();
-                    async move { publisher.publish_event(&route, payload).await.map_err(|e| e.to_string()) }
+                    let context = context.clone();
+                    async move {
+                        let mut payload = payload;
+                        crate::privacy::apply(&mut payload, &context.config_manager.get().await);
+                        publisher.publish_event(&route, payload).await.map_err(|e| e.to_string())
+                    }
                 }).await {
                     Ok(DrainStatus::More) => delay = Duration::from_millis(250),
                     Ok(DrainStatus::Idle | DrainStatus::Interrupted) => {},
