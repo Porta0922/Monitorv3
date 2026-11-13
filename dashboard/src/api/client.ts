@@ -35,7 +35,7 @@ export interface Investigation {
 export interface DeadLetterStatus { queues: {queue: string; ready: number | null; available: boolean}[]; observed_at: string; replay_days: number }
 export interface StoragePage {items: {schema_name: string; relation_name: string; total_bytes: number; heap_bytes: number; index_bytes: number; estimated_rows: number | null}[]; has_more: boolean; observed_at: string}
 export interface EquipmentPage {devices: Device[]; total: number; page: number; page_size: number; counts: {total:number; online:number; offline:number; stale:number}; groups:string[]}
-export interface AgentPolicy { [key:string]: number | boolean | string[]; monitoring_paused:boolean; enabled_monitors:string[]; disabled_monitors:string[] }
+export interface AgentPolicy { [key:string]: number | boolean | string[] | undefined; monitoring_paused:boolean; privacy_hide_titles?:boolean; privacy_hide_paths?:boolean; privacy_excluded_apps?:string[]; privacy_title_filters?:string[]; enabled_monitors:string[]; disabled_monitors:string[] }
 export interface PolicyRecord {fingerprint:string;observed:{fingerprint:string|null;observed_at:string;stale:boolean}|null;scope:string; revision:number; override:boolean; policy:AgentPolicy; updated_at:string|null}
 export interface VersionSummary {versions:{version:string;devices:number}[]; targeted:number;matching:number;different:number}
 export interface AccountDirectory { source: 'managed_file'|'bootstrap'; accounts: {username:string;role:'viewer'|'operator'|'admin';disabled:boolean;mfa_enabled:boolean}[] }

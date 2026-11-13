@@ -79,7 +79,7 @@ impl TaskContext {
         })
     }
 
-    pub async fn publish_or_cache(&self, routing_event_type: &str, payload: serde_json::Value) -> bool {
+    pub async fn publish_or_cache(&self, routing_event_type: &str, mut payload: serde_json::Value) -> bool {
         // Recheck policy at the write boundary; a collector may have been in flight when paused.
         let config = self.config_manager.get().await;
         let monitor = match routing_event_type {
@@ -92,6 +92,7 @@ impl TaskContext {
         };
         if monitor.is_some_and(|name| !config.is_monitor_enabled(name))
             || (routing_event_type == "security" && config.monitoring_paused) { return false; }
+        crate::privacy::apply(&mut payload, &config);
         // Persist before attempting any transport. A failed write is observable and never acknowledged.
         let cache_id = match self.cache.save_event(routing_event_type, &payload).await {
             Ok(id) => id,

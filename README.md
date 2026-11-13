@@ -4,6 +4,8 @@
 
 [Guía paso a paso de release para DevOps](docs/RELEASE_DEVOPS.md): dónde configurar cuentas, MFA, secretos, certificados, red, enrolamiento, actualización y reversión. Las credenciales reales se incorporan en el servidor de destino.
 
+Estado 2026-11-13: PR #5 y #6 fusionados con CI completo aprobado. Código publicado; piloto e instaladores sin reemplazar. Producción pendiente de los controles del [TODO](docs/TODO.md).
+
 [Respaldos cifrados](docs/ENCRYPTED_BACKUPS.md): herramientas para cifrar DB/configuración y verificar integridad sin guardar el dump en claro. Recuperación PostgreSQL aislada comprobada; recuperación completa Timescale y copia externa pendientes de aceptación.
 
 Escaneo reproducible de imágenes y generación de SBOM: [procedimiento](docs/IMAGE_SECURITY.md). Dashboard candidato con base Nginx actualizada y escaneo sin avisos conocidos; los servicios restantes siguen pendientes.
@@ -234,3 +236,5 @@ Servidor y dashboard nuevos desplegados, 17 migraciones aplicadas y agente Windo
 Piloto Windows 0.1.0: recuperación automática del servicio en 16 s tras caída; corte RabbitMQ de 75 s con 11 eventos pendientes que luego se entregaron, cola final cero e identidad conservada. No sustituye reinicio completo ni desconexión prolongada. La salud de sesiones se consolida cada cinco minutos, por lo que puede estar vacía en el primer reporte.
 
 Código piloto publicado en `Monitorv3/main` (commit `7217239`): [alcance y credenciales históricas pendientes](docs/GITHUB_PUBLICATION.md). Se retiraron credenciales heredadas del código actual; su revocación/rotación sigue pendiente. Se conserva el historial por decisión del usuario. Esta publicación de código piloto no certifica producción.
+
+Privacidad del escritorio: el candidato incorpora controles en Administración para ocultar títulos/rutas y excluir aplicaciones, aplicados por el agente antes de almacenar y reenviar eventos. Requiere agente actualizado; no desplegado en el piloto. Alcance y límites: [DESKTOP_PRIVACY.md](docs/DESKTOP_PRIVACY.md).

@@ -3,16 +3,47 @@ use serde_json::{json,Value};
 use std::sync::Arc;
 use crate::api::AppState;
 type Response=(StatusCode,Json<Value>);
+#[cfg(test)]
+mod privacy_tests {
+    use super::*;
+    #[test]
+    fn privacy_schema_accepts_legacy_and_rejects_partial_or_unbounded_rules() {
+        let mut policy=serde_json::to_value(crate::domains::agent::routes::default_policy()).unwrap();
+        assert!(valid(&policy));
+        policy["privacy_title_filters"]=json!([""]);
+        assert!(!valid(&policy));
+        policy["privacy_title_filters"]=json!(["confidencial"]);
+        assert!(valid(&policy));
+        policy.as_object_mut().unwrap().remove("privacy_hide_titles");
+        assert!(!valid(&policy));
+        for key in ["privacy_hide_paths","privacy_excluded_apps","privacy_title_filters"] {policy.as_object_mut().unwrap().remove(key);}
+        assert!(valid(&policy));
+    }
+}
 pub fn router()->Router<Arc<AppState>> {Router::new().route("/policy/:scope",get(read_policy).put(save_policy)).route("/versions",get(versions)).route("/accounts",get(accounts))}
 pub async fn effective(state:&AppState,device:Option<&str>)->Result<Value,sqlx::Error> {
     let fallback=serde_json::to_value(crate::domains::agent::routes::default_policy()).expect("Policy serialization");
     let stored=sqlx::query_scalar::<_,Value>("SELECT policy FROM administration_policy WHERE policy IS NOT NULL AND (scope='global' OR scope=$1) ORDER BY (scope=$1) DESC LIMIT 1")
         .bind(device.unwrap_or("global")).fetch_optional(&state.db.pool).await?;
-    Ok(stored.unwrap_or(fallback))
+    let mut policy = stored.unwrap_or_else(|| fallback.clone());
+    if let Some(object) = policy.as_object_mut() {
+        for key in ["privacy_hide_titles", "privacy_hide_paths", "privacy_excluded_apps", "privacy_title_filters"] {
+            object.entry(key).or_insert_with(|| fallback[key].clone());
+        }
+    }
+    Ok(policy)
 }
 fn valid(policy:&Value)->bool {
     let fields=[("window_activity_interval_secs",2,60),("heartbeat_interval_secs",1,86400),("usb_detector_interval_secs",1,86400),("usb_copy_interval_secs",1,86400),("wifi_interval_secs",1,86400),("running_apps_interval_secs",1,86400),("inventory_interval_days",1,365),("heatmap_interval_secs",1,86400),("resource_logger_interval_secs",1,60),("osquery_scheduler_seconds",0,86400),("idle_threshold_seconds",1,86400),("activity_heartbeat_seconds",1,3600)];
-    if policy.as_object().map(|p|p.len())!=Some(15) || !policy["monitoring_paused"].is_boolean() {return false;}
+    let privacy_keys = ["privacy_hide_titles", "privacy_hide_paths", "privacy_excluded_apps", "privacy_title_filters"];
+    let privacy_present = privacy_keys.iter().any(|key| policy.get(*key).is_some());
+    if privacy_present {
+        if !policy["privacy_hide_titles"].is_boolean() || !policy["privacy_hide_paths"].is_boolean() {return false;}
+        for key in ["privacy_excluded_apps", "privacy_title_filters"] {
+            if !policy[key].as_array().is_some_and(|items| items.len()<=100 && items.iter().all(|v| v.as_str().is_some_and(|s| !s.trim().is_empty() && s.len()<=256 && !s.chars().any(char::is_control)))) {return false;}
+        }
+    }
+    if policy.as_object().map(|p|p.len())!=Some(if privacy_present {19} else {15}) || !policy["monitoring_paused"].is_boolean() {return false;}
     if fields.iter().any(|(key,min,max)|!policy[*key].as_u64().is_some_and(|v|v>=*min && v<=*max)) {return false;}
     let monitors=["window_activity","heartbeat","usb_detector","usb_copy","wifi_history","running_apps","inventory","heatmap","resource_logger","security_osquery","session_input"];
     if let (Some(enabled),Some(disabled))=(policy["enabled_monitors"].as_array(),policy["disabled_monitors"].as_array()) {

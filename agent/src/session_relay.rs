@@ -232,6 +232,7 @@ async fn accept(context: &TaskContext, lease: &Mutex<Option<(String, Instant)>>,
         event.as_object_mut().expect("validated envelope").remove("source_session");
     }
     event["version"] = json!(env!("CARGO_PKG_VERSION"));
+    crate::privacy::apply(&mut event, &context.config_manager.get().await);
     // FULL synchronous SQLite commit occurs before returning an acceptance response.
     context.cache.save_event(if principal.is_some() && route=="input_heatmaps" {"heartbeat"} else {route}, &event).await.map_err(io::Error::other)?;
     *owner = Some((instance, Instant::now()));
@@ -264,7 +265,8 @@ pub fn spawn_sender(context: Arc<TaskContext>, relay: Arc<SessionRelay>) -> toki
         loop {
             timer.tick().await;
             match context.cache.get_unsynced_events().await {
-                Ok(events) => for (id, route, event) in events {
+                Ok(events) => for (id, route, mut event) in events {
+                    crate::privacy::apply(&mut event, &context.config_manager.get().await);
                     match relay.deliver(&route, &event).await {
                         Ok(true) => {},
                         Ok(false) => continue, // Retain paused records without acknowledging or deleting them.
