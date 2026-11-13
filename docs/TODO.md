@@ -20,7 +20,7 @@ Estas marcas acreditan implementación y evidencia acotada, no aceptación produ
 ## Qué falta programar y qué falta validar
 
 - Privacidad de escritorio: implementada en este incremento (política global/equipo, títulos, aplicaciones, rutas, caché e IPC); pendiente CI/publicación y entrega del agente compatible. Ver [DESKTOP_PRIVACY.md](DESKTOP_PRIVACY.md).
-- Operación: completar integración de copia externa y alertas con el destino elegido; los backups locales cifrados y plantillas de programación ya existen.
+- Operación: copia externa verificable implementada con rclone e integrada al respaldo programado; configurar destino real y alertas. Los backups cifrados y plantillas de programación ya existen.
 - Imágenes: resolver/mitigar hallazgos y preparar la migración de servicios; no equivale a repetir las pruebas de la misma imagen.
 - Agente/instaladores: existen recuperación, enrolamiento y scripts de ciclo de vida; quedan paquetes nuevos versionados/firmados, aceptación por SO y correcciones que surjan de esa matriz.
 - Validación final: recuperación integral, carga, aceptación del dashboard y piloto con los artefactos definitivos. No marcan nuevas funcionalidades por sí mismas.
@@ -78,7 +78,7 @@ Imágenes: dashboard candidato con Nginx 1.30.6 fijado por digest, build y compr
 - [ ] Aprobar retención por actividad, recursos, sesiones, inventario, USB/WiFi, auditoría y seguridad; separar detalle, resumen, archivo y backup.
 - [ ] Resolver compatibilidad Timescale/columnstore/workers y mantenimiento con chunks comprimidos, lotes, concurrencia, reintentos, datos tardíos y deduplicación.
 - [ ] Decidir archivo histórico adicional; si hace falta, implementar cifrado, catálogo, verificación, recuperación y vencimiento.
-- [ ] Automatizar backups cifrados fuera del anfitrión, incluyendo configuración y claves necesarias; fijar RPO/RTO y alertas. Avance: scripts de cifrado age y verificación, manifiesto, permisos y guía [ENCRYPTED_BACKUPS.md](ENCRYPTED_BACKUPS.md); ensayos PostgreSQL y Timescale con 5000 filas y chunks comprimidos aprobados. Pendientes recuperación integral, transferencia externa, programación y alertas en destino.
+- [ ] Automatizar backups cifrados fuera del anfitrión, incluyendo configuración y claves necesarias; fijar RPO/RTO y alertas. Avance: scripts de cifrado age y verificación, manifiesto, permisos y guía [ENCRYPTED_BACKUPS.md](ENCRYPTED_BACKUPS.md); ensayos PostgreSQL y Timescale con 5000 filas y chunks comprimidos aprobados. Transferencia verificable implementada y ensayada con backend local de rclone; pendientes destino externo real, recuperación integral, programación y alertas en destino.
 - [ ] Restaurar en entorno limpio y comprobar identidades, políticas y datos; medir recuperación y verificar límites antes de activar eliminación productiva.
 
 **Cierre:** retención acotada y restauración demostrada. Sin copia heredada representativa, comprobar instalación nueva y fixtures sin certificar una migración real.

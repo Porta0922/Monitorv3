@@ -238,3 +238,5 @@ Piloto Windows 0.1.0: recuperación automática del servicio en 16 s tras caída
 Código piloto publicado en `Monitorv3/main` (commit `7217239`): [alcance y credenciales históricas pendientes](docs/GITHUB_PUBLICATION.md). Se retiraron credenciales heredadas del código actual; su revocación/rotación sigue pendiente. Se conserva el historial por decisión del usuario. Esta publicación de código piloto no certifica producción.
 
 Privacidad del escritorio: el candidato incorpora controles en Administración para ocultar títulos/rutas y excluir aplicaciones, aplicados por el agente antes de almacenar y reenviar eventos. Requiere agente actualizado; no desplegado en el piloto. Alcance y límites: [DESKTOP_PRIVACY.md](docs/DESKTOP_PRIVACY.md).
+
+El respaldo programado admite copia externa opcional con rclone y verificación SHA-256 antes de publicar el manifiesto. DevOps configura el remoto y las credenciales fuera del repositorio; no se activó un destino real. Ver [respaldos](docs/ENCRYPTED_BACKUPS.md).

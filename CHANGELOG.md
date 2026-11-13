@@ -1,5 +1,10 @@
 # Changelog
 
+## Copia externa de respaldos — 2026-11-13
+
+- Transferencia opcional con rclone, lista fija de archivos, hashes remotos y manifiesto al final; sin clave de recuperación ni borrado remoto.
+- Integración en el respaldo programado; fallo externo conserva la copia local y devuelve error. Destino real y alertas pendientes de DevOps.
+
 ## Privacidad del escritorio — 2026-11-13
 
 - Políticas de títulos, rutas y aplicaciones en Administración; validación acotada y compatibilidad de políticas anteriores.

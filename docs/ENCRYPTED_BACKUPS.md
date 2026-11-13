@@ -58,10 +58,44 @@ Después del éxito, copiar el directorio completo a almacenamiento externo cifr
 en tránsito, con identidad restringida y protección contra borrado/inmutabilidad.
 Copiar el manifiesto al final y comprobar tamaño/SHA-256 de los dos archivos en el
 destino. Alertar si falla la copia o falta un respaldo externo reciente. El script
-no configura proveedor, credenciales, transferencia ni alertas por sí mismo.
+no configura proveedor, credenciales ni alertas por sí mismo.
 Un respaldo solo en el mismo disco **no satisface** la recuperación ante pérdida
 del host. No borrar automáticamente respaldos hasta aprobar retención y demostrar
 recuperación; restringir también el acceso al manifiesto (contiene metadatos).
+
+## Transferencia verificable con rclone
+
+Instalar rclone en el host y configurar un remoto llamado, por ejemplo,
+`monitor-vault`, en `/etc/monitor-backup/rclone.conf` (root, 0600). Elegir un destino
+realmente externo al servidor, TLS/SFTP con validación del certificado/host,
+credenciales restringidas al prefijo de respaldo y retención/inmutabilidad en el
+proveedor. No usar `--no-check-certificate` ni publicar este archivo de configuración.
+Un remoto con backend local sirve para ensayos, no cumple la copia fuera del host.
+
+Para copiar un respaldo completo existente:
+
+```bash
+sudo python3 /opt/monitor/scripts/production/publish_backup.py \
+  --backup-dir /var/backups/monitor/RESPALDO \
+  --rclone-config /etc/monitor-backup/rclone.conf \
+  --remote monitor-vault:monitor/backups
+```
+
+El helper transfiere solo los dos archivos cifrados, descarga cada uno en streaming
+para comparar SHA-256 y publica el manifiesto al final. No sube claves ni archivos
+adyacentes. Usa `copyto --immutable`; no elimina respaldos ni sobrescribe objetos
+diferentes. Un fallo devuelve código no cero; conservar la copia local. La
+verificación descarga el tamaño completo del backup: presupuestar tiempo y tráfico.
+Referencia: [copyto](https://rclone.org/commands/rclone_copyto/) y
+[cat](https://rclone.org/commands/rclone_cat/).
+
+Para incluirlo en cada ejecución programada, agregar a `ExecStart` de la unidad
+`monitor-backup.service` los argumentos `--publish-remote monitor-vault:monitor/backups`
+y `--rclone-config /etc/monitor-backup/rclone.conf`. El proceso devuelve error si
+falla la copia o su verificación, aunque el respaldo local ya esté completo.
+Ajustar `TimeoutStartSec` al tamaño y velocidad previstos; conectar `OnFailure`
+y una alerta independiente de antigüedad del último manifiesto externo verificado.
+No se activa ni configura ningún destino externo automáticamente.
 
 ## Verificación en el host de recuperación
 
