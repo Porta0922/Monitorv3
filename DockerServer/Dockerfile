@@ -39,6 +39,10 @@ EXPOSE 3000
 CMD ["activity-monitor-server"]
 
 # Production selects this target explicitly; development retains the legacy runtime.
-FROM runtime AS production
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:cb87acc574abe719b6e5c547384defa2f7b1f24af9605d3f618cf852495d8be2 AS production
+WORKDIR /app
+COPY --from=builder /app/target/release/activity-monitor-server /usr/local/bin/activity-monitor-server
 USER 65532:65532
+EXPOSE 3000
+CMD ["/usr/local/bin/activity-monitor-server"]
 FROM runtime AS default

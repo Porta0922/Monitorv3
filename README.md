@@ -240,3 +240,5 @@ Código piloto publicado en `Monitorv3/main` (commit `7217239`): [alcance y cred
 Privacidad del escritorio: el candidato incorpora controles en Administración para ocultar títulos/rutas y excluir aplicaciones, aplicados por el agente antes de almacenar y reenviar eventos. Requiere agente actualizado; no desplegado en el piloto. Alcance y límites: [DESKTOP_PRIVACY.md](docs/DESKTOP_PRIVACY.md).
 
 El respaldo programado admite copia externa opcional con rclone y verificación SHA-256 antes de publicar el manifiesto. DevOps configura el remoto y las credenciales fuera del repositorio; no se activó un destino real. Ver [respaldos](docs/ENCRYPTED_BACKUPS.md).
+
+El candidato del servidor de producción usa una imagen mínima sin shell/curl y comprobación de salud nativa. Escaneo completo del 2026-11-13: cero críticos/altos; pendientes menores y aceptación del conjunto. Desarrollo y piloto no se sustituyen automáticamente. Ver [imágenes](docs/IMAGE_SECURITY.md).

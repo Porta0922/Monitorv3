@@ -1,4 +1,5 @@
 mod telemetry_writer;
+mod healthcheck;
 mod replay_policy;
 mod telemetry_contract;
 mod api;
@@ -27,6 +28,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load environment variables
     if !human_sessions::production() { dotenv().ok(); }
     let args:Vec<String>=std::env::args().skip(1).collect();
+    if args==["--healthcheck"] {
+        let port=std::env::var("SERVER_PORT").unwrap_or_else(|_| "3000".into()).parse::<u16>().unwrap_or(0);
+        std::process::exit(if healthcheck::ready(port).await {0} else {1});
+    }
     if args==["--hash-password-stdin"] {
         use std::io::Read;
         let mut password=String::new();std::io::stdin().take(4097).read_to_string(&mut password)?;
