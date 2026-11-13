@@ -1,0 +1,11 @@
+[Unit]
+Description=Schedule Monitor encrypted backups
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=5m
+Unit=monitor-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -39,3 +39,25 @@ jobs:
       - run: python -m playwright install --with-deps chromium
       - name: Untrusted text escaping and production CSP in Chromium
         run: python tests/dashboard_security.py
+  encrypted-backup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+          - timescale/timescaledb:latest-pg15@sha256:6343bdc87ca132c6b53acb26113a6bad1821d188fa39975a745f32ddd9757634
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build isolated recovery fixture
+        run: docker build -f tests/Dockerfile.backup-fixture --build-arg BASE_IMAGE='${{ matrix.image }}' -t monitor-backup-validation .
+      - name: Verify encryption and PostgreSQL recovery
+        run: |
+          docker run -d --name monitor-backup-fixture --network none \
+            -e POSTGRES_HOST_AUTH_METHOD=trust \
+            -v "$PWD:/workspace:ro" monitor-backup-validation
+          docker exec monitor-backup-fixture python3 /workspace/tests/encrypted_backup.py
+      - name: Remove disposable fixture
+        if: always()
+        run: docker rm -fv monitor-backup-fixture

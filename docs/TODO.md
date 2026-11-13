@@ -53,7 +53,7 @@ Imágenes: dashboard candidato con Nginx 1.30.6 fijado por digest, build y compr
 
 - [ ] Arrancar perfil productivo completo desde configuración limpia, sin defaults ni secretos en imágenes, paquetes, repositorio o logs.
 - [ ] Verificar HTTPS/AMQPS, confianza, nombres, renovación y vencimiento; comprobar cookies Secure/HttpOnly/SameSite en el destino real.
-- [ ] Verificar redes/firewall y ausencia de bypass del proxy; DB/Redis internos, broker limitado a agentes y administración restringida.
+- [ ] Verificar redes/firewall y ausencia de bypass del proxy; DB interna, broker limitado a agentes y administración restringida. Redis eliminado.
 - [ ] Comprobar privilegios efectivos de aplicación/migración/mantenimiento DB, permisos de secretos, usuarios de contenedor, capacidades y límites de recursos.
 - [ ] Confirmar debug desactivado, errores sin información sensible y rotación/retención de logs; documentar rotación de secretos y arranque Docker tras reboot.
 - [ ] Configurar alertas externas por abuso, accesos denegados, API/consumidores caídos, cola/DLQ, disco/DB, mantenimiento, backups y certificados; asignar receptor y respuesta.
@@ -67,7 +67,7 @@ Imágenes: dashboard candidato con Nginx 1.30.6 fijado por digest, build y compr
 - [ ] Aprobar retención por actividad, recursos, sesiones, inventario, USB/WiFi, auditoría y seguridad; separar detalle, resumen, archivo y backup.
 - [ ] Resolver compatibilidad Timescale/columnstore/workers y mantenimiento con chunks comprimidos, lotes, concurrencia, reintentos, datos tardíos y deduplicación.
 - [ ] Decidir archivo histórico adicional; si hace falta, implementar cifrado, catálogo, verificación, recuperación y vencimiento.
-- [ ] Automatizar backups cifrados fuera del anfitrión, incluyendo configuración y claves necesarias; fijar RPO/RTO y alertas.
+- [ ] Automatizar backups cifrados fuera del anfitrión, incluyendo configuración y claves necesarias; fijar RPO/RTO y alertas. Avance: scripts de cifrado age y verificación, manifiesto, permisos y guía [ENCRYPTED_BACKUPS.md](ENCRYPTED_BACKUPS.md); ensayo PostgreSQL de 5000 filas aprobado. Pendientes Timescale, transferencia externa, programación y alertas en destino.
 - [ ] Restaurar en entorno limpio y comprobar identidades, políticas y datos; medir recuperación y verificar límites antes de activar eliminación productiva.
 
 **Cierre:** retención acotada y restauración demostrada. Sin copia heredada representativa, comprobar instalación nueva y fixtures sin certificar una migración real.

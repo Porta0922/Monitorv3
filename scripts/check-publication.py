@@ -13,8 +13,9 @@ def git_paths(*args):
 
 files = git_paths("ls-files", "--cached") | git_paths("ls-files", "--others", "--exclude-standard")
 forbidden_dirs = {".local-test", ".production", ".tools", ".wix", "node_modules", "target"}
-forbidden_suffixes = {".exe", ".dll", ".pdb", ".msi", ".msix", ".deb", ".pfx", ".p12", ".key", ".sqlite", ".sqlite3", ".db", ".db-wal", ".db-shm"}
+forbidden_suffixes = {".exe", ".dll", ".pdb", ".msi", ".msix", ".deb", ".pfx", ".p12", ".key", ".sqlite", ".sqlite3", ".db", ".db-wal", ".db-shm", ".age", ".dump", ".backup"}
 patterns = {
+    "age_private_key": re.compile(rb"AGE-SECRET-KEY-1[0-9A-Z]{40,}"),
     "legacy_internal_endpoint": re.compile(rb"10[.]30[.]0[.]123"),
     "private_key": re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----"),
     "github_token": re.compile(rb"(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{50,})"),

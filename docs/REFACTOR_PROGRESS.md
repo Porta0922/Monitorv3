@@ -1,3 +1,9 @@
+## 2026-11-07 — Respaldos cifrados y CI de navegador
+
+Scripts age para DB/configuración, verificación de integridad y plantillas systemd implementados. Ensayos aislados aprobados: PostgreSQL 16 y Timescale/PostgreSQL 15, 5000 filas, chunks comprimidos, clave incorrecta, alteración, rutas inseguras, productor fallido y timeout. Guía ENCRYPTED_BACKUPS.md enlazada desde README/release. Copia externa, recuperación integral y RPO/RTO siguen pendientes.
+
+PR #5 fusionado tras los cuatro flujos aprobados (`c9efebb50be1e13541878fb74adfe113a7538b1c`). PR #6 publica los respaldos; navegador, backups, retención y agente aprobados. Corregida limpieza de la DB temporal del ensayo concurrente: Timescale podía conservar una conexión después del cierre del pool; eliminación forzada solo de la DB UUID creada por el fixture. CI completo de esta corrección pendiente.
+
 ## 2026-11-07 — PR #4 fusionado; recuperación offline en curso
 
 PR #4 fusionado en `e15e1103967b5c0fbd7cc497668d48551a0d4ec4`, cabeza `18154cbe9503bf683b80b2cde4f0bef134507014`, después de Publication preflight, Storage retention, Agent lifecycle y Stack smoke aprobados. Lapin 4.12.3 validado además con identidad/AMQPS aislados en RabbitMQ 3.12 y 4.2. Sin avisos de mantenimiento Rust; rsa opcional clasificado, sin supresión. Guía DevOps publicada; configuración/secretos reales se incorporan en destino.
