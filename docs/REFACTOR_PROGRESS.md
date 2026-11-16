@@ -1,3 +1,7 @@
+## 2026-11-13 — Privacidad y copia externa fusionadas
+
+PR #7 fusionado en `8fe2614d222756a6a7d466414fa2501a3c47a124` y PR #8 en `f81080bb0cafd0f7dd13768191f020ce16b6a154`, ambos con los cuatro flujos CI aprobados. Controles de escritorio y publicación verificable de respaldos disponibles en código; requieren agente actualizado y configuración del destino, respectivamente. Nuevo candidato de runtime productivo mínimo en preparación, separado del piloto.
+
 ## 2026-11-13 — Cierre del PR #6
 
 PR #6 fusionado en `c6a4b45acb6b97f95ccbe67798875f1302e60445`, cabeza comprobada `c89d185bc79b150a60422aff80cc272e91c22913`. Los cuatro flujos finalizaron correctamente: Publication preflight (incluye navegador y respaldos PostgreSQL/Timescale), Storage retention, Agent lifecycle checks y Stack smoke test. Corregida y validada la limpieza de conexiones Timescale del fixture. No se desplegaron cambios en el piloto ni se publicó instalador nuevo.

@@ -1,5 +1,11 @@
 # Changelog
 
+## Runtime productivo mínimo — 2026-11-13
+
+- Servidor con Distroless fijado por digest, sin shell/curl y manteniendo UID 65532.
+- Healthcheck nativo local sin proxy/redirecciones; bootstrap de cuentas mediante imagen temporal sin red.
+- Prueba de imagen integrada al CI y guía DevOps adaptada. Piloto sin reemplazar.
+
 ## Copia externa de respaldos — 2026-11-13
 
 - Transferencia opcional con rclone, lista fija de archivos, hashes remotos y manifiesto al final; sin clave de recuperación ni borrado remoto.

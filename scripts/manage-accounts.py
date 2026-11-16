@@ -25,6 +25,7 @@ def main():
     executor=parser.add_mutually_exclusive_group(required=True)
     executor.add_argument('--server-bin', type=Path)
     executor.add_argument('--docker-container')
+    executor.add_argument('--docker-image', help='Hash in a disposable offline container; no shell required')
     parser.add_argument('action', choices=['create','disable','enable','role','reset-password','reset-mfa'])
     parser.add_argument('username')
     parser.add_argument('--role', choices=['viewer','operator','admin'])
@@ -56,6 +57,11 @@ def main():
             password=getpass.getpass('New password (12+ characters): ')
             if len(password)<12 or len(password.encode())>4096 or password!=getpass.getpass('Confirm password: '): parser.error('Invalid password or confirmation')
             command=[str(args.server_bin),'--hash-password-stdin'] if args.server_bin else ['docker','exec','-i',args.docker_container,'/usr/local/bin/activity-monitor-server','--hash-password-stdin']
+            if args.docker_image:
+                if args.docker_image.startswith('-') or any(c.isspace() for c in args.docker_image): parser.error('Invalid image reference')
+                command=['docker','run','--rm','-i','--network','none','--read-only','--cap-drop','ALL',
+                         '--security-opt','no-new-privileges:true','--user','65532:65532',
+                         '--entrypoint','/usr/local/bin/activity-monitor-server',args.docker_image,'--hash-password-stdin']
             result=subprocess.run(command,input=password,text=True,capture_output=True,timeout=60)
             if result.returncode or not result.stdout.strip().startswith('$argon2id$'): parser.error('Password hashing failed; no account changes saved')
             account['password_hash']=result.stdout.strip()

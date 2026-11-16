@@ -26,6 +26,8 @@ services:
       - ./.production/rabbit-definitions.json:/etc/rabbitmq/definitions.json:ro
   server:
     env_file: [./.production/endpoint.env]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/activity-monitor-server", "--healthcheck"]
     build:
       target: production
     user: "65532:65532"
