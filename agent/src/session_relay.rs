@@ -97,6 +97,12 @@ impl SessionRelay {
         }).await.map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "Session relay timeout"))?
     }
 
+    pub async fn connection_status(&self, device_id: &str) -> io::Result<bool> {
+        let reply = self.request(json!({"operation":"connection_status","device_id":device_id})).await?;
+        if reply["device_id"] != device_id { return Err(io::Error::other("Connection status identity mismatch")); }
+        reply["connected"].as_bool().ok_or_else(|| io::Error::other("Invalid connection status"))
+    }
+
     pub async fn report_health(&self, device_id: &str, report: Value) -> io::Result<()> {
         self.request(json!({"operation":"health","device_id":device_id,"report":report})).await?;
         Ok(())
@@ -157,6 +163,14 @@ async fn accept(context: &TaskContext, lease: &Mutex<Option<(String, Instant)>>,
     let body = &request["body"];
     if body["operation"] == "identity" {
         return Ok(json!({"device_id": context.device_id, "hostname": context.hostname, "mac_address": context.mac_address, "nickname": null}));
+    }
+    if body["operation"] == "connection_status" {
+        if body["device_id"] != context.device_id { return Err(io::Error::other("Status requested for another device")); }
+        let connected = match context.publisher.read().await.as_ref() {
+            Some(publisher) => publisher.is_connected().await,
+            None => false,
+        };
+        return Ok(json!({"device_id":context.device_id,"connected":connected}));
     }
     if body["operation"] == "policy" {
         if body["device_id"] != context.device_id { return Err(io::Error::other("Policy requested for another device")); }
@@ -286,6 +300,28 @@ mod ipc_tests {
     use super::*;
     fn relay(port: u16, key: u8) -> SessionRelay {
         SessionRelay { cipher: Aes256Gcm::new_from_slice(&[key;32]).unwrap(), port, instance: Uuid::new_v4().to_string(), principal: None }
+    }
+    #[tokio::test]
+    async fn connection_status_requires_matching_identity_and_boolean() {
+        for (body, expected) in [
+            (json!({"device_id":"device","connected":true}), Some(true)),
+            (json!({"device_id":"device","connected":false}), Some(false)),
+            (json!({"device_id":"other","connected":true}), None),
+            (json!({"device_id":"device","connected":"true"}), None),
+        ] {
+            let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST,0)).await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let relay = relay(port,1);
+                let request = relay.read(&mut socket).await.unwrap();
+                assert_eq!(request["body"]["operation"], "connection_status");
+                relay.write(&mut socket, &json!({"protocol":PROTOCOL,"direction":"response",
+                    "request_id":request["request_id"],"ok":true,"body":body})).await.unwrap();
+            });
+            assert_eq!(relay(port,1).connection_status("device").await.ok(), expected);
+            server.await.unwrap();
+        }
     }
     #[tokio::test]
     async fn wrong_key_and_oversized_frames_are_rejected() {

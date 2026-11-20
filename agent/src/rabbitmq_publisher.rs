@@ -20,6 +20,13 @@ struct PublisherState {
 }
 
 impl RabbitMQPublisher {
+    /// Transport state, not merely the existence of a publisher object.
+    pub async fn is_connected(&self) -> bool {
+        let state = self.state.lock().await;
+        state.connection.as_ref().is_some_and(|c| c.status().connected())
+            && state.channel.as_ref().is_some_and(|c| c.status().connected())
+    }
+
     /// Connect to RabbitMQ and initialize exchanges
     pub async fn connect(rabbitmq_url: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         if crate::network_identity::production() && reqwest::Url::parse(rabbitmq_url).map(|u|u.scheme()!="amqps").unwrap_or(true){return Err("Production requires AMQPS".into());}

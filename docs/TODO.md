@@ -214,3 +214,9 @@ Correspondencia: antiguos 1/2/3 → nuevos 1/2/6; antiguo 5 → nuevo 3; antiguo
 - Firma aplazada por decisión del responsable; mantener comprobación SHA256 y aceptación explícita sin firma.
 - Publicar código y empaquetar Windows/Debian/Ubuntu; ver RELEASE_0_2_1.md.
 - Aceptación en equipos reales, SMTP autorizado, configuración del destino y revisión final de imágenes siguen pendientes.
+
+## Actualización 0.2.2
+
+- Implementados: publicación automática de paquetes tras CI, actualizador silencioso Windows, estado de conexión autenticado para el icono.
+- Verificar la release efectiva y actualizar una vez el piloto antiguo para activar el nuevo actualizador.
+- Pendientes: aceptación de actualización real bajo SYSTEM, firma de Windows, actualización Linux mediante APT, distribución central para grandes despliegues.
