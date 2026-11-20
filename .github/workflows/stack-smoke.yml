@@ -10,6 +10,13 @@ concurrency:
 permissions:
   contents: read
 jobs:
+  broker-cutover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconcile broker transfer, restart and reversal
+        run: python3 tests/broker_cutover.py
   stack:
     runs-on: ubuntu-latest
     timeout-minutes: 30

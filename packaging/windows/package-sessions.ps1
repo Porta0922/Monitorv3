@@ -1,6 +1,6 @@
 #Requires -RunAsAdministrator
 [CmdletBinding()]
-param([Parameter(Mandatory)][ValidateSet('prepare','restore','remove')][string]$Action)
+param([Parameter(Mandatory)][ValidateSet('prepare','restore','remove')][string]$Action,[switch]$ResumeSessions)
 $ErrorActionPreference='Stop'
 $packageLock=[Threading.Mutex]::new($false,'Global\ActivityMonitorLifecycle');$packageHeld=$false
 try {
@@ -42,7 +42,12 @@ if ($Action -eq 'prepare') {
     $binary=Join-Path $env:ProgramFiles 'ActivityMonitor\activity-monitor-agent.exe'
     foreach ($process in Get-Process -ErrorAction Stop) {
         if ($process.ProcessName -eq 'activity-monitor-agent') {
-            if ($process.Path -ne $binary) {throw 'A legacy agent uses another path; migrate it before MSI deployment.'}
+            # A service/session may exit while the process snapshot is inspected.
+            # Read Path once: repeated reads can become null after shutdown.
+            if ($process.HasExited) {continue}
+            $processPath=$process.Path
+            if ($process.HasExited) {continue}
+            if ($processPath -ne $binary) {throw "Agent process $($process.Id) uses another or inaccessible path ($processPath); resolve it before MSI deployment."}
             # Retained SQLite WAL is the durable boundary; never delete its files on termination.
             $process.Kill();if (!$process.WaitForExit(20000)) {throw 'Desktop process did not stop.'}
         }
@@ -62,7 +67,13 @@ if ($Action -eq 'prepare') {
         }
         foreach ($task in $plan.tasks) {
             if ($task.name -notmatch '^ActivityMonitor-Session-S-1-5-21-[0-9-]+$') {throw 'Invalid journal task.'}
-            if ($task.enabled) {Enable-ScheduledTask -TaskName $task.name -TaskPath '\'|Out-Null}
+            if ($task.enabled) {
+                Enable-ScheduledTask -TaskName $task.name -TaskPath '\'|Out-Null
+                # Re-enable alone waits for another logon and leaves the current
+                # desktop collector stopped after maintenance. The task retains
+                # its enrolled interactive principal; do not launch as SYSTEM.
+                if ($ResumeSessions) {Start-ScheduledTask -TaskName $task.name -TaskPath '\'}
+            }
         }
     } else {
         foreach ($task in $plan.tasks) {

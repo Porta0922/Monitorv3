@@ -123,6 +123,16 @@ fn run_service() -> Result<(), windows_service::Error> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Packaging metadata must not load secrets, start capture or contact services.
+    if std::env::args().nth(1).as_deref() == Some("--version-json") {
+        println!("{}", serde_json::json!({
+            "name": "activity-monitor-agent",
+            "version": env!("CARGO_PKG_VERSION"),
+            "os": std::env::consts::OS,
+            "arch": std::env::consts::ARCH
+        }));
+        return Ok(());
+    }
     #[cfg(target_os = "linux")]
     if std::env::args().nth(1).as_deref()==Some("--internal-x11-input-worker") {
         return keystroke_tracker::linux_input_listener::worker_main();

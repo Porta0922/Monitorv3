@@ -1,5 +1,7 @@
 # Escaneo de imágenes y componentes
 
+Candidatas adicionales 2026-11-16: `docker-compose.next.yml` fija Timescale 2.32.0/PG17 y RabbitMQ 4.2 por digest, en volúmenes nuevos. Se obtuvieron imágenes, no se arrancaron ni escanearon ahora. Ruta protegida de primer arranque y límites de migración en [PRODUCTION_RECOVERY.md](PRODUCTION_RECOVERY.md). El script de escaneo ahora separa medios, bajos, desconocidos y entradas sin versión corregida. La aceptación del conjunto queda para la campaña final; no declarar cerrado el riesgo por cambiar etiquetas.
+
 El escaneo se realiza sobre imágenes locales identificadas por ID; no actualiza contenedores ni volúmenes. Necesita PowerShell y Docker con contenedores Linux. El script fija el digest del escáner y consulta su base de vulnerabilidades al ejecutar.
 
 ```powershell
@@ -37,8 +39,8 @@ capacidades eliminadas y no-new-privileges. Desarrollo conserva su target anteri
 
 Imagen completa local `monitor-security-server:distroless-candidate`, ID
 `sha256:0a2036be1e4af6fd9444cbe5a4eb50954a652a343d16606d311cf9fa4bbd4c11`:
-Trivy registró **0 críticos, 0 altos, 53 hallazgos totales**. Informe y SBOM privados
-conservados. No se suprimieron avisos; menor severidad requiere clasificación y el
+Trivy registró **0 críticos, 0 altos, 39 medios, 12 bajos y 2 sin severidad determinada (53 entradas)**. Ninguna entrada informa versión corregida. Informe y SBOM privados
+conservados. No se suprimieron avisos; los medios, bajos y desconocidos requieren clasificación de exposición y el
 resultado no certifica ausencia de vulnerabilidades. El candidato trixie anterior
 reportaba 52 altos; no fue adoptado. PostgreSQL/RabbitMQ y la aceptación del conjunto
 siguen sus propios pendientes.
@@ -54,3 +56,16 @@ Antes de promover, verificar procedencia/firma del digest con el procedimiento
 repetir el escaneo del artefacto definitivo y validar HTTPS/AMQPS y despliegue completo.
 La nueva prueba CI cubre estructura, hash de contraseña, salud y arranque con
 DB/broker de ensayo; no reemplaza la aceptación TLS del destino.
+# Validación local del 2026-11-17
+
+El dashboard reconstruido `monitor-security-dashboard:20261116` pasó el escaneo
+sin hallazgos. El candidato `monitor-security-postgres:20261117` pasó el umbral
+de críticos/altos: 0 críticos, 0 altos, 0 medios, 0 bajos y 2 sin severidad
+determinada. Informes privados en `.local-test/security/images/20261117-122949-44cebd61`
+y `.local-test/security/images/20261117-123308-c5030e3d`, con SBOM e identidad de imagen.
+
+La imagen PostgreSQL actualiza paquetes de sistema, reemplaza la invocación
+de gosu por su-exec y retira parallel-copy, que no utiliza la recuperación serial.
+Los dos avisos restantes son CVE-2026-39824 y CVE-2026-97054; requieren evaluación
+de aplicabilidad. El escaneo no demuestra aceptación funcional ni autoriza
+desplegar sobre los volúmenes PG15. El ensayo de recuperación/migración sigue abierto.

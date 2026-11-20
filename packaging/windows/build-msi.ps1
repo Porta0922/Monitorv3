@@ -4,11 +4,16 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ExpectedSha256,
     [Parameter(Mandatory)][ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$Version,
     [Parameter(Mandatory)][string]$OutputPath,
-    [string]$ConfigTemplate
+    [string]$ConfigTemplate,
+    [switch]$PrivatePilot
 )
 $ErrorActionPreference='Stop'
 $artifact=(Resolve-Path -LiteralPath $BinaryPath).Path
 $destination=[IO.Path]::GetFullPath($OutputPath)
+if (Test-Path -LiteralPath $destination) { throw 'Refusing to overwrite an existing package.' }
+if ($ConfigTemplate -and !$PrivatePilot) { throw 'Custom configuration requires -PrivatePilot; never distribute that package.' }
+& python (Join-Path (Split-Path -Parent $PSScriptRoot) 'common\verify-release-input.py') --binary $artifact --sha256 $ExpectedSha256 --version $Version --os windows --arch x86_64
+if ($LASTEXITCODE -ne 0) { throw 'Release input verification failed.' }
 $outputDirectory=Split-Path -Parent $destination
 New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 $stage=Join-Path $outputDirectory ('.build-msi-' + [guid]::NewGuid().ToString('N'))

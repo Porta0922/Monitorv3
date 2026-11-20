@@ -1,3 +1,31 @@
+## 2026-11-16 — Detectores y recuperación preparados
+
+Implementados watchdog y timer con consultas agregadas/solo lectura, notificaciones de transición/recuperación y recordatorios acotados. Preparada recuperación de DB, configuración, roles, identidades/políticas y definiciones RabbitMQ a contenedores/volúmenes nuevos sin red, detención final y recibo privado de invariantes. Sesiones humanas recuperadas se revocan. Backup ahora incorpora definiciones vivas cifradas; no incluye mensajes del broker.
+
+Obtenidas imágenes candidatas Timescale 2.32.0/PG17 (`6a6b7d7a346d7c6be03a310c240706f3bbc6d7adbdf3fbc07823570b34337f5e`) y RabbitMQ 4.2 (`77ca2ba3621a95208918e6e331199a6c81129690bf7fc570dc61b6e64726840a`). Overlay separado y primer arranque con rechazo de proyectos/volúmenes existentes. No se arrancaron candidatas, migraron datos, restauraron backups ni enviaron avisos. Revisada sintaxis; pruebas funcionales, escaneo/procedencia y aceptación integral diferidos por instrucción del usuario. Sin nuevo PR. El piloto conserva agente 0.2.0 y sus servicios anteriores.
+
+## 2026-11-16 — Ubuntu 22.04, firma y canal operativo
+
+DEB amd64 Ubuntu 22.04 construido con digest `9abcaffc92a5279fff3a6a41635c0800ea33e528425fb389658806476e7defde`; salida privada `.local-test/agent-0.2.0-ubuntu2204/` incluye SHA256 y entorno. Verificador compatible con Python 3.10 usando Cargo offline/locked. Compilación y empaquetado completados; sin instalar Linux ni ejecutar campaña funcional.
+
+Herramienta de firma Windows preparada, no ejecutada por falta de certificado organizacional aprovisionado. Canal HTTPS de fallos systemd/backups implementado con archivo privado, sin redirecciones/proxies y reintentos acotados; plantilla de backup enlazada. No instalado ni conectado a un receptor, sin mensajes enviados. Guías RELEASE_SIGNING y EXTERNAL_ALERTS explican límites y tareas DevOps. Detectores periódicos y actividad sospechosa todavía pendientes; no se cierra vigilancia productiva. Cambios locales, sin PR.
+
+## 2026-11-16 — Agente local actualizado y paquetes Linux construidos
+
+Actualización autorizada del piloto Windows a 0.2.0 completada con MSI genérico local sin firma; configuración conservada por hash, ejecutable instalado idéntico al candidato, servicio Running/Auto y procesos en sesiones 0 y 1. El primer intento se detuvo antes de MSI por inspección de procesos; se restauró el servicio, se corrigió el manejo de procesos terminados y recuperación del journal, y se completó con el candidato r2.
+
+DEB amd64 0.2.0 construidos por separado para Debian 12 y Ubuntu 24.04, con dependencias calculadas por dpkg-shlibdeps. Artefactos privados en `.local-test/agent-0.2.0-debian12/` y `.local-test/agent-0.2.0-ubuntu2404/`, SHA256 y entorno adjuntos. Sin instalación Linux, sin campaña funcional ni nuevo PR. Asistente Windows implementado; interacción gráfica pendiente de aceptación. Persisten firma, Ubuntu 22.04/arm64 si forman parte del alcance, entrega desde checkout limpio y campaña final. No es una release productiva.
+
+## 2026-11-16 — Preparación del instalador 0.2.0
+
+Fuente del agente incrementada a 0.2.0; piloto instalado permanece 0.1.0. Generadores comprueban hash, versión Cargo/lock/binario y plataforma nativa, rechazan sobrescritura y requieren declaración privada para configuración MSI personalizada. Compilación release Windows y construcción MSI genérico completadas; sin firma ni instalación. No se ejecutó campaña funcional, según prioridad del usuario. Pendientes DEB por destino, firma, experiencia Windows de instalación, manifiestos finales y pruebas tras completar paquetes. Ver AGENT_RELEASE_0_2.md.
+
+## 2026-11-16 — Cierre del runtime productivo mínimo
+
+PR #9 fusionado en `9dc50b48a95161efda7d1bf7fe6ae60a53da3c7e`, sobre la cabeza comprobada `0006f33d9c8dc7105654c571d7363fba9d53f042`. Publication preflight, Storage retention, Agent lifecycle checks y Stack smoke test finalizaron correctamente. La nueva prueba incluye imagen sin shell, UID sin privilegios, Argon2 sin red, readiness y arranque con DB/broker aislados. No se actualizó el piloto ni se distribuyó un agente nuevo.
+
+Escaneo histórico del 13 de noviembre: 0 críticos, 0 altos, 39 medios, 12 bajos y 2 sin severidad determinada; ninguno informa versión corregida. No constituye aceptación de riesgo ni escaneo nuevo del 16 de noviembre. Pendientes: clasificación de exposición y procedencia, restantes imágenes/migración, alertas externas, recuperación integral, paquetes versionados y firmados, aceptación instalada y candidato integrado. Credenciales y destino se completan con DevOps.
+
 ## 2026-11-13 — Privacidad y copia externa fusionadas
 
 PR #7 fusionado en `8fe2614d222756a6a7d466414fa2501a3c47a124` y PR #8 en `f81080bb0cafd0f7dd13768191f020ce16b6a154`, ambos con los cuatro flujos CI aprobados. Controles de escritorio y publicación verificable de respaldos disponibles en código; requieren agente actualizado y configuración del destino, respectivamente. Nuevo candidato de runtime productivo mínimo en preparación, separado del piloto.

@@ -1,6 +1,6 @@
 # Versionado y mantenimiento de documentación
 
-Actualizado: 2026-10-28.
+Actualizado: 2026-11-16. Fuente y piloto Windows: **0.2.0**, actualizado desde **0.1.0** por autorización del usuario, conservando configuración. Distribución general y estabilidad no aprobadas. Ver [preparación del instalador](AGENT_RELEASE_0_2.md).
 
 ## Serie del agente
 

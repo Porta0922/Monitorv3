@@ -1,0 +1,31 @@
+# New installation candidate ONLY. Use start_fresh_candidate.py; never reuse PG15/Rabbit3 volumes.
+x-postgres-candidate: &postgres-candidate
+  image: monitor-postgres:0.2.0-candidate
+  build:
+    context: .
+    dockerfile: DockerPostgres/Dockerfile
+services:
+  postgres:
+    <<: *postgres-candidate
+    volumes: !override
+      - postgres17_data:/var/lib/postgresql/data
+      - ./.production/init-roles.sql:/docker-entrypoint-initdb.d/10-monitor-roles.sql:ro
+  db-maintenance:
+    <<: *postgres-candidate
+  rabbitmq:
+    image: rabbitmq:4.2-management-alpine@sha256:77ca2ba3621a95208918e6e331199a6c81129690bf7fc570dc61b6e64726840a
+    volumes: !override
+      - rabbitmq42_data:/var/lib/rabbitmq
+      - ./.production/tls/ca.crt:/run/tls/ca.crt:ro
+      - ./.production/tls/broker.crt:/run/tls/broker.crt:ro
+      - ./.production/tls/broker.key:/run/tls/broker.key:ro
+      - ./.production/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./.production/rabbit-definitions.json:/etc/rabbitmq/definitions.json:ro
+    ports: !override
+      - "127.0.0.1:35671:5671"
+  dashboard:
+    ports: !override
+      - "127.0.0.1:28443:8443"
+volumes:
+  postgres17_data:
+  rabbitmq42_data:

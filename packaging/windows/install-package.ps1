@@ -32,16 +32,51 @@ try {
     # Snapshot coordinator/helper outside INSTALLFOLDER so removal/rollback cannot delete the recovery code.
     $recovery=Join-Path (Split-Path -Parent $trust) ('.package-recovery-'+[guid]::NewGuid().ToString('N'))
     Protect-Directory $recovery $false
+    # SecureRepair resolves the registered source basename. A fresh random MSI
+    # basename breaks maintenance when the original temporary source was removed.
+    $installer=New-Object -ComObject WindowsInstaller.Installer
+    $database=$null;$view=$null;$record=$null
+    try {
+        $database=$installer.OpenDatabase($stage,0)
+        $view=$database.OpenView('SELECT `Value` FROM `Property` WHERE `Property` = ''ProductCode''')
+        $view.Execute();$record=$view.Fetch();$productCode=$record.StringData(1)
+        $packageName=[IO.Path]::GetFileName($path);$installed=$false
+        foreach ($product in $installer.ProductsEx($productCode,'',4)) {
+            $packageName=$product.SourceListInfo('PackageName');$installed=$true
+        }
+        if ($Action -eq 'repair' -and !$installed) {throw 'The supplied MSI product is not installed.'}
+        if (!$packageName -or $packageName.Length -gt 255 -or [IO.Path]::GetFileName($packageName) -ne $packageName -or $packageName.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0 -or [IO.Path]::GetExtension($packageName) -ne '.msi') {
+            throw 'Invalid registered package source name.'
+        }
+    } finally {
+        if ($view) {$view.Close()}
+        foreach ($com in @($record,$view,$database,$installer)) {if ($com) {[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($com)}}
+    }
+    $sourcePackage=Join-Path $recovery $packageName
+    Move-Item -LiteralPath $stage -Destination $sourcePackage
+    $stage=$sourcePackage
     Copy-Item -LiteralPath $coordinator -Destination (Join-Path $recovery 'package-sessions.ps1')
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'session-common.ps1') -Destination (Join-Path $recovery 'session-common.ps1')
     $coordinator=Join-Path $recovery 'package-sessions.ps1'
     & $coordinator -Action prepare
-    $verb=if ($Action -eq 'remove') {'/x'} elseif ($Action -eq 'repair') {'/fa'} else {'/i'}
-    $process=Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\msiexec.exe') -ArgumentList @($verb,('"'+$stage+'"'),'/qn','/norestart','MONITOR_COORDINATED=1') -Wait -PassThru -WindowStyle Hidden
+    # /f ignores command-line properties, including our coordination guard.
+    # Repair through /i so the launch condition remains enforced.
+    $verb=if ($Action -eq 'remove') {'/x'} else {'/i'}
+    $installerLog=Join-Path $recovery 'installer.log'
+    $installerArguments=@($verb,('"'+$stage+'"'),'/qn','/norestart','MONITOR_COORDINATED=1','/L*v',('"'+$installerLog+'"'))
+    if ($Action -eq 'repair') {$installerArguments+=@('REINSTALL=ALL','REINSTALLMODE=amus')}
+    $process=Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\msiexec.exe') -ArgumentList $installerArguments -Wait -PassThru -WindowStyle Hidden
     if ($process.ExitCode -notin @(0,3010)) {
         & $coordinator -Action restore
         throw "Windows Installer failed: $($process.ExitCode). Previous autostart restored; services remain stopped."
     }
-    if ($Action -eq 'remove') {& $coordinator -Action remove} else {& $coordinator -Action restore}
+    if ($Action -eq 'remove') {& $coordinator -Action remove} else {& $coordinator -Action restore -ResumeSessions}
     Write-Output "Installer completed: $($process.ExitCode). Configuration/data retained; review configuration before starting."
+} catch {
+    # Preparation can fail after writing its journal and disabling autostart.
+    # Restore that journal too, not only failures returned by msiexec.
+    if ($held -and $coordinator -and (Test-Path -LiteralPath $coordinator)) {
+        try { & $coordinator -Action restore } catch { Write-Warning 'Session recovery remains pending; run package-sessions.ps1 -Action restore as administrator.' }
+    }
+    throw
 } finally { if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage }; if ($held) {$lifecycleLock.ReleaseMutex()};$lifecycleLock.Dispose() }

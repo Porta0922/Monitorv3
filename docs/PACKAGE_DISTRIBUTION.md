@@ -1,3 +1,5 @@
+> Vigente 2026-11-16: usar [preparación del agente 0.2.0](AGENT_RELEASE_0_2.md). Los comandos 3.4.0 y pendientes descritos debajo son históricos. Los generadores actuales verifican versión del binario contra Cargo y no aceptan renombrar un ejecutable antiguo.
+>
 > Actualización 2026-10-28: el cierre de implementación, los nuevos flujos multiusuario
 > y la integración de paquetes están descritos en [P2_IMPLEMENTATION_CLOSURE.md](P2_IMPLEMENTATION_CLOSURE.md).
 > Las limitaciones y pendientes de esta página anteriores a esa fecha son históricos;

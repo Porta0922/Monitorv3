@@ -29,12 +29,16 @@ foreach ($image in $Images) {
         checked_at_utc = [DateTime]::UtcNow.ToString('o')
         critical = @($vulnerabilities | Where-Object Severity -eq 'CRITICAL').Count
         high = @($vulnerabilities | Where-Object Severity -eq 'HIGH').Count
+        medium = @($vulnerabilities | Where-Object Severity -eq 'MEDIUM').Count
+        low = @($vulnerabilities | Where-Object Severity -eq 'LOW').Count
+        unknown = @($vulnerabilities | Where-Object { $_.Severity -notin @('CRITICAL','HIGH','MEDIUM','LOW') }).Count
+        without_fixed_version = @($vulnerabilities | Where-Object { !$_.FixedVersion }).Count
         total = $vulnerabilities.Count
         vulnerability_report = "$prefix-vulnerabilities.json"; sbom = "$prefix-sbom.cdx.json"
     }
     $index++
 }
 ConvertTo-Json -InputObject @($summary) -Depth 5 | Set-Content -LiteralPath (Join-Path $reportPath 'summary.json') -Encoding utf8
-$summary | Format-Table image,critical,high,total
+$summary | Format-Table image,critical,high,medium,low,unknown,total
 Write-Output "Reports: $reportPath"
 if ($FailOnHigh -and @($summary | Where-Object { $_.critical -gt 0 -or $_.high -gt 0 }).Count -gt 0) { exit 1 }

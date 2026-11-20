@@ -8,6 +8,7 @@ both encrypted streams finish and configuration remains unchanged.
 import argparse
 import datetime
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -105,7 +106,7 @@ def encrypt_dump(command, recipients, output, timeout):
         stop(producer)
 
 
-def encrypt_configuration(files, recipients, output, timeout):
+def encrypt_configuration(files, recipients, output, timeout, extra_entries=None):
     encryptor = None
     timer = None
     try:
@@ -119,6 +120,12 @@ def encrypt_configuration(files, recipients, output, timeout):
                     regular(path)
                     # Follow no symlinks, and archive only explicitly inventoried files.
                     archive.add(path, arcname=name, recursive=False)
+                for name, data in (extra_entries or {}).items():
+                    if name != 'config/rabbit-live-definitions.json' or name in files:
+                        raise ValueError('Unexpected additional configuration entry')
+                    member = tarfile.TarInfo(name)
+                    member.size = len(data); member.mode = 0o600
+                    archive.addfile(member, io.BytesIO(data))
             encryptor.stdin.close()
             if encryptor.wait(timeout=timeout): raise RuntimeError('Configuration encryption failed')
             encrypted.flush()
@@ -132,6 +139,26 @@ def run(command):
     result = subprocess.run(command, cwd=ROOT, capture_output=True, timeout=60)
     if result.returncode: raise RuntimeError('Deployment inspection failed; no credentials printed')
     return result.stdout.decode().strip()
+
+
+def live_broker_definitions(command):
+    # The temporary plaintext stays inside the broker, mode 0600, and is removed
+    # by the shell trap. Only bounded bytes in host memory enter the age stream.
+    temporary = '/tmp/monitor-backup-' + uuid.uuid4().hex + '.json'
+    script = 'set -eu; umask 077; trap \'rm -f -- "$1"\' EXIT; rabbitmqctl -q -t 30 export_definitions "$1" >/dev/null; cat "$1"'
+    process = subprocess.Popen(command + ['exec','-T','--user','rabbitmq','rabbitmq','/bin/sh','-c',script,'sh',temporary],
+                               cwd=ROOT,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,stdin=subprocess.DEVNULL)
+    timer = deadline(process,60)
+    try:
+        data = process.stdout.read(16*1024**2+1)
+        if len(data)>16*1024**2: raise ValueError('Broker definitions exceed recovery limit')
+        if process.wait(timeout=30): raise RuntimeError('Broker definition export failed')
+        parsed = json.loads(data)
+        if not isinstance(parsed,dict) or any(not isinstance(parsed.get(name),list) for name in ('users','vhosts','permissions','queues','exchanges','bindings')):
+            raise ValueError('Incomplete broker definitions')
+        return data
+    finally:
+        timer.cancel(); process.stdout.close(); stop(process)
 
 
 def main():
@@ -180,12 +207,18 @@ def main():
     encrypt_dump(command + ['exec', '-T', 'postgres', 'pg_dump', '--username=monitor_bootstrap',
                             '--dbname=activity_monitor', '--format=custom'], args.recipients_file,
                  output / FILES[0], args.timeout_seconds)
-    encrypt_configuration(files, args.recipients_file, output / FILES[1], args.timeout_seconds)
+    broker_container = run(command + ['ps','-q','rabbitmq'])
+    if not broker_container or len(broker_container.splitlines()) != 1: raise ValueError('Exactly one running broker is required')
+    broker_image = run(['docker','inspect','--format','{{.Image}}',broker_container])
+    broker_definitions = live_broker_definitions(command)
+    encrypt_configuration(files, args.recipients_file, output / FILES[1], args.timeout_seconds,
+                          extra_entries={'config/rabbit-live-definitions.json': broker_definitions})
     after = {name: digest(path) for name, path in configuration_files(private, inputs).items()}
     if before != after: raise RuntimeError('Configuration changed during backup; no complete manifest published')
     manifest = {'format': 1, 'status': 'complete', 'started_at': started.isoformat(),
                 'finished_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 'commit': commit, 'project': args.project_name, 'postgres_image_id': image,
+                'rabbitmq_image_id': broker_image, 'broker_live_definitions': True,
                 'files': {name: {'sha256': digest(output / name), 'bytes': (output / name).stat().st_size} for name in FILES}}
     pending = output / 'manifest.json.partial'
     with pending.open('x') as stream:

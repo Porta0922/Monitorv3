@@ -1,6 +1,6 @@
 # Guía de release para DevOps
 
-Actualizada: 2026-11-07. Las credenciales reales se incorporarán en el servidor de destino por DevOps, según decisión del usuario. Esta guía prepara el procedimiento; no declara aprobado el release. Consultar los bloqueantes vigentes en [TODO.md](TODO.md).
+Actualizada: 2026-11-17. Las credenciales reales se incorporarán en el servidor de destino por DevOps, según decisión del usuario. Esta guía prepara el procedimiento; no declara aprobado el release. Consultar los bloqueantes vigentes en [TODO.md](TODO.md).
 
 ## 1. Definir y registrar el destino
 
@@ -19,7 +19,7 @@ Registrar en el ticket de release:
 | Datos | Retención aprobada, exclusiones de captura, aviso a usuarios |
 | Paquetes | Versión de agente, sistemas admitidos, firmas y SHA256 |
 
-No promover un commit con CI fallido ni sustituir un paquete entregado por otro de igual versión. La fuente del agente es `agent/Cargo.toml`; el piloto instalado sigue en 0.1.0. [Reglas de versionado](VERSIONING.md).
+No promover un commit con CI fallido ni sustituir un paquete entregado por otro de igual versión. La fuente del agente es `agent/Cargo.toml`; el piloto Windows instalado está en 0.2.0, todavía sin aprobación estable. [Reglas de versionado](VERSIONING.md).
 
 ## 2. Obtener y construir el candidato
 
@@ -147,6 +147,12 @@ sudo python3 scripts/configure-agent-identity.py \
 En Windows usar Python y rutas absolutas de la instalación desde una terminal administrativa. El script conserva UUID, clave de caché y pendientes; no reinicia. Reiniciar mediante el procedimiento de ciclo de vida del instalador y validar servicio **y sesión de usuario**: el servicio aislado no ve todas las ventanas del escritorio. Comprobar recursos, ventanas, actividad, desconexión/reconexión y ausencia de equipos duplicados. Ver [AGENT_IDENTITY.md](AGENT_IDENTITY.md) y [PLATFORM_LIFECYCLE.md](PLATFORM_LIFECYCLE.md).
 
 ## 9. Operación, actualización y reversión
+
+- Preparar detector periódico según [EXTERNAL_ALERTS.md](EXTERNAL_ALERTS.md), con proyecto/vhost/umbrales/HTTPS/certificados del destino; no activar el timer antes de configurar receptor y límites.
+- Recuperación y nuevas imágenes: [PRODUCTION_RECOVERY.md](PRODUCTION_RECOVERY.md). El restaurador exige salida vacía y usa imagen original en DB aislada; el overlay PG17/Rabbit4.2 es para instalación nueva, no actualización de los volúmenes actuales.
+
+- Preparar firma y confianza de los paquetes según [RELEASE_SIGNING.md](RELEASE_SIGNING.md). La herramienta de firma copia artefactos y verifica sello/publicador; requiere certificado real, no configurado automáticamente.
+- Configurar [EXTERNAL_ALERTS.md](EXTERNAL_ALERTS.md): canal HTTPS y unidad systemd para fallos del backup. La plantilla de backup requiere instalar la unidad notificadora y su archivo privado antes de habilitar el timer. No cubre todavía todos los detectores enumerados abajo.
 
 - Integrar vencimiento TLS: `python3 scripts/production/tls-maintenance.py --warning-days 14`. Alertar al responsable ante salida no cero. Renovar con `--install-from /ruta/protegida/renovados` y los mismos `--project-name`, `--env-file` y `--compose-file` del despliegue; la rotación de CA requiere distribución previa de confianza.
 - Alertar externamente por API/consumidor caído, cola/DLQ creciente, disco/DB, fallos de mantenimiento/backup y abuso de autenticación. Registrar una alerta realmente recibida; disponer de la pantalla no equivale a vigilancia operativa.

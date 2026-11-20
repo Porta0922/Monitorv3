@@ -146,6 +146,10 @@ La configuración y la DB no constituyen una instantánea transaccional conjunta
 
 ## Evidencia disponible
 
+Desde 2026-11-16 el flujo de backup captura también las definiciones vivas de RabbitMQ (usuarios y hashes, permisos y topología) mediante rabbitmqctl y las incorpora en el tar cifrado, además de guardar el ID de la imagen. El JSON temporal existe solo dentro del broker con permisos privados y se elimina mediante trap; sus bytes pasan por memoria al cifrado, sin archivo plano adicional en el host. Exportación limitada a 16 MiB/60 segundos; un fallo impide publicar el manifiesto completo. No incluye mensajes ni convierte DB/broker/configuración en una instantánea transaccional conjunta. Pendiente validación del nuevo recorrido; no atribuirle automáticamente las pruebas históricas. Referencia: [definiciones RabbitMQ](https://www.rabbitmq.com/docs/definitions).
+
+Automatización nueva: [PRODUCTION_RECOVERY.md](PRODUCTION_RECOVERY.md) describe `restore_isolated.py`, que autentica, recupera DB/configuración en recursos nuevos sin red, revoca sesiones humanas recuperadas y deja un recibo de invariantes. Implementada, pendiente de ejecutar en la campaña final; no sustituye las evidencias históricas siguientes ni acredita recuperación productiva.
+
 `tests/encrypted_backup.py`: ensayo aislado Linux con age y PostgreSQL 16; cifrado,
 restauración y comparación exacta de 5000 filas; también Timescale/PostgreSQL 15
 con 5000 muestras y chunks comprimidos conservados. Rechazo de clave equivocada,
