@@ -19,6 +19,8 @@ jobs:
           python-version: '3.12'
       - name: Reject private artifacts and recognizable credentials
         run: python scripts/check-publication.py
+      - name: Release requires successful checks and immutable versions
+        run: python tests/test_release_gate.py
       - name: Preserve deployment configuration during TLS renewal and rollback
         run: python tests/tls_maintenance_config.py
   browser-security:

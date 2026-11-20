@@ -1,6 +1,8 @@
 # Monitor — Supervisión de equipos de oficina
 
-**Estado: candidato 0.2.1 sin firma; todavía no aprobado para producción.**
+**Estado: candidato 0.2.2 sin firma; todavía no aprobado para producción.**
+
+[Actualizaciones silenciosas Windows, releases e icono de conexión](docs/AUTOMATIC_UPDATES.md).
 
 [Entrega e instalación 0.2.1](docs/RELEASE_0_2_1.md).
 

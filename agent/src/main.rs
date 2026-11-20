@@ -479,6 +479,21 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
         native_workers.push(ui::spawn_tray(web_state.clone()));
         let relay = relay.expect("session relay configured");
         session_policy::bootstrap(&context, &relay).await?;
+        supervisor.track("session_connection_status", {
+            let relay = relay.clone(); let state = web_state.clone(); let device_id = context.device_id.clone();
+            move || {
+                let relay = relay.clone(); let state = state.clone(); let device_id = device_id.clone();
+                tokio::spawn(async move {
+                    let mut timer = tasks::skip_interval(Duration::from_secs(5));
+                    loop {
+                        timer.tick().await;
+                        // Fail closed on timeout, authentication failure or a stopped service.
+                        let connected = relay.connection_status(&device_id).await.unwrap_or(false);
+                        state.connected.store(connected, std::sync::atomic::Ordering::Relaxed);
+                    }
+                })
+            }
+        }).await;
         for name in ["window_activity", "running_apps", "heatmap", "session_input"] {
             let ctx = context.clone();
             supervisor.track(name, move || session_policy::spawn_collector(ctx.clone(), name)).await;
@@ -624,7 +639,10 @@ async fn run_agent(mut shutdown_rx: mpsc::Receiver<()>) -> Result<(), Box<dyn st
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 interval.tick().await;
-                let connected = ctx.publisher.read().await.is_some();
+                let connected = match ctx.publisher.read().await.as_ref() {
+                    Some(publisher) => publisher.is_connected().await,
+                    None => false,
+                };
                 ws.connected.store(connected, std::sync::atomic::Ordering::Relaxed);
                 let events=ec.load(std::sync::atomic::Ordering::Relaxed);
                 ws.events_today.store(events,std::sync::atomic::Ordering::Relaxed);

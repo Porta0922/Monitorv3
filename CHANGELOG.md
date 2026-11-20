@@ -1,3 +1,7 @@
+# 0.2.2 — Actualización silenciosa y conexión
+
+Tarea SYSTEM para actualizar MSI desde releases verificadas por HTTPS/SHA256; publicación de paquetes después del CI en main. El icono de sesión consulta el estado real de conexión del servicio por IPC autenticado. Firma aplazada; automatización Linux pendiente.
+
 # 0.2.1 — 2026-11-20
 
 Correcciones del coordinador MSI: reparación con fuente registrada y reanudación de sesiones enroladas. Entrega sin firma autorizada; guía de certificado interno y paquetes separados por plataforma.

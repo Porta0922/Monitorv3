@@ -58,6 +58,7 @@ try {
     Copy-Item -LiteralPath $coordinator -Destination (Join-Path $recovery 'package-sessions.ps1')
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'session-common.ps1') -Destination (Join-Path $recovery 'session-common.ps1')
     $coordinator=Join-Path $recovery 'package-sessions.ps1'
+    $wasRunning=(Get-Service ActivityMonitor -ErrorAction SilentlyContinue).Status -eq 'Running'
     & $coordinator -Action prepare
     # /f ignores command-line properties, including our coordination guard.
     # Repair through /i so the launch condition remains enforced.
@@ -70,7 +71,15 @@ try {
         & $coordinator -Action restore
         throw "Windows Installer failed: $($process.ExitCode). Previous autostart restored; services remain stopped."
     }
-    if ($Action -eq 'remove') {& $coordinator -Action remove} else {& $coordinator -Action restore -ResumeSessions}
+    if ($Action -eq 'remove') {
+        & $coordinator -Action remove
+        Get-ScheduledTask -TaskName 'ActivityMonitor-Updates' -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false
+    } else {
+        & $coordinator -Action restore -ResumeSessions
+        if ($wasRunning) {Start-Service ActivityMonitor}
+        $updates=Join-Path $env:ProgramFiles 'ActivityMonitor\maintenance\automatic-updates.ps1'
+        if (Test-Path -LiteralPath $updates) {& $updates -Action register -AllowUnsigned:$LocalTest}
+    }
     Write-Output "Installer completed: $($process.ExitCode). Configuration/data retained; review configuration before starting."
 } catch {
     # Preparation can fail after writing its journal and disabling autostart.

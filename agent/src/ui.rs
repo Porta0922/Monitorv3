@@ -147,7 +147,7 @@ pub fn spawn_tray(state: Arc<WebState>) -> crate::native_worker::NativeWorker {
             let icon_green = create_colored_icon(35, 180, 30);
             let icon_red = create_colored_icon(220, 50, 40);
 
-            let tip = to_wide("ActivityMonitor Agent");
+            let tip = to_wide("Monitor — Sin conexión con el servidor");
             let mut nid: NOTIFYICONDATAW = std::mem::zeroed();
             nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as DWORD;
             nid.hWnd = window;
@@ -242,7 +242,10 @@ unsafe extern "system" fn tray_wndproc(
                     mod_nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as DWORD;
                     mod_nid.hWnd = hwnd;
                     mod_nid.uID = ID_TRAY;
-                    mod_nid.uFlags = NIF_ICON;
+                    mod_nid.uFlags = NIF_ICON | NIF_TIP;
+                    let tip = to_wide(if connected { "Monitor — Conectado al servidor" } else { "Monitor — Sin conexión con el servidor" });
+                    let count = tip.len().min(mod_nid.szTip.len());
+                    mod_nid.szTip[..count].copy_from_slice(&tip[..count]);
                     mod_nid.hIcon = new_icon;
                     Shell_NotifyIconW(NIM_MODIFY, &mut mod_nid);
                 }
