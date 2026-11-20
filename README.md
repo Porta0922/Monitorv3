@@ -1,32 +1,44 @@
 # Monitor — Supervisión de equipos de oficina
 
-**Estado: piloto controlado; todavía no aprobado para producción.**
+**Estado: candidato 0.2.1 sin firma; todavía no aprobado para producción.**
+
+[Entrega e instalación 0.2.1](docs/RELEASE_0_2_1.md).
+
+Aceptación del 2026-11-20: reparado el coordinador MSI y comprobada la reparación
+del agente instalado conservando configuración y reanudando servicio/sesión.
+También pasó el drenaje integrado de 5.000 eventos por AMQPS sin duplicar efectos
+en DB. Entrega 0.2.1: incluye las correcciones del instalador. La firma se pospone por
+decisión del responsable; siguen pendientes las validaciones finales de producción. Ver [estado del agente](docs/AGENT_RELEASE_0_2.md).
 
 [Guía paso a paso de release para DevOps](docs/RELEASE_DEVOPS.md): dónde configurar cuentas, MFA, secretos, certificados, red, enrolamiento, actualización y reversión. Las credenciales reales se incorporan en el servidor de destino.
 
-Estado 2026-11-13: PR #5 y #6 fusionados con CI completo aprobado. Código publicado; piloto e instaladores sin reemplazar. Producción pendiente de los controles del [TODO](docs/TODO.md).
+Estado actualizado al **2026-11-17**: agente piloto **0.2.0** instalado. Existen
+candidatos MSI Windows y DEB amd64 para Debian 12, Ubuntu 22.04 y 24.04;
+la firma y la aceptación final por plataforma siguen pendientes.
 
-[Respaldos cifrados](docs/ENCRYPTED_BACKUPS.md): herramientas para cifrar DB/configuración y verificar integridad sin guardar el dump en claro. Recuperación PostgreSQL aislada comprobada; recuperación completa Timescale y copia externa pendientes de aceptación.
+El dashboard corregido pasó el escaneo sin hallazgos; la imagen candidata de
+PostgreSQL/Timescale no presenta críticos ni altos y conserva dos hallazgos de
+severidad no determinada. No se sustituyeron las imágenes del piloto.
+La recuperación sintética, la migración PG15→PG17 y el ensayo de transferencia/
+reversión RabbitMQ pasaron. La aceptación integrada con agentes instalados,
+los certificados/credenciales del destino y el correo siguen pendientes.
 
-Escaneo reproducible de imágenes y generación de SBOM: [procedimiento](docs/IMAGE_SECURITY.md). Dashboard candidato con base Nginx actualizada y escaneo sin avisos conocidos; los servicios restantes siguen pendientes.
-
-Bloque 1 en curso: clientes Rust actualizados a reqwest 0.12 con JSON/TLS nativo y sin HTTP/2 opcional; eliminado h2 vulnerable y comprobación del workspace Windows aprobada. Esta actualización no está instalada en el piloto; el próximo paquete del agente deberá tener una versión nueva conforme a VERSIONING.md.
-
-Compatibilidad Linux: la enumeración de ventanas pasa a metadatos X11 mediante XCB, sin dependencias de captura de pantalla/PipeWire. Wayland sigue fuera de la captura global admitida. El PR #2 fue fusionado con los cuatro flujos de CI aprobados; queda pendiente la aceptación del agente con escritorios reales.
-
-RabbitMQ 4.2 pasó la validación aislada de identidad y transporte TLS; aún no reemplaza el broker del piloto. Véase el [plan de migración](docs/RABBITMQ_MIGRATION.md).
-
-Plan vigente: [TODO y ruta de cierre hacia producción](docs/TODO.md), reorganizado el 2026-11-06 en ocho bloques con criterios de cierre. Siguiente paso: credenciales y dependencias; después despliegue, datos, agente, paquetes, dashboard y aceptación integrada.
-
-Revisión de seguridad actualizada al **2026-11-06**: [hallazgos, correcciones y pruebas](docs/SECURITY_REVIEW_2026-11-06.md). Incluye endurecimiento local de sesiones, registros, Nginx y configuración. Quedan abiertos el token histórico, dependencias Rust, imágenes Docker y validación del despliegue final. Estos cambios todavía no están desplegados en el piloto.
-
-**Agente piloto instalado: 0.1.0, sin publicación estable.** Actualizado: 2026-11-03.
+Consultar [TODO vigente](docs/TODO.md), [seguridad de imágenes](docs/IMAGE_SECURITY.md),
+[alertas](docs/EXTERNAL_ALERTS.md) y [respaldos](docs/ENCRYPTED_BACKUPS.md).
+Linux admite metadatos de ventanas X11; Wayland no admite captura global.
+RabbitMQ 4.2 pasó el recorrido aislado de identidad/TLS, pero aún no reemplaza
+el broker del piloto: [migración](docs/RABBITMQ_MIGRATION.md).
 
 Monitor reúne recursos, actividad de aplicaciones, inventario y eventos de computadoras de oficina. El agente se instala en cada equipo; el servidor central recibe la información y el dashboard permite consultarla. RabbitMQ se mantiene como transporte de eventos. La recuperación offline del servicio usa lotes acotados y acelera el reenvío mientras haya pendientes; conserva IDs para deduplicación. [Garantías y límites](docs/TELEMETRY_DELIVERY.md).
 
 La nueva numeración comienza en 0.1.0. El piloto local fue reinstalado desde cero por autorización del usuario, descartando los datos 3.4.0. El MSI nuevo es privado y sin firma; los artefactos antiguos 3.x no deben reutilizarse. Esto no valida la migración que conserva datos de otras instalaciones. Consulta [versionado](docs/VERSIONING.md).
 
 ## Arquitectura
+
+El inicio del dashboard se centra en los equipos: búsqueda, estado de conexión,
+última señal y acceso al detalle. Wi-Fi, USB y aplicaciones se consultan dentro
+de cada equipo; ya no forman un grupo independiente en el menú lateral.
+Las alertas y métricas generales conservan sus propias páginas.
 
 ```text
 Computadora supervisada
@@ -200,6 +212,12 @@ Retención configurable: detalle de métricas 14 días y resúmenes 365 como val
 
 ## Documentación vigente y versiones
 
+Operación preparada: detector periódico de salud/colas/actividad sospechosa, recuperación aislada de DB/configuración y despliegue candidato PG17/RabbitMQ 4.2 con volúmenes nuevos. Código local, todavía sin activar ni ejecutar la campaña integral. Guías: [alertas](docs/EXTERNAL_ALERTS.md) y [recuperación e imágenes](docs/PRODUCTION_RECOVERY.md).
+
+Preparación de entrega: [firma y confianza](docs/RELEASE_SIGNING.md) y [alertas externas por fallos de backups](docs/EXTERNAL_ALERTS.md). Implementación local, pendiente de credenciales, activación y aceptación por DevOps. No se enviaron alertas ni se firmaron/publicaron paquetes.
+
+Agente **0.2.0** instalado en el piloto Windows por autorización del usuario; configuración conservada y servicio/sesión relanzados. MSI genérico y asistente Windows preparados; DEB con dependencias calculadas y construcción aislada por distribución. Las pruebas integrales siguen diferidas hasta completar paquetes. Sin nueva publicación PR ni aprobación productiva. Ver [preparación y pendientes del instalador](docs/AGENT_RELEASE_0_2.md).
+
 - [TODO de producción](docs/TODO.md): prioridades, tareas y criterios de cierre.
 - [Progreso y evidencia](docs/REFACTOR_PROGRESS.md): registro histórico, con fecha y alcance.
 - [Validación P4](docs/P4_VALIDATION.md): resultados y pendientes de comprobación.
@@ -241,4 +259,11 @@ Privacidad del escritorio: el candidato incorpora controles en Administración p
 
 El respaldo programado admite copia externa opcional con rclone y verificación SHA-256 antes de publicar el manifiesto. DevOps configura el remoto y las credenciales fuera del repositorio; no se activó un destino real. Ver [respaldos](docs/ENCRYPTED_BACKUPS.md).
 
-El candidato del servidor de producción usa una imagen mínima sin shell/curl y comprobación de salud nativa. Escaneo completo del 2026-11-13: cero críticos/altos; pendientes menores y aceptación del conjunto. Desarrollo y piloto no se sustituyen automáticamente. Ver [imágenes](docs/IMAGE_SECURITY.md).
+El servidor de producción usa una imagen mínima sin shell/curl y comprobación de salud nativa, fusionada en el [PR #9](https://github.com/Porta0922/Monitorv3/pull/9) el 2026-11-16 tras los cuatro flujos CI aprobados. Escaneo completo del 2026-11-13: cero críticos/altos, 39 medios, 12 bajos y 2 sin severidad determinada; pendientes clasificación y aceptación del conjunto. Desarrollo y piloto no se sustituyen automáticamente. Ver [imágenes](docs/IMAGE_SECURITY.md).
+## Estado operativo de alertas (2026-11-17)
+
+El notificador admite webhook HTTPS y correo SMTP con TLS obligatorio. La guía
+[de alertas externas](docs/EXTERNAL_ALERTS.md) explica la configuración privada
+para DevOps. La entrega real de correo y la aceptación de las imágenes corregidas
+siguen pendientes; este avance no habilita producción. El estado vigente y los
+bloqueos se mantienen en [TODO](docs/TODO.md).

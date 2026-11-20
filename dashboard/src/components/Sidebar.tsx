@@ -5,7 +5,6 @@ import type { IconName } from './Icon';
 const groups: { label: string; items: [string, string, string, IconName][] }[] = [
   { label: 'Supervisión', items: [['dashboard', '/dashboard', 'Equipos', 'grid'], ['activity', '/activity', 'Actividad', 'activity'], ['metrics', '/metrics', 'Métricas', 'chart'], ['administration', '/administration', 'Administración', 'monitor'], ['session', '/session', 'Sesiones y acceso', 'shield']] },
   { label: 'Protección', items: [['alerts', '/alerts', 'Alertas', 'bell'], ['security', '/security', 'Eventos de seguridad', 'shield']] },
-  { label: 'Equipos y conexiones', items: [['inventory', '/inventory', 'Inventario', 'box'], ['usb', '/usb', 'Dispositivos USB', 'usb'], ['wifi', '/wifi', 'Redes WiFi', 'wifi']] },
 ];
 export function Sidebar({ currentPage, onNavigate }: { currentPage: string; onNavigate?: () => void }) {
   return <aside className="workspace-sidebar">

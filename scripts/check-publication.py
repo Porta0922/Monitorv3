@@ -29,7 +29,10 @@ for env_file in [ROOT / ".local-test/.env", ROOT / ".local-test/agent.env"]:
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, value = line.split("=", 1)
-            if any(part in key for part in ("SECRET", "PASSWORD", "TOKEN", "CACHE_KEY", "RELAY_KEY")) and len(value) >= 16:
+            key, value = key.strip().upper(), value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            if any(part in key for part in ("SECRET", "PASSWORD", "CONTRASEÑA", "TOKEN", "CACHE_KEY", "RELAY_KEY")) and len(value) >= 8:
                 secrets.add(value.encode())
 issues = []
 checked = 0

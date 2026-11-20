@@ -1,6 +1,11 @@
 # Estructura vigente y retirada del legado
 
-Actualizado: 2026-11-03. Esta limpieza no cambia el protocolo ni la versión 0.1.0 del agente.
+Actualizado: 2026-11-17. Esta limpieza no cambia el protocolo ni la versión 0.2.0 del agente.
+
+Limpieza local adicional: retiradas ocho carpetas vacías del legado y los logs e
+informes generados antiguos de la raíz, todos ignorados por Git. Se conservan
+`.local-test/`, herramientas de construcción, instaladores y cachés necesarias
+para terminar la entrega. No se modificaron datos ni configuración del piloto.
 
 ## Fuentes activas
 
@@ -9,7 +14,7 @@ Actualizado: 2026-11-03. Esta limpieza no cambia el protocolo ni la versión 0.1
 - `dashboard/`: interfaz React/TypeScript y Nginx.
 - `packaging/`: instalación, actualización, desinstalación y gestión de sesiones Windows/Linux.
 - `scripts/`: piloto local, mantenimiento, producción y preparación de publicaciones.
-- `DockerServer/`, los Compose de raíz y `.github/workflows/`: construcción, despliegue y CI.
+- `DockerServer/`, `DockerPostgres/`, los Compose de raíz y `.github/workflows/`: construcción, despliegue y CI. La imagen de PostgreSQL endurecida sigue siendo candidata hasta completar su aceptación.
 - `tools/agent-transport-probe/`, `tests/`: diagnóstico de transporte y validación.
 - `shared_types.rs`: contratos compartidos; todavía utilizado por el código.
 - `docs/`: documentación operativa y evidencia. `TODO.md` es la lista vigente.

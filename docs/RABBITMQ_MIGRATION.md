@@ -1,6 +1,40 @@
 # RabbitMQ: candidato y migración pendiente
 
-Actualizado: 2026-11-07. No ejecutar una sustitución de imagen sobre el volumen 3.12 existente. El piloto conserva su broker actual.
+Actualizado: 2026-11-17. No ejecutar una sustitución de imagen sobre el volumen 3.12 existente. El piloto conserva su broker actual.
+
+## Ensayo de transferencia y reversión aprobado
+
+`python tests/broker_cutover.py` crea dos brokers desechables y una red propia;
+no accede al piloto. El ensayo local pasó con las imágenes 3.12 y 4.2 fijadas por
+digest: 70 mensajes persistentes transferidos, incluidos duplicados y una cola
+`.dead`; dos eventos adicionales enviados después del cambio; reinicio del
+destino; devolución de los 72 mensajes al origen. Compara hashes de todos los
+payloads y su multiplicidad, y exige cero entregas sin confirmar en el origen.
+La evidencia sin credenciales queda en `.local-test/broker-cutover/`. Los
+contenedores, volúmenes anónimos y red de ensayo se eliminan al terminar.
+Se incorpora como job independiente del workflow de stack; ese CI aún debe
+ejecutarse sobre el commit publicado.
+
+La transferencia usa Shovel con `ack-mode: on-confirm` y
+`src-delete-after: queue-length`, para una ventana de drenaje con productores
+pausados. No usar esa condición como migración continua: solo cubre la cantidad
+existente al iniciar la transferencia. No se purgan colas ni se reutilizan
+volúmenes entre versiones. Referencia: [configuración oficial de Shovel](https://www.rabbitmq.com/docs/4.2/shovel-dynamic).
+
+Límites: los dos eventos tardíos simulan un productor que vuelve; no ejecutan
+el outbox del agente real. El ensayo usa AMQP en red dedicada y administración
+HTTP solo en loopback, con credenciales efímeras. No certifica TLS de Shovel,
+deduplicación SQL, productores concurrentes, corte en medio de una confirmación,
+carga sostenida ni una migración productiva. TLS del agente y deduplicación
+de aplicación tienen ensayos separados; deben combinarse en la aceptación final.
+
+Para el cambio real, mantener los consumidores y productores detenidos durante
+el inventario y el drenaje; conservar origen, destino y outboxes hasta conciliar
+IDs con los registros procesados. Las DLQ se trasladan sin reinterpretar ni
+eliminar sus eventos, y solo se reprocesan tras corregir la causa y autorizarlo.
+Si hay nuevas publicaciones antes de revertir, drenar también el destino y
+conciliar sus IDs. DevOps debe validar los certificados y permisos del usuario
+temporal de transferencia, y eliminarlo al concluir la ventana.
 
 ## Evidencia del candidato
 

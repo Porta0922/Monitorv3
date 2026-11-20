@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package a prebuilt Linux artifact. Requires dpkg-deb; never compiles/downloads."""
+"""Package a native Linux artifact. Requires dpkg-deb/dpkg-shlibdeps; no downloads."""
 import argparse
 import hashlib
 import os
@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import sys
 
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--binary',required=True,type=Path)
@@ -20,9 +21,23 @@ if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.]+)?',args.version
 artifact=args.binary.read_bytes()
 if not artifact.startswith(b'\x7fELF') or hashlib.sha256(artifact).hexdigest()!=args.sha256.lower(): parser.error('Artifact/hash mismatch')
 root=Path(__file__).resolve().parents[2]
+if args.output.exists(): parser.error('Refusing to overwrite an existing package')
+subprocess.run([sys.executable,str(root/'packaging/common/verify-release-input.py'),
+                '--binary',str(args.binary.resolve()),'--sha256',args.sha256,
+                '--version',args.version,'--os','linux','--arch',
+                {'amd64':'x86_64','arm64':'aarch64'}[args.architecture]],check=True)
 args.output.parent.mkdir(parents=True,exist_ok=True)
 with tempfile.TemporaryDirectory(prefix='monitor-deb-') as temporary:
-    stage=Path(temporary)
+    stage=Path(temporary)/'package'
+    metadata=Path(temporary)/'dependency-metadata'
+    (metadata/'debian').mkdir(parents=True)
+    (metadata/'debian/control').write_text('Source: activity-monitor-agent\nSection: admin\nPriority: optional\nMaintainer: ActivityMonitor administrators\n\nPackage: activity-monitor-agent\nArchitecture: any\nDescription: Office monitoring agent\n',encoding='utf-8')
+    dependency_result=subprocess.run(['dpkg-shlibdeps','-O','-e'+str(args.binary.resolve())],
+                                     cwd=metadata,capture_output=True,text=True,check=True)
+    dependency_lines=[line.removeprefix('shlibs:Depends=') for line in dependency_result.stdout.splitlines() if line.startswith('shlibs:Depends=')]
+    if len(dependency_lines)!=1 or not dependency_lines[0].strip():
+        parser.error('Unable to determine native binary library dependencies')
+    dependencies=dependency_lines[0]+', python3, systemd, util-linux, openssl, xdg-utils, x11-utils, passwd'
     def write(relative,content,mode=0o644):
         path=stage/relative;path.parent.mkdir(parents=True,exist_ok=True)
         path.write_bytes(content if isinstance(content,bytes) else content.encode());path.chmod(mode)
@@ -35,7 +50,7 @@ with tempfile.TemporaryDirectory(prefix='monitor-deb-') as temporary:
     write('usr/share/activity-monitor/agent.env.example',(root/'packaging/agent.env.example').read_bytes())
     write('lib/systemd/system/activity-monitor-agent.service',(root/'packaging/linux/activity-monitor-agent.service').read_bytes())
     write('usr/share/applications/activity-monitor.desktop',(root/'packaging/linux/activity-monitor.desktop').read_bytes())
-    write('DEBIAN/control',f"Package: activity-monitor-agent\nVersion: {args.version}\nArchitecture: {args.architecture}\nMaintainer: ActivityMonitor administrators\nDepends: libc6, libssl3, libx11-6, libxi6, libxtst6, libxcb1, libxrandr2, libdbus-1-3, libpipewire-0.3-0, libgbm1, libwayland-client0, libxkbcommon0, libegl1, python3, systemd, util-linux, openssl, xdg-utils, x11-utils\nDescription: ActivityMonitor system agent and optional desktop companion\n Native monitoring agent with durable offline queue.\n")
+    write('DEBIAN/control',f"Package: activity-monitor-agent\nVersion: {args.version}\nArchitecture: {args.architecture}\nMaintainer: ActivityMonitor administrators\nDepends: {dependencies}\nDescription: ActivityMonitor system agent and optional desktop companion\n Native monitoring agent with durable offline queue.\n")
     write('DEBIAN/postinst',"""#!/bin/sh
 set -eu
 case "${1:-}" in configure|abort-upgrade|abort-remove|abort-deconfigure) ;; *) exit 0;; esac

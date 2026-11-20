@@ -1,4 +1,35 @@
+# 0.2.1 — 2026-11-20
+
+Correcciones del coordinador MSI: reparación con fuente registrada y reanudación de sesiones enroladas. Entrega sin firma autorizada; guía de certificado interno y paquetes separados por plataforma.
+
 # Changelog
+
+## Detectores y recuperación aislada — 2026-11-16
+
+- Backup incorpora definiciones vivas de RabbitMQ cifradas e ID de imagen; recuperación opcional del broker original aislado, sin mensajes. Respaldos anteriores continúan reconocidos con alcance DB/configuración.
+
+- Watchdog root del host: servicios, consumidores, backlog/DLQ, DB/disco, mantenimiento, backups, HTTPS/certificados y señales agregadas de autenticación/seguridad; cooldown persistente y aviso de recuperación.
+- Recuperador de respaldo autenticado a contenedor/volumen nuevos sin red, extracción restrictiva de configuración, roles/Timescale, revocación de sesiones humanas y recibo de invariantes. No corta ni modifica el despliegue activo.
+- Overlay candidato Timescale 2.32.0/PG17 y RabbitMQ 4.2 por digest; helper rechaza reutilizar proyecto/volúmenes para su primer arranque.
+- Implementación y documentación; ejecución/aceptación final diferidas. No se aprobaron migraciones, RPO/RTO ni nuevas imágenes para producción.
+
+## Preparación de entrega y avisos operativos — 2026-11-16
+
+- Verificador de paquetes compatible con Python 3.10 de Ubuntu 22.04, sin dependencias Python adicionales; Cargo comprueba el lockfile sin red.
+- Herramienta Windows de firma sobre copias, con sello de tiempo, verificación de publicador y marcador de operación incompleta. Requiere certificado organizacional; no ejecutada.
+- Canal HTTPS mínimo para fallos systemd del backup, configuración privada y reintentos limitados; sin activar receptor ni enviar mensajes. Detectores periódicos y actividad sospechosa siguen pendientes.
+
+## Agente 0.2.0 — en preparación, 2026-11-16
+
+- Piloto Windows actualizado con configuración conservada; servicio y tarea de sesión reiniciados. Sin campaña funcional ni PR nuevo.
+- Coordinador MSI tolera procesos que terminan durante inspección y restaura autostart también ante errores de preparación.
+- Asistente Windows para instalación/reparación/desinstalación; mantiene comprobación de firma o modo piloto explícito con hash.
+- DEB calcula dependencias del ejecutable con dpkg-shlibdeps; receta Docker de compilación/empaquetado por distribución, sin tests.
+
+- Agrupa privacidad de escritorio, recuperación offline y dependencias actualizadas desde el piloto 0.1.0.
+- Metadatos `--version-json` sin iniciar captura/configuración y validación de versión/arquitectura/hash en generadores MSI/DEB.
+- Generadores rechazan sobrescritura; configuración MSI personalizada requiere declarar paquete privado del piloto.
+- Sin instalación ni aceptación funcional nueva; firma y artefactos finales pendientes.
 
 ## Runtime productivo mínimo — 2026-11-13
 
@@ -293,3 +324,12 @@ El contenido siguiente se conserva como registro de versiones anteriores. Sus af
 - Lanzamiento inicial de la versión Enterprise v3.
 - Arquitectura distribuida con RabbitMQ y Backend en Rust.
 - Dashboard en React con soporte para múltiples dispositivos.
+# Correcciones de aceptación — 2026-11-20 (sin release estable)
+
+- Reparación MSI mediante `/i REINSTALL=ALL` para preservar la propiedad de
+  coordinación y nombre de origen registrado para evitar SecureRepair 1603.
+- Reanudación de tareas de sesión habilitadas después de mantener el paquete.
+- Diagnóstico MSI privado y comprobación de reparación instalada con conservación
+  de configuración/binario y reanudación de servicio/sesión.
+- Ensayo DEB aislado de dependencias, reinstalación, eliminación y preservación
+  de datos; no equivale a aceptación de systemd/escritorio reales.

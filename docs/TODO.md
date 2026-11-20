@@ -1,10 +1,59 @@
 # TODO — Ruta de cierre hacia producción
 
-Seguimiento **2026-11-13**: PR #5 y #6 fusionados tras CI completo; respaldo cifrado y recuperación aislada PostgreSQL/Timescale aprobados. Copia externa, recuperación integral y aceptación del destino siguen pendientes. Historial previo: PR #2, #3 y #4 fusionados tras CI completo. PR #4 (`e15e110`) publica Lapin 4.12.3, retirada de Redis y guía DevOps. Recorridos de identidad/AMQPS aprobados con RabbitMQ 3.12 y 4.2. El piloto conserva agente/servidor/dashboard actuales; solo se retiró el contenedor Redis sin uso. Producción no aprobada.
+## Estado vigente — 2026-11-17
 
-Actualizado: **2026-11-13**. Estado: **piloto controlado; producción no aprobada**. Agente **0.1.0**. Este es el único plan activo. El [plan anterior completo](TODO_PRODUCCION_HISTORICO_2026-11-06.md) conserva el detalle y las evidencias para consulta, no como segunda lista de ejecución.
+Actualización de aceptación **2026-11-20**: reparación real Windows del MSI piloto
+aprobada con configuración/binario conservados y servicio/sesión reanudados;
+coordinador corregido pendiente de nueva entrega versionada. Matriz aislada de
+identidad/TLS/roles/MFA/revocación aprobada y 5.000 eventos acumulados por AMQPS
+con RabbitMQ 4.2 persistidos exactamente una vez usando binarios recompilados.
+Esto no cierra carga sostenida, escritorios Linux reales ni aceptación final.
+Firma pendiente: la organización aún no dispone de certificado.
+DEB Debian 12/Ubuntu 22.04/Ubuntu 24.04 aprobados en instalación, reinstalación,
+eliminación y purga con datos sintéticos preservados; systemd simulado. Falta
+aceptación nativa de servicio/escritorio y artefactos finales firmados. El MSI
+0.2.0 no se reemplazó por bytes diferentes: las correcciones del coordinador
+deben incorporarse en la siguiente entrega versionada antes de distribuir.
 
-Base: [informe de seguridad](SECURITY_REVIEW_2026-11-06.md), [progreso](REFACTOR_PROGRESS.md) y [diagnóstico del piloto](PILOT_TROUBLESHOOTING.md). Las correcciones de seguridad del 6 de noviembre están publicadas mediante PR #2; no desplegadas en el piloto.
+- [x] Simplificar el inicio: listado de equipos y filtros de conexión; retirar
+  resúmenes de actividad/alertas/recursos y el grupo lateral «Equipos y conexiones».
+  Wi-Fi, USB e inventario siguen disponibles en el detalle de cada equipo.
+
+Esta sección prevalece sobre las entradas históricas siguientes. Agente instalado:
+**0.2.0**. Las comprobaciones de los bloques 1–3 están autorizadas por el usuario.
+
+- [x] Añadir transporte de correo TLS/STARTTLS con errores sanitizados; tres
+  comprobaciones locales aprobadas: cifrado antes de autenticación, rechazo de
+  certificado sin enviar credenciales y rechazo de autenticación sin reintento ni
+  filtración de respuesta. Esto no acredita entrega real.
+- [ ] DevOps: sustituir la contraseña habitual por una contraseña de aplicación
+  autorizada o configurar un relay SMTP; confirmar recepción. TLS funciona pero
+  la autenticación cierra la conexión. No habilitar aún notificaciones periódicas.
+- [x] Escanear cuatro imágenes: servidor y RabbitMQ sin críticos/altos; dashboard
+  anterior con 3 altos; Timescale candidato original con 1 crítico y 197 altos.
+- [x] Construir candidatos corregidos del dashboard y PostgreSQL/Timescale.
+- [x] Reescanear candidatos corregidos: dashboard sin hallazgos; PostgreSQL sin
+  críticos/altos/medios/bajos y con dos hallazgos de severidad no determinada.
+- [ ] Aceptar funcionamiento y clasificar los dos hallazgos restantes antes de desplegar.
+  Docker volvió a responder; ya no es un bloqueo.
+- [x] Recuperación sintética DB/configuración/definiciones RabbitMQ: 5.000 filas
+  comprimidas idénticas, credenciales/políticas conservadas y sesiones web revocadas.
+- [x] Migración sintética PG15/Timescale 2.28.3 → PG17/2.28.3 → PG17/2.32.0
+  conservando las 5.000 filas comprimidas. Alertas HTTPS, rechazo de CA/redirección,
+  detección de login fallido, cooldown y recuperación aprobados.
+- [ ] Reconciliación de mensajes RabbitMQ y aceptación completa de la aplicación.
+  La recuperación de definiciones no recupera mensajes ni acredita RPO cero.
+  Avance 2026-11-17: transferencia 3.12→4.2, reinicio y reversión de 72 mensajes
+  sintéticos aprobados, incluidos duplicados/DLQ y dos envíos tardíos; cero
+  entregas sin confirmar en el origen. Pendientes combinación con agente/DB/TLS
+  reales, cortes durante transferencia y carga sostenida. Ver RABBITMQ_MIGRATION.
+- [ ] Completar firma de instaladores, aceptación por SO, copia externa y
+  configuración productiva por DevOps. Producción sigue sin aprobación.
+
+Evidencia privada del escaneo inicial:
+`.local-test/security/images/20261116-165944-db7cdaaf`. No publicar archivos privados.
+
+Los avances históricos se conservan en Git y en [REFACTOR_PROGRESS](REFACTOR_PROGRESS.md). Este documento mantiene una única lista vigente.
 
 ## Ya completado: conservar, no rehacer
 
@@ -21,7 +70,7 @@ Estas marcas acreditan implementación y evidencia acotada, no aceptación produ
 
 - Privacidad de escritorio: publicada y fusionada en PR #7 (política global/equipo, títulos, aplicaciones, rutas, caché e IPC); pendiente entrega del agente compatible. Ver [DESKTOP_PRIVACY.md](DESKTOP_PRIVACY.md).
 - Operación: copia externa verificable fusionada en PR #8 con rclone e integrada al respaldo programado; configurar destino real y alertas. Los backups cifrados y plantillas de programación ya existen.
-- Imágenes: servidor mínimo candidato con cero críticos/altos en el escaneo completo del 2026-11-13; clasificar hallazgos menores, validar CI y preparar la migración de servicios; no equivale a repetir las pruebas de la misma imagen.
+- Imágenes: servidor mínimo fusionado en PR #9 con CI aprobado y cero críticos/altos en el escaneo del 2026-11-13; clasificar 39 medios, 12 bajos y 2 sin severidad determinada, verificar procedencia y preparar las restantes imágenes y migración de servicios.
 - Agente/instaladores: existen recuperación, enrolamiento y scripts de ciclo de vida; quedan paquetes nuevos versionados/firmados, aceptación por SO y correcciones que surjan de esa matriz.
 - Validación final: recuperación integral, carga, aceptación del dashboard y piloto con los artefactos definitivos. No marcan nuevas funcionalidades por sí mismas.
 - Decisiones de DevOps/organización: credenciales, certificados, destino externo, alertas, retención y alcance. Se completan en destino según lo acordado.
@@ -159,3 +208,9 @@ Solicitar cada dato cuando bloquee una acción concreta; avanzar con trabajo ind
 Cerrar cada bloque con implementación, evidencia y lista de pendientes. Indicar si los cambios están locales, publicados o desplegados. No marcar una casilla compuesta por completar solo una parte. Actualizar documentación junto con cambios de comportamiento.
 
 Correspondencia: antiguos 1/2/3 → nuevos 1/2/6; antiguo 5 → nuevo 3; antiguo 6 → nuevo 4; antiguo 7 → nuevo 5; antiguos 4/8 → nuevo 6 y aceptación 7; antiguo 9 → nuevo 7; antiguo 10 → nuevo 8. El archivo histórico conserva el detalle previo.
+
+## Entrega 0.2.1 (2026-11-20)
+
+- Firma aplazada por decisión del responsable; mantener comprobación SHA256 y aceptación explícita sin firma.
+- Publicar código y empaquetar Windows/Debian/Ubuntu; ver RELEASE_0_2_1.md.
+- Aceptación en equipos reales, SMTP autorizado, configuración del destino y revisión final de imágenes siguen pendientes.
