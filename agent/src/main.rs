@@ -767,20 +767,3 @@ fn register_panic_hook() {
         std::thread::sleep(std::time::Duration::from_millis(500));
     }));
 }
-
-#[cfg(windows)]
-fn register_windows_restart() {
-    unsafe {
-        // winapi::um::winbase::RegisterApplicationRestart registers the application for restart by Windows Error Reporting (WER).
-        // Passing std::ptr::null() restarts the app with its original command line arguments.
-        // 0 flags represents default restart settings.
-        let hr = winapi::um::winbase::RegisterApplicationRestart(std::ptr::null(), 0);
-        if hr == 0 {
-            tracing::info!("✅ Application restart registered with Windows Error Reporting (WER)");
-        } else {
-            tracing::warn!("⚠️ Failed to register application restart with WER (HRESULT: {})", hr);
-        }
-    }
-}
-
-

@@ -28,6 +28,9 @@ jobs:
         if: runner.os == 'Windows'
       - run: rustup show active-toolchain
       - run: cargo test --locked -p activity-monitor-agent --no-run
+      - name: Windows release warning policy
+        if: runner.os == 'Windows'
+        run: cargo rustc --locked -p activity-monitor-agent -- -D warnings
       - run: cargo test --locked -p activity-monitor-agent lifecycle_tests
       - run: cargo test --locked -p activity-monitor-agent policy_tests
       - run: cargo test --locked -p activity-monitor-agent durability_tests
