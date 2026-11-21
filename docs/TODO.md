@@ -220,3 +220,5 @@ Correspondencia: antiguos 1/2/3 → nuevos 1/2/6; antiguo 5 → nuevo 3; antiguo
 - Implementados: publicación automática de paquetes tras CI, actualizador silencioso Windows, estado de conexión autenticado para el icono.
 - Verificar la release efectiva y actualizar una vez el piloto antiguo para activar el nuevo actualizador.
 - Pendientes: aceptación de actualización real bajo SYSTEM, firma de Windows, actualización Linux mediante APT, distribución central para grandes despliegues.
+
+- 0.2.3: corregido el reintento de descargas y preparada la clasificación de todas las releases heredadas 3.x/4.x. Verificar publicación y actualización del piloto desde GitHub.

@@ -38,7 +38,7 @@ Assert-NoReparse $configPath;Assert-AdminControlled $configPath
 $policy=Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
 if ($policy.schema -ne 1 -or !$policy.enabled) {return}
 if ($policy.channel -notin @('candidate','stable')) {throw 'Invalid update channel.'}
-$lock=[Threading.Mutex]::new($false,'Global\ActivityMonitorUpdates');$held=$false;$client=$null;$work=$null
+$lock=[Threading.Mutex]::new($false,'Global\ActivityMonitorUpdates');$held=$false;$client=$null;$work=$null;$installAttempted=$false
 try {
     try {$held=$lock.WaitOne(0)} catch [Threading.AbandonedMutexException] {$held=$true}
     if (!$held) {return}
@@ -96,6 +96,7 @@ try {
     [IO.File]::WriteAllBytes($package,(Read-Remote $expectedUrl 134217728))
     $hash=$asset.digest.Substring(7)
     if ((Get-FileHash $package -Algorithm SHA256).Hash -ne $hash) {throw 'Update digest mismatch.'}
+    $installAttempted=$true
     @{version=$version;status='installing';at=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json|Set-Content $statusPath -Encoding utf8
     # Snapshot the trusted installed coordinator before MSI replaces its files.
     foreach ($file in @('install-package.ps1','package-sessions.ps1','session-common.ps1')) {
@@ -117,7 +118,7 @@ try {
 } catch {
     if ($held) {
         # No URLs, credentials or exception details in the retained status.
-        @{version=$version;status='failed';at=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json|Set-Content (Join-Path $directory 'status.json') -Encoding utf8
+        @{version=$version;status=(Get-MonitorFailureStatus $installAttempted);at=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json|Set-Content (Join-Path $directory 'status.json') -Encoding utf8
     }
     throw
 } finally {if ($client) {$client.Dispose()};if ($held) {$lock.ReleaseMutex()};$lock.Dispose()}

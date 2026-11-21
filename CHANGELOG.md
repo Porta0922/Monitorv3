@@ -1,3 +1,7 @@
+# 0.2.3 — Reintento de descargas
+
+Los fallos de consulta/descarga del actualizador se reintentan en la siguiente ejecución; los intentos de instalación fallidos/interrumpidos conservan el bloqueo de seguridad.
+
 # 0.2.2 — Actualización silenciosa y conexión
 
 Tarea SYSTEM para actualizar MSI desde releases verificadas por HTTPS/SHA256; publicación de paquetes después del CI en main. El icono de sesión consulta el estado real de conexión del servicio por IPC autenticado. Firma aplazada; automatización Linux pendiente.

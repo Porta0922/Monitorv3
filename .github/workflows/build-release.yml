@@ -117,6 +117,6 @@ jobs:
           cp docs/AUTOMATIC_UPDATES.md artifacts/
           (cd artifacts && sha256sum *.msi *.deb *.zip > SHA256SUMS)
           gh release create "agent-v$VERSION" artifacts/* --target "$RELEASE_SHA" --prerelease --title "Monitor Agent $VERSION (candidato sin firma)" --notes-file docs/AUTOMATIC_UPDATES.md
-          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.tag_name == "v3.4.0" or .tag_name == "3.4.0") | .id' | while read -r id; do
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.tag_name | test("^v?[34][.][0-9]+[.][0-9]+$")) | .id' | while read -r id; do
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$id" -F prerelease=true -f make_latest=false
           done
