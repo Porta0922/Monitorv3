@@ -24,3 +24,6 @@ $rejected=$false
 try {Get-MonitorWindowsAsset @{tag_name='agent-v0.2.10';assets=@($asset,$asset)}|Out-Null} catch {$rejected=$true}
 Assert $rejected 'Ambiguous package accepted'
 Write-Output 'PASS: numeric versions, legacy exclusion, channels, draft exclusion, asset origin, digest and ambiguity'
+
+Assert ((Get-MonitorFailureStatus $false) -eq 'check_failed') 'Download failures must remain retryable'
+Assert ((Get-MonitorFailureStatus $true) -eq 'failed') 'Installation failures must block automatic retries'

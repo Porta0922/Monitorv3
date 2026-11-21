@@ -18,3 +18,8 @@ function Get-MonitorWindowsAsset($Release) {
     if ($assets[0].browser_download_url -cne $expectedUrl) {throw 'Release asset origin mismatch.'}
     return $assets[0]
 }
+
+function Get-MonitorFailureStatus([bool]$InstallAttempted) {
+    if ($InstallAttempted) {return 'failed'}
+    return 'check_failed'
+}

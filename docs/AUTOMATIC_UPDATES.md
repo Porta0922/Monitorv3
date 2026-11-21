@@ -1,4 +1,7 @@
-# Monitor Agent 0.2.2 — candidato sin firma
+# Monitor Agent 0.2.3 — candidato sin firma
+
+0.2.3 distingue errores de consulta/descarga (`check_failed`, reintentables) de
+fallos después de iniciar la instalación (`failed`, requieren revisión).
 
 Esta entrega incorpora actualización silenciosa de Windows y el estado de
 conexión del servicio en el icono de la sesión. No constituye todavía la
@@ -62,8 +65,8 @@ Cada cambio distribuible debe incrementar `agent/Cargo.toml` y `Cargo.lock`.
 Tras fusionar en `main` y pasar las cuatro comprobaciones requeridas, el flujo
 Build and Release compila MSI/ZIP Windows, DEB Debian12/Ubuntu22.04/Ubuntu24.04,
 código fuente y SHA256SUMS; publica `agent-vVERSION` como candidato.
-No sobrescribe versiones ya publicadas. v3.4.0 se conserva como legado y deja
-de anunciarse como release estable. No usar `/releases/latest` para este canal.
+No sobrescribe versiones ya publicadas. Las versiones heredadas 3.x/4.x se conservan como legado y dejan
+de anunciarse como releases estables. No usar `/releases/latest` para este canal.
 
 Los DEB se publican para instalación administrativa; el mecanismo silencioso
 de esta entrega es para Windows. La distribución automática Linux mediante
