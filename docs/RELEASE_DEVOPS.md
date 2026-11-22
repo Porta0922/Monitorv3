@@ -1,6 +1,8 @@
 # Guía de release para DevOps
 
-Actualizada: 2026-11-17. Las credenciales reales se incorporarán en el servidor de destino por DevOps, según decisión del usuario. Esta guía prepara el procedimiento; no declara aprobado el release. Consultar los bloqueantes vigentes en [TODO.md](TODO.md).
+Actualizada: 2026-11-22. Las credenciales reales se incorporarán en el servidor de destino por DevOps, según decisión del usuario. Esta guía prepara el procedimiento; no declara aprobado el release. Consultar los bloqueantes vigentes en [TODO.md](TODO.md).
+
+Preparación del piloto del 23/11: [REDUCED_PILOT.md](REDUCED_PILOT.md).
 
 ## 1. Definir y registrar el destino
 
@@ -19,7 +21,7 @@ Registrar en el ticket de release:
 | Datos | Retención aprobada, exclusiones de captura, aviso a usuarios |
 | Paquetes | Versión de agente, sistemas admitidos, firmas y SHA256 |
 
-No promover un commit con CI fallido ni sustituir un paquete entregado por otro de igual versión. La fuente del agente es `agent/Cargo.toml`; el piloto Windows instalado está en 0.2.0, todavía sin aprobación estable. [Reglas de versionado](VERSIONING.md).
+No promover un commit con CI fallido ni sustituir un paquete entregado por otro de igual versión. La fuente del agente es `agent/Cargo.toml`; el piloto Windows instalado está en 0.2.4 y GitHub aún en 0.2.3 al 22/11, todavía sin aprobación estable. No usar esa discrepancia como una entrega sincronizada. [Reglas de versionado](VERSIONING.md).
 
 ## 2. Obtener y construir el candidato
 

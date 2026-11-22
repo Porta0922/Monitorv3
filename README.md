@@ -1,10 +1,15 @@
 # Monitor — Supervisión de equipos de oficina
 
-**Estado: candidato 0.2.3 sin firma; todavía no aprobado para producción.**
+**Candidato 0.2.5 para publicación; piloto local verificado 0.2.4. Sin firma y todavía no aprobado para producción.**
 
 [Actualizaciones silenciosas Windows, releases e icono de conexión](docs/AUTOMATIC_UPDATES.md).
 
-[Entrega e instalación 0.2.1](docs/RELEASE_0_2_1.md).
+[Releases y paquetes publicados](https://github.com/Porta0922/Monitorv3/releases).
+Usar `agent-v0.2.5` para el nuevo piloto una vez completado Build and Release;
+no asumir que un commit publicado ya tiene instaladores disponibles.
+[Evidencias y límites de aceptación](docs/PRODUCTION_EVIDENCE.md).
+[Consumo medido del agente: resultados y límites](docs/AGENT_PERFORMANCE.md).
+[Preparación del piloto reducido con DevOps](docs/REDUCED_PILOT.md).
 
 Aceptación del 2026-11-20: reparado el coordinador MSI y comprobada la reparación
 del agente instalado conservando configuración y reanudando servicio/sesión.
@@ -14,9 +19,12 @@ decisión del responsable; siguen pendientes las validaciones finales de producc
 
 [Guía paso a paso de release para DevOps](docs/RELEASE_DEVOPS.md): dónde configurar cuentas, MFA, secretos, certificados, red, enrolamiento, actualización y reversión. Las credenciales reales se incorporan en el servidor de destino.
 
-Estado actualizado al **2026-11-17**: agente piloto **0.2.0** instalado. Existen
-candidatos MSI Windows y DEB amd64 para Debian 12, Ubuntu 22.04 y 24.04;
-la firma y la aceptación final por plataforma siguen pendientes.
+Estado actualizado al **2026-11-21**: agente piloto **0.2.4** instalado localmente
+con supervisor de conexión; configuración conservada, servicio y sesión activos.
+Reconexión sin reiniciar el agente comprobada tras recuperar el puerto Docker.
+La actualización anterior 0.2.2 → 0.2.3 desde GitHub también fue verificada. MSI Windows y DEB amd64 Debian 12/Ubuntu 22.04/24.04
+publicados como candidato. Firma aplazada por decisión del responsable; aceptación
+final por plataforma y despliegue productivo todavía pendientes.
 
 El dashboard corregido pasó el escaneo sin hallazgos; la imagen candidata de
 PostgreSQL/Timescale no presenta críticos ni altos y conserva dos hallazgos de

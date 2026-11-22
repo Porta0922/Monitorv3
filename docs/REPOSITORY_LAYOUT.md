@@ -1,11 +1,34 @@
 # Estructura vigente y retirada del legado
 
-Actualizado: 2026-11-17. Esta limpieza no cambia el protocolo ni la versión 0.2.0 del agente.
+Actualizado: 2026-11-21. Limpieza de archivos; no modifica la versión 0.2.3
+ni el comportamiento del agente instalado.
 
-Limpieza local adicional: retiradas ocho carpetas vacías del legado y los logs e
-informes generados antiguos de la raíz, todos ignorados por Git. Se conservan
-`.local-test/`, herramientas de construcción, instaladores y cachés necesarias
-para terminar la entrega. No se modificaron datos ni configuración del piloto.
+## Limpieza local del 21/11
+
+Retirados aproximadamente **25,96 GiB / 26.936 archivos generados**:
+
+- `target/` (compilaciones y fixtures temporales) y `dashboard/dist/`.
+- Dos cachés de Trivy; conservados los informes de vulnerabilidades y SBOM.
+- Copias temporales de publicación GitHub y UX (`publish*`, `github-upload`,
+  `ux-publication` dentro de `.local-test`).
+- Paquetes/candidatos 0.1.0 y 0.2.0, instalador inicial y ZIP del piloto antiguo.
+- Binarios, paquetes ZIP/MSI/DEB y símbolos de la entrega 0.2.1; conservados
+  manifiestos, hashes y recibos pequeños como evidencia de procedencia.
+- Dos TODO históricos del árbol de documentación y configuración vacía de VS Code;
+  recuperables en Git. [TODO.md](TODO.md) es la única lista vigente.
+
+Comprobados los destinos dentro del workspace y ausencia de enlaces antes del
+borrado recursivo. No se borraron volúmenes Docker, configuración privada ni datos
+del agente instalado en ProgramData. No hay procesos activos del piloto ejecutados
+desde las carpetas eliminadas. Registro privado: `.local-test/cleanup-20261121.json`.
+
+Se conservan `.tools/`, `.wix/` y `dashboard/node_modules/` como herramientas y
+dependencias de desarrollo útiles; `.local-test/.env`, `agent.env`, evidencias de
+seguridad/aceptación, la entrega anterior 0.2.2 para soporte y los recibos actuales
+0.2.3. Los artefactos publicados de 0.2.3 siguen disponibles en GitHub.
+
+La próxima compilación Rust reconstruirá `target/`; el build frontend recreará
+`dist/`. Trivy volverá a descargar su base de avisos cuando se ejecute.
 
 ## Fuentes activas
 
@@ -35,12 +58,12 @@ Cargo y los tres Dockerfiles que copiaban manager/remover fueron ajustados. Carg
 ## Conservado deliberadamente
 
 - `migrations/` de raíz: esquema legado consumido por las pruebas de migración mediante `LEGACY_SCHEMA_DIR`; no es la fuente de migraciones del servidor actual.
-- Informes históricos en `docs/`: evidencia de decisiones y comprobaciones. Sus menciones a rutas eliminadas describen el pasado.
+- Informes de validación en `docs/`: evidencia útil para pendientes abiertos. Sus menciones a rutas eliminadas describen el pasado; los TODO históricos se consultan en Git.
 - Compatibilidad dentro del código del agente: requiere evaluar comportamiento antes de retirarla; no se elimina por antigüedad.
-- Archivos privados/ignorados, binarios locales, volúmenes Docker e instalación del piloto: no se modificaron. Por eso alguna carpeta antigua puede seguir visible localmente aunque ya no forme parte del proyecto publicado.
+- Configuración privada, evidencias, volúmenes Docker e instalación del piloto: preservados. Los binarios antiguos y cachés enumerados arriba sí se retiraron.
 
 La retirada de archivos actuales no borra commits anteriores ni revoca credenciales históricas.
 
-## Comprobación de esta limpieza
+## Comprobación de la limpieza anterior
 
 `cargo metadata --locked --offline --no-deps`, preflight de publicación y `git diff --check` aprobados. La resolución completa offline se detuvo por falta de `adler2 2.0.1` en caché; no se afirma una compilación completa. No se ejecutó de nuevo la matriz funcional ni se reinstaló el piloto.

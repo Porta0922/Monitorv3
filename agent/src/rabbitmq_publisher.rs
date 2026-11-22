@@ -27,6 +27,18 @@ impl RabbitMQPublisher {
             && state.channel.as_ref().is_some_and(|c| c.status().connected())
     }
 
+    /// Serialize recovery with publishing; never replace the persistent outbox.
+    /// Returns true only when this call restored the transport.
+    pub async fn ensure_connected(&self) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let mut state = self.state.lock().await;
+        if state.connection.as_ref().is_some_and(|c| c.status().connected())
+            && state.channel.as_ref().is_some_and(|c| c.status().connected()) {
+            return Ok(false);
+        }
+        Self::connect_locked(&self.rabbitmq_url, &mut state).await?;
+        Ok(true)
+    }
+
     /// Connect to RabbitMQ and initialize exchanges
     pub async fn connect(rabbitmq_url: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         if crate::network_identity::production() && reqwest::Url::parse(rabbitmq_url).map(|u|u.scheme()!="amqps").unwrap_or(true){return Err("Production requires AMQPS".into());}
@@ -47,6 +59,22 @@ impl RabbitMQPublisher {
     }
 
     async fn connect_locked(
+        rabbitmq_url: &str,
+        state: &mut PublisherState,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Clear stale handles before awaiting so cancellation cannot preserve a dead channel.
+        state.channel = None;
+        state.connection = None;
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            Self::initialize_locked(rabbitmq_url, state),
+        ).await {
+            Ok(result) => result,
+            Err(_) => Err(Self::boxed_error("RabbitMQ initialization timed out after 20s".into())),
+        }
+    }
+
+    async fn initialize_locked(
         rabbitmq_url: &str,
         state: &mut PublisherState,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -340,6 +368,23 @@ mod tests {
         let event_type = format!("probe_{}", Uuid::new_v4().simple());
         let key = format!("monitoring.{event_type}");
         channel.queue_bind(queue.name().as_str().into(), "monitoring".into(), key.as_str().into(), Default::default(), Default::default()).await.unwrap();
+        // Keep the publisher object alive with a closed channel: the old watchdog
+        // mistook Some(publisher) for a healthy transport and never repaired it.
+        {
+            let state = publisher.state.lock().await;
+            state.channel.as_ref().unwrap().close(200, "watchdog recovery test".into()).await.unwrap();
+        }
+        assert!(!publisher.is_connected().await);
+        let (first, second) = tokio::join!(publisher.ensure_connected(), publisher.ensure_connected());
+        assert_ne!(first.unwrap(), second.unwrap(), "only one caller should reconnect");
+        assert!(publisher.is_connected().await);
+        assert!(!publisher.ensure_connected().await.unwrap(), "healthy transport must be reused");
+        {
+            let state = publisher.state.lock().await;
+            state.connection.as_ref().unwrap().close(200, "watchdog connection test".into()).await.unwrap();
+        }
+        assert!(!publisher.is_connected().await);
+        assert!(publisher.ensure_connected().await.unwrap());
         let payload = json!({"test_id":Uuid::new_v4().to_string()});
         publisher.publish_event(&event_type, payload.clone()).await.unwrap();
         let received = channel.basic_get(queue.name().as_str().into(), lapin::options::BasicGetOptions { no_ack: true }).await.unwrap().unwrap();

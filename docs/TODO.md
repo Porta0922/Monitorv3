@@ -1,224 +1,187 @@
-# TODO — Ruta de cierre hacia producción
+# TODO — Cierre hacia producción
 
-## Estado vigente — 2026-11-17
+Actualizado: **2026-11-22**. Esta lista reemplaza los estados mezclados anteriores;
+el detalle histórico permanece en Git y en REFACTOR_PROGRESS.md.
+Una casilla cerrada acredita solamente el alcance indicado, no producción completa.
 
-Actualización de aceptación **2026-11-20**: reparación real Windows del MSI piloto
-aprobada con configuración/binario conservados y servicio/sesión reanudados;
-coordinador corregido pendiente de nueva entrega versionada. Matriz aislada de
-identidad/TLS/roles/MFA/revocación aprobada y 5.000 eventos acumulados por AMQPS
-con RabbitMQ 4.2 persistidos exactamente una vez usando binarios recompilados.
-Esto no cierra carga sostenida, escritorios Linux reales ni aceptación final.
-Firma pendiente: la organización aún no dispone de certificado.
-DEB Debian 12/Ubuntu 22.04/Ubuntu 24.04 aprobados en instalación, reinstalación,
-eliminación y purga con datos sintéticos preservados; systemd simulado. Falta
-aceptación nativa de servicio/escritorio y artefactos finales firmados. El MSI
-0.2.0 no se reemplazó por bytes diferentes: las correcciones del coordinador
-deben incorporarse en la siguiente entrega versionada antes de distribuir.
+## Estado verificable
 
-- [x] Simplificar el inicio: listado de equipos y filtros de conexión; retirar
-  resúmenes de actividad/alertas/recursos y el grupo lateral «Equipos y conexiones».
-  Wi-Fi, USB e inventario siguen disponibles en el detalle de cada equipo.
+Publicación en preparación: **0.2.5**, mismo supervisor comprobado localmente en
+0.2.4. CI y existencia de release/paquetes se confirman antes de distribuir.
 
-Esta sección prevalece sobre las entradas históricas siguientes. Agente instalado:
-**0.2.0**. Las comprobaciones de los bloques 1–3 están autorizadas por el usuario.
+- Release pública **0.2.3**, fusionada en main: `6a1ef7a61e3f00f6b14a44588d2dd4a96c5a915b`.
+- [x] PR #11 y #12 fusionados después de CI satisfactorio.
+- [x] CI del commit: ciclo de vida Windows/Linux, preflight/seguridad navegador/backups,
+  retención y stack integrado aprobados. Enlaces en [evidencias](PRODUCTION_EVIDENCE.md).
+- [x] Release [agent-v0.2.3](https://github.com/Porta0922/Monitorv3/releases/tag/agent-v0.2.3)
+  publicada: MSI, ZIP Windows, DEB Debian 12/Ubuntu 22.04/24.04, código y SHA256SUMS.
+  Es un candidato sin firma, no una versión estable aprobada.
+- [x] Piloto Windows actualizado 0.2.2 → **0.2.3** desde GitHub mediante tarea SYSTEM;
+  configuración conservada, servicio Running y una sesión de escritorio activa.
+- [x] Recuperación inicial del 21/11: publicador conectado tras actualización y cola
+  drenada desde más de 2.100 eventos.
+- [x] Instalar supervisor 0.2.4 localmente conservando configuración y sesión.
+  El puerto Docker cerraba AMQP incluso con cliente independiente; recrear solo
+  RabbitMQ conservando volumen recuperó el puerto y el agente reconectó solo.
+- [ ] Observar estabilidad del puerto Docker y del agente 0.2.4; no declarar
+  resuelta definitivamente la recurrencia por una recuperación satisfactoria.
+- [x] Confirmar recepción en API del dashboard: 9 aplicaciones vigentes, última observación
+  21/11 11:23:11 UTC; cola de 1–2 eventos con captura activa.
 
-- [x] Añadir transporte de correo TLS/STARTTLS con errores sanitizados; tres
-  comprobaciones locales aprobadas: cifrado antes de autenticación, rechazo de
-  certificado sin enviar credenciales y rechazo de autenticación sin reintento ni
-  filtración de respuesta. Esto no acredita entrega real.
-- [ ] DevOps: sustituir la contraseña habitual por una contraseña de aplicación
-  autorizada o configurar un relay SMTP; confirmar recepción. TLS funciona pero
-  la autenticación cierra la conexión. No habilitar aún notificaciones periódicas.
-- [x] Escanear cuatro imágenes: servidor y RabbitMQ sin críticos/altos; dashboard
-  anterior con 3 altos; Timescale candidato original con 1 crítico y 197 altos.
-- [x] Construir candidatos corregidos del dashboard y PostgreSQL/Timescale.
-- [x] Reescanear candidatos corregidos: dashboard sin hallazgos; PostgreSQL sin
-  críticos/altos/medios/bajos y con dos hallazgos de severidad no determinada.
-- [ ] Aceptar funcionamiento y clasificar los dos hallazgos restantes antes de desplegar.
-  Docker volvió a responder; ya no es un bloqueo.
-- [x] Recuperación sintética DB/configuración/definiciones RabbitMQ: 5.000 filas
-  comprimidas idénticas, credenciales/políticas conservadas y sesiones web revocadas.
-- [x] Migración sintética PG15/Timescale 2.28.3 → PG17/2.28.3 → PG17/2.32.0
-  conservando las 5.000 filas comprimidas. Alertas HTTPS, rechazo de CA/redirección,
-  detección de login fallido, cooldown y recuperación aprobados.
-- [ ] Reconciliación de mensajes RabbitMQ y aceptación completa de la aplicación.
-  La recuperación de definiciones no recupera mensajes ni acredita RPO cero.
-  Avance 2026-11-17: transferencia 3.12→4.2, reinicio y reversión de 72 mensajes
-  sintéticos aprobados, incluidos duplicados/DLQ y dos envíos tardíos; cero
-  entregas sin confirmar en el origen. Pendientes combinación con agente/DB/TLS
-  reales, cortes durante transferencia y carga sostenida. Ver RABBITMQ_MIGRATION.
-- [ ] Completar firma de instaladores, aceptación por SO, copia externa y
-  configuración productiva por DevOps. Producción sigue sin aprobación.
+## 1. Seguridad, dependencias e imágenes
 
-Evidencia privada del escaneo inicial:
-`.local-test/security/images/20261116-165944-db7cdaaf`. No publicar archivos privados.
+### Implementado y comprobado dentro del alcance documentado
 
-Los avances históricos se conservan en Git y en [REFACTOR_PROGRESS](REFACTOR_PROGRESS.md). Este documento mantiene una única lista vigente.
+- [x] Identidad individual, transporte autenticado, sesiones, MFA administrativo,
+  roles, CSRF, revocación y auditoría; matriz aislada aprobada.
+- [x] Endurecimiento Nginx/API: rutas, archivos, cabeceras, límites y errores seguros.
+- [x] Actualización reqwest/hyper; eliminación de h2 vulnerable y dependencias sin uso
+  identificadas (env_logger), sustitución dotenv y actualización Lapin.
+- [x] Clasificación de rsa: dependencia opcional sqlx-mysql sin ruta activa PostgreSQL.
+  Reevaluar al cambiar features; no equivale a eliminar el aviso del lockfile.
+- [x] Retirar Redis de Compose y consumidores; volumen anterior conservado.
+- [x] Automatizar escaneo de imágenes y SBOM; escanear candidatos identificados en
+  [IMAGE_SECURITY.md](IMAGE_SECURITY.md). No repetirlos sin cambio de artefacto o base de avisos.
+- [x] Construir candidatos corregidos de servidor, dashboard y PostgreSQL/Timescale;
+  RabbitMQ 4.2 comprobado en entorno aislado.
 
-## Ya completado: conservar, no rehacer
+### Pendiente
 
-- [x] Identidad individual y transporte autenticado de agentes; comprobación aislada.
-- [x] Sesiones, MFA administrativo, roles, CSRF, revocación y auditoría; matriz aislada aprobada.
-- [x] Renovación del dashboard y consistencia de métricas para el alcance UTC del candidato 0.1.
-- [x] Endurecimiento local de Nginx/API, bloqueo de archivos, límites y registros seguros; comprobaciones focalizadas aprobadas.
-- [x] Corrección de avisos npm detectados y build aprobado.
-- [x] Inventario inicial de secretos, dependencias Rust e imágenes; hallazgos pendientes documentados.
+- [ ] Confirmar revocación y revisar uso del token histórico de `usb/agent-config.json`;
+  rotar cualquier credencial antigua activa. No reescribir historial ni hacer force-push.
+- [ ] Evaluar copias históricas accesibles después de la revocación, con decisión del titular.
+- [ ] Clasificar hallazgos restantes de imágenes (incluidos dos sin severidad en PostgreSQL)
+  y registrar responsable, mitigación y vencimiento de excepciones.
+- [ ] Promover imágenes/digests aceptados al despliegue real; completar aceptación de la
+  migración RabbitMQ/PostgreSQL/Timescale antes de modificar datos productivos.
+- [ ] Inventariar y escanear los artefactos finales; retirar otros paquetes solo si se
+  demuestra que no se usan. Los escaneos históricos no certifican binarios nuevos.
 
-Estas marcas acreditan implementación y evidencia acotada, no aceptación productiva del despliegue final.
+## 2. Configuración productiva y alertas — DevOps
 
-## Qué falta programar y qué falta validar
-
-- Privacidad de escritorio: publicada y fusionada en PR #7 (política global/equipo, títulos, aplicaciones, rutas, caché e IPC); pendiente entrega del agente compatible. Ver [DESKTOP_PRIVACY.md](DESKTOP_PRIVACY.md).
-- Operación: copia externa verificable fusionada en PR #8 con rclone e integrada al respaldo programado; configurar destino real y alertas. Los backups cifrados y plantillas de programación ya existen.
-- Imágenes: servidor mínimo fusionado en PR #9 con CI aprobado y cero críticos/altos en el escaneo del 2026-11-13; clasificar 39 medios, 12 bajos y 2 sin severidad determinada, verificar procedencia y preparar las restantes imágenes y migración de servicios.
-- Agente/instaladores: existen recuperación, enrolamiento y scripts de ciclo de vida; quedan paquetes nuevos versionados/firmados, aceptación por SO y correcciones que surjan de esa matriz.
-- Validación final: recuperación integral, carga, aceptación del dashboard y piloto con los artefactos definitivos. No marcan nuevas funcionalidades por sí mismas.
-- Decisiones de DevOps/organización: credenciales, certificados, destino externo, alertas, retención y alcance. Se completan en destino según lo acordado.
-
-Las casillas siguientes combinan implementación y aceptación: abiertas no significa que todo su código falte. No se declara terminado lo que todavía necesita evidencia de entrega.
-
-## Orden sugerido
-
-| Orden | Bloque | Resultado |
-|---|---|---|
-| 1 | Credenciales y dependencias | Riesgos conocidos resueltos y bases compatibles |
-| 2 | Despliegue y alertas | Configuración reproducible y servicios protegidos |
-| 3 | Privacidad, retención y recuperación | Datos acotados y respaldo recuperable |
-| 4 | Agente multiplataforma | Captura, persistencia y recuperación por plataforma |
-| 5 | Instaladores y actualización | Paquetes genéricos verificables y rollback |
-| 6 | Seguridad y aceptación del dashboard | Frontend final comprobado |
-| 7 | Candidato y piloto integrado | Evidencia de todo el sistema sobre una versión concreta |
-| 8 | Publicación y salida gradual | Artefactos aprobados, soporte y reversión |
-
-Primero implementar cada bloque y luego ejecutar sus comprobaciones focalizadas. Reservar la campaña completa para el bloque 7 y repetir después solo lo afectado por cambios. La revocación del token se atiende inmediatamente, pero no bloquea trabajo local independiente. Kubernetes queda como evolución posterior.
-
-## 1. Credenciales y dependencias — en curso
-
-- [ ] Confirmar revocación del token GitHub histórico de usb/agent-config.json y revisar su uso; rotar credenciales antiguas todavía activas. Requiere acceso del titular. Borrar archivos o commits no revoca tokens.
-- [ ] Evaluar limpieza posterior del historial/copias accesibles; no reescribir ni hacer force-push automáticamente. Mantener el repositorio existente como destino acordado.
-- [x] Migrar reqwest/hyper/h2 a una combinación compatible corregida; revisar agente, servidor y probe. Avance 2026-11-06: reqwest 0.12.28 con JSON/native-tls y sin HTTP/2 opcional; h2 0.3.27 eliminado del lockfile. Cargo check Windows y recorrido de identidad/transporte aislado aprobados; Linux aprobado por CI.
-- [x] Identificar features/targets que incorporan rsa y eliminarlo si no se usa, o documentar exposición y tratamiento del aviso sin parche. Clasificación 2026-11-07: presente en Cargo.lock por sqlx-mysql opcional, sin ruta activa en `cargo tree --locked --target all -i rsa` con las funciones PostgreSQL actuales. Aviso conservado, sin excepción; reevaluar al cambiar funciones o artefactos.
-- [x] Resolver dependencias sin mantenimiento y paquete retirado del registro; revisar Windows/Linux. Avance: dotenv sustituido por dotenvy, env_logger sin uso retirado del agente y async-executor actualizado a 1.14.1. Actualización local Lapin 4.12.3 elimina los avisos de mantenimiento; build Windows y AMQPS con RabbitMQ 4.2 aprobados. CI Windows/Linux del PR #4 aprobado.
-
-Seguimiento del CI: fixture Windows corregido y aprobado por el runner; prueba de origen/autenticación local ajustada al contrato vigente y aprobada en Windows. Captura Linux sustituye xcap por XCB para evitar incompatibilidad PipeWire con Ubuntu 22.04; compilación y comprobaciones Linux aprobadas en CI; aceptación con escritorio real pendiente. Auditoría histórica tras esa sustitución: rsa seguía abierto y quedaban dos avisos de mantenimiento (instant y rustls-pemfile). Los dos avisos de mantenimiento se eliminaron posteriormente con Lapin 4.12.3; rsa queda clasificado como dependencia opcional no activa. La prueba de migraciones ahora exige todo el historial embebido, conservando aserciones de integridad de datos.
-- [ ] Actualizar bases y servicios Docker soportados, fijar digests y reconstruir. Revisar compatibilidad y ruta de actualización de RabbitMQ/PostgreSQL/Timescale antes de modificar volúmenes. Conservar RabbitMQ.
-- [ ] Retirar dependencias sin uso demostrado. Redis retirado de Compose base/local/producción y del ensayo; contenedor del piloto detenido y eliminado, volumen conservado. No hay consumidores de Redis en el código.
-- [ ] Generar inventario de componentes/SBOM y volver a escanear artefactos nuevos, registrando herramientas, fecha y versiones.
-
-Imágenes: dashboard candidato con Nginx 1.30.6 fijado por digest, build y comprobación HTTPS aprobados, cero avisos conocidos en su escaneo. Script `scripts/security-images.ps1` genera informes privados y SBOM por ID de imagen, con umbral crítico/alto opcional. RabbitMQ 4.2 candidato también pasó el escaneo y el recorrido aislado de identidad/AMQPS; migración y restantes imágenes siguen pendientes; ver [IMAGE_SECURITY.md](IMAGE_SECURITY.md).
-
-**Cierre:** correcciones comprobadas y hallazgos clasificados. Riesgos críticos/altos explotables bloquean producción; cualquier excepción requiere responsable, mitigación, motivo y vencimiento. No confundir avisos de escáner con explotación demostrada ni análisis con corrección.
-
-## 2. Despliegue seguro y alertas
-
-- [ ] Arrancar perfil productivo completo desde configuración limpia, sin defaults ni secretos en imágenes, paquetes, repositorio o logs.
-- [ ] Verificar HTTPS/AMQPS, confianza, nombres, renovación y vencimiento; comprobar cookies Secure/HttpOnly/SameSite en el destino real.
-- [ ] Verificar redes/firewall y ausencia de bypass del proxy; DB interna, broker limitado a agentes y administración restringida. Redis eliminado.
-- [ ] Comprobar privilegios efectivos de aplicación/migración/mantenimiento DB, permisos de secretos, usuarios de contenedor, capacidades y límites de recursos.
-- [ ] Confirmar debug desactivado, errores sin información sensible y rotación/retención de logs; documentar rotación de secretos y arranque Docker tras reboot.
-- [ ] Configurar alertas externas por abuso, accesos denegados, API/consumidores caídos, cola/DLQ, disco/DB, mantenimiento, backups y certificados; asignar receptor y respuesta.
-- [ ] Ajustar límites para oficinas detrás de NAT. Antes de múltiples réplicas, coordinar límites actualmente mantenidos por instancia.
-
-**Cierre:** despliegue reproducible, inventario de puertos/privilegios y recepción de alertas demostrada. La configuración escrita no acredita su aplicación real.
+- [x] Perfil productivo, secretos por archivo y guía [RELEASE_DEVOPS.md](RELEASE_DEVOPS.md).
+- [x] Transporte SMTP TLS/STARTTLS y comprobaciones de cifrado/rechazo seguro.
+- [x] Alertas HTTPS, rechazo de CA/redirecciones, cooldown y recuperación en ensayo aislado.
+- [ ] Configurar credenciales nuevas, dominio y certificados en destino; arrancar perfil
+  limpio y verificar HTTPS/AMQPS, renovación y cookies Secure/HttpOnly/SameSite.
+- [ ] Verificar firewall, DB interna, acceso administrativo, privilegios DB/contenedores,
+  permisos de secretos, capacidades y límites efectivos; ausencia de bypass del proxy.
+- [ ] Confirmar debug desactivado, rotación de logs/secretos y arranque tras reboot.
+- [ ] Sustituir contraseña habitual de correo por contraseña de aplicación autorizada o
+  relay SMTP; comprobar recepción y asignar responsables. No hay entrega de correo acreditada.
+- [ ] Activar alertas de abuso, API/consumidores, cola/DLQ, disco, mantenimiento, backups
+  y certificados en el destino real.
+- [ ] Ajustar límites para NAT; coordinar límites por instancia antes de múltiples réplicas.
 
 ## 3. Privacidad, retención y recuperación
 
-- [ ] Aprobar mínimos, finalidad y aviso a usuarios. Controles de escritorio implementados en agente/servidor/dashboard: ocultar títulos/rutas, excluir aplicaciones y filtrar frases antes de almacenar y reenviar. Pendientes entrega instalada y aceptación; USB/inventario/osquery tienen alcance separado.
-- [ ] Aprobar retención por actividad, recursos, sesiones, inventario, USB/WiFi, auditoría y seguridad; separar detalle, resumen, archivo y backup.
-- [ ] Resolver compatibilidad Timescale/columnstore/workers y mantenimiento con chunks comprimidos, lotes, concurrencia, reintentos, datos tardíos y deduplicación.
-- [ ] Decidir archivo histórico adicional; si hace falta, implementar cifrado, catálogo, verificación, recuperación y vencimiento.
-- [ ] Automatizar backups cifrados fuera del anfitrión, incluyendo configuración y claves necesarias; fijar RPO/RTO y alertas. Avance: scripts de cifrado age y verificación, manifiesto, permisos y guía [ENCRYPTED_BACKUPS.md](ENCRYPTED_BACKUPS.md); ensayos PostgreSQL y Timescale con 5000 filas y chunks comprimidos aprobados. Transferencia verificable implementada y ensayada con backend local de rclone; pendientes destino externo real, recuperación integral, programación y alertas en destino.
-- [ ] Restaurar en entorno limpio y comprobar identidades, políticas y datos; medir recuperación y verificar límites antes de activar eliminación productiva.
+- [x] Política de escritorio en agente/servidor/dashboard: títulos/rutas, aplicaciones
+  excluidas y filtrado antes de caché/envío; [DESKTOP_PRIVACY.md](DESKTOP_PRIVACY.md).
+- [x] Implementar mantenimiento, backups cifrados age y transferencia verificable rclone.
+- [x] Recuperación sintética de 5.000 filas comprimidas/configuración/definiciones broker;
+  migración PG15 → PG17 y Timescale 2.28.3 → 2.32.0 comprobadas.
+- [x] Transferencia/reinicio/reversión de 72 mensajes sintéticos RabbitMQ, incluidos
+  duplicados, DLQ y envíos tardíos; no acredita recuperar mensajes desde un backup de definiciones.
+- [ ] Aprobar finalidad, aviso a usuarios, mínimos y retención por tipo de dato;
+  aceptar política de privacidad instalada. USB/inventario/osquery tienen alcance separado.
+- [ ] Completar aceptación de mantenimiento con concurrencia, datos tardíos, reintentos y
+  columnstore/workers del destino. CI de retención aprobado no sustituye dimensionamiento real.
+- [ ] Decidir archivo histórico adicional; implementarlo solo si se requiere, con cifrado,
+  catálogo, recuperación y vencimiento.
+- [ ] Configurar destino externo, programación, alertas y RPO/RTO; restaurar integralmente
+  en entorno limpio, medir tiempos y reconciliar mensajes/datos antes de activar borrado.
+- [ ] Aceptar cortes durante transferencia y migración con agente/DB/TLS reales.
 
-**Cierre:** retención acotada y restauración demostrada. Sin copia heredada representativa, comprobar instalación nueva y fixtures sin certificar una migración real.
+## 4. Agente multiplataforma
 
-## 4. Agente y recuperación multiplataforma
+- [x] Implementar supervisor de conexión 0.2.4: comprobar conexión/canal reales,
+  reconstrucción serializada, límite de inicialización y reintentos acotados.
+- [x] Cargo check 0.2.4 y regresión real de canal/conexión cerrados, reconexión
+  concurrente única y publicación confirmada aprobados con broker temporal.
+- [x] Compilar, empaquetar e instalar MSI 0.2.4 sin firma; configuración idéntica,
+  servicio Running y sesión activa. Reconexión tras recuperación de RabbitMQ
+  sin reiniciar agente; cola de más de 1.100 eventos a 1, datos recientes en API.
+- [ ] Publicar el supervisor: conservar los bytes del MSI 0.2.4 entregado; si CI
+  reconstruye el paquete, usar una versión posterior. No sobrescribir artefactos.
 
-- [ ] Fijar versiones Windows/Ubuntu/Debian, incluyendo Ubuntu 22.04 mientras forme parte del alcance; matriz servicio/sesión, X11/Wayland y RDP.
-- [ ] Implementar drenaje adaptativo acotado tras cortes largos, sin pérdida ni snapshots antiguos sobrescribiendo estado actual. Avance local: servicio reenvía lotes de 256 con presupuesto de 5 s y pausa de 250 ms entre lotes completos; confirmaciones SQLite atómicas, IDs/timestamps conservados. Regresión de 5000 eventos en caché y recorrido aislado AMQPS→PostgreSQL aprobados, con 5000 registros y broker vacío; aceptación instalada por destino y carga sostenida pendientes.
-- [ ] Revisar IPC autenticado, claves, origen/replay, secuencias, permisos locales y separación servicio/usuario; vista local solo loopback/lectura.
-- [ ] Completar recuperación SCM/systemd, reboot, parada intencional, shutdown y cierre de procesos/hooks; usuarios limitados, sesiones múltiples y autostart RDP/XDG.
-- [ ] Cubrir desconexión, cola llena/corrupta, disco lleno, permisos, identidades corruptas y escritura interrumpida, sin pérdida silenciosa.
-- [ ] Medir CPU/RAM/disco/red/caché y definir límites; verificar captura al aparecer/desaparecer escritorio/dispositivos, sin actividad ficticia.
+- [x] Drenaje acotado de caché implementado; ensayo de 5.000 eventos AMQPS → PostgreSQL
+  aprobado sin duplicar efectos. IDs conservados y confirmación SQLite atómica.
+- [x] Servicio/sesión separados, IPC autenticado y vista local loopback de lectura.
+- [x] Icono verde/rojo basado en estado real de conexión/canal, consultado por IPC autenticado.
+- [x] Compilación/ciclo de vida CI Windows, Ubuntu 22.04/24.04 y contenedores Linux aprobados.
+- [ ] Aceptación nativa Windows/Ubuntu/Debian: reboot, parada intencional, shutdown,
+  usuario limitado, sesiones múltiples, RDP/XDG, permisos IPC y captura real.
+- [ ] Completar escenarios de disco/cola llena o corrupta, identidad dañada, escritura
+  interrumpida y recuperación sin pérdida silenciosa sobre la entrega final.
+- [x] Medición corta Windows 0.2.4: CPU, RAM, E/S de proceso, disco total, tráfico
+  AMQP y cola; reenvío de 2.739 eventos y corte/recuperación comprobados.
+  Ver [AGENT_PERFORMANCE.md](AGENT_PERFORMANCE.md); CPU baja, RAM pico 171,73 MiB.
+- [ ] Identificar/optimizar auxiliares del pico de memoria (>150 MiB provisional),
+  completar disco físico y red total por proceso si se exige atribución estricta.
+- [ ] Carga sostenida, respuesta de aplicaciones, equipos de pocos recursos y Linux;
+  validar aparición/desaparición de dispositivos/escritorio. Wayland no admite
+  captura global implementada. No certificar ausencia de ralentización con ensayo corto.
+- [ ] Fijar versiones SO soportadas y límites de la matriz antes de declarar soporte estable.
 
-**Cierre:** evidencia nativa de cada plataforma anunciada. Conservar límites visibles de Wayland y alcance UTC; no anunciar captura no implementada ni extrapolar evidencia Windows a Linux.
+## 5. Instaladores y actualización
 
-## 5. Instaladores y actualización segura
+- [x] Generadores MSI/DEB, enrolamiento separado del paquete genérico y versiones coherentes.
+- [x] Reparación Windows real conservando configuración y reanudando servicio/sesión (20/11).
+- [x] Ciclo DEB de instalación/reinstalación/eliminación/purga en contenedores con systemd
+  simulado; no sustituye servicio/escritorio nativos.
+- [x] Publicación automática desde checkout del commit aprobado; hashes y notas incluidos.
+- [x] Actualizador Windows oculto bajo SYSTEM, canales candidate/stable, verificación de
+  origen/HTTPS/SHA256, política protegida y protección contra downgrade; pruebas focalizadas.
+- [x] Corregir en 0.2.3 reintentos previos a instalación; mantener bloqueado el reintento
+  automático de una instalación fallida de la misma versión para revisión de TI.
+- [x] Actualización real Windows desde GitHub mediante tarea SYSTEM aceptada el 21/11;
+  versión 0.2.3, configuración intacta, servicio conectado y sesión activa.
+- [ ] Completar rollback, cortes, sesiones múltiples y conservación detallada de
+  identidad/claves/outbox con artefactos finales; completar casos de
+  journals/WAL/enlaces/purga/archivos ajenos y transición heredada soportada.
+- [ ] Analizar reproducibilidad de paquetes finales y completar manifiestos de procedencia.
+- [ ] Evolución posterior: actualización automática Linux/APT y distribución central a escala.
 
-- [ ] Generar MSI/DEB desde checkout limpio, con versiones, manifiestos, hashes y análisis de reproducibilidad.
-- [ ] Separar paquete genérico y enrolamiento; excluir credenciales del piloto y secretos compartidos.
-- [ ] Configurar firma Windows y confianza del canal Linux; custodiar claves y verificar publicador.
-- [ ] Validar instalación/reparación/actualización, downgrade rechazado, rollback y desinstalación con sesiones activas; conservar identidad/claves/outbox según política.
-- [ ] Cubrir cortes, journals, WAL, symlinks/reparse/hardlinks, purga explícita y archivos ajenos; definir transición de legado únicamente para escenarios soportados.
-- [ ] Preparar canales piloto/estable y notas. Mantener autoactualización remota deshabilitada hasta completar firma, autorización y rollback.
+**Firma aplazada por decisión del usuario:** no bloquea el candidato sin firma autorizado.
+Mantener hashes/canal confiable y aceptación explícita; no afirmar identidad del publicador
+verificada. Firma Windows y confianza Linux siguen como mejora futura documentada en
+[RELEASE_SIGNING.md](RELEASE_SIGNING.md). Serie vigente **0.2.x**; no reutilizar una versión
+para bytes distintos. Procedimiento: [AUTOMATIC_UPDATES.md](AUTOMATIC_UPDATES.md).
 
-**Cierre:** paquetes firmados sin secretos y ciclo de vida comprobado por destino. Seguir [VERSIONING.md](VERSIONING.md); continuar serie 0.1.x durante piloto y versionar cambios del agente distribuido.
+## 6. Dashboard
 
-## 6. Dashboard: seguridad y aceptación
+- [x] Renovación UX, tema oscuro predeterminado, inicio con equipos/conexión y detalle
+  por máquina; Wi-Fi/USB/inventario sin grupo lateral independiente.
+- [x] Lint/build y regresión Chromium de XSS en nombres/títulos/búsquedas/USB/WiFi,
+  con y sin CSP; bloqueo inline comprobado e incorporado al CI.
+- [ ] Completar exportaciones, inspección de assets/almacenamiento sin secretos,
+  cierre/revocación, auditoría y permisos por rol en el destino final.
+- [ ] Aceptación humana: vacíos/atrasos/errores, temas, móvil, teclado y lector de pantalla.
 
-- [x] Corregir lint de AdministrationPage.tsx; reinicio del estado trasladado a la acción de actualizar. Lint global aprobado; aceptación final del frontend sigue en los puntos siguientes.
-- [ ] Probar payloads XSS en títulos, nombres, tablas, búsquedas y exportaciones; verificar escape/CSP en navegador, no solo cabeceras. Avance: Chromium aprobó nombres de equipos/aplicaciones, títulos, búsqueda, USB/WiFi sin ejecutar HTML, tanto sin CSP como con la política productiva; comprobado bloqueo de script inline. Regresión añadida a CI. Exportaciones y aceptación del destino final siguen pendientes.
-- [ ] Inspeccionar assets y almacenamiento: sin API keys, secretos ni sesión accesible a JavaScript; verificar cierre/revocación y errores seguros.
-- [ ] Recorrer roles, datos vacíos/atrasados/error, temas, móvil, teclado y lector de pantalla; completar aceptación humana.
-- [ ] Confirmar que auditoría y pantalla de seguridad no divulgan secretos ni datos fuera del rol; conservar protección de fórmulas CSV.
+## 7. Aceptación final y despliegue gradual
 
-**Cierre:** lint/build y pruebas focalizadas aprobados, aceptación registrada y límites explícitos. No rehacer la renovación UX ya terminada.
+- [x] Publicar código y candidato 0.2.3 tras CI; publicar no equivale a desplegar producción.
+- [x] Conciliar TODO con evidencias y separar implementación de aceptación (21/11).
+- [x] Limpiar compilaciones/cachés/entregas antiguas y TODO duplicados (21/11);
+  conservar configuración, herramientas y evidencias. Ver REPOSITORY_LAYOUT.md.
+- [ ] Definir cantidad de equipos, duración, capacidad, responsables, criterios de éxito,
+  versión/hashes y umbrales de parada/rollback antes del piloto final.
+- [ ] Ensayo integral con artefactos definitivos: agente → RabbitMQ → DB → dashboard,
+  ACK/duplicados/concurrencia/DLQ/eventos inválidos/tardíos, desconexiones y recuperación.
+- [ ] Matriz final de seguridad y dependencias en destino; carga sostenida, crecimiento DB,
+  latencia y recursos. Repetir solo lo afectado por cambios, no toda prueba histórica.
+- [ ] Emitir informe único de defectos/evidencias/riesgos residuales y mantener README,
+  CHANGELOG y runbooks sincronizados con cada entrega.
+- [ ] Aprobar privacidad/retención/riesgos, verificar backup recuperable y soporte;
+  autorizar producción y desplegar gradualmente con alertas comprobadas.
 
-## 7. Candidato y piloto integrado
+## Orden de ejecución restante
 
-- [ ] Fijar commit, versiones/hashes, plataformas, cantidad de equipos, duración, recursos y criterios de éxito antes del ensayo.
-- [ ] Ejecutar CI por destino y despliegue limpio con artefactos del candidato; migraciones nuevas y escenarios heredados representativos disponibles.
-- [ ] Verificar recorrido agente → RabbitMQ → DB → dashboard: ACK tras commit, duplicados, concurrencia, rollback, DLQ, eventos inválidos/tardíos y recuperación.
-- [ ] Ejecutar matriz final de seguridad: roles, MFA, revocación, suplantación, inyección, XSS, CSRF, límites, archivos/permisos, secretos y dependencias.
-- [ ] Medir carga sostenida, latencia, recursos, crecimiento DB, colas y recuperación con parámetros representativos.
-- [ ] Ejecutar piloto Windows/Ubuntu/Debian con desconexiones, reinicios, políticas, actualización, restauración y aceptación UX.
-- [ ] Registrar defectos y regresión focalizada; emitir informe único con evidencia, límites y riesgos residuales.
+1. Publicar el supervisor y observar estabilidad tras la recuperación del puerto
+   Docker. 0.2.4 instalado localmente; GitHub permanece en 0.2.3.
+2. Resolver hallazgos de seguridad/imágenes y revocación; cerrar configuración DevOps.
+3. Completar aceptación nativa por SO y respaldos externos/restauración.
+4. Ejecutar piloto integrado acotado, emitir informe y autorizar despliegue gradual.
 
-**Cierre:** candidato identificado sin bloqueantes abiertos. No presentar resultados históricos como pruebas de binarios o imágenes nuevos.
-
-## 8. Publicación y operación gradual
-
-- [ ] Actualizar README, TODO, CHANGELOG y runbooks de instalación, enrolamiento, rotación, backup/restore, mantenimiento, rollback y soporte.
-- [ ] Preparar publicación del código piloto: revisar diff, secretos, archivos expuestos y CI. Un commit de avance no equivale a release estable ni exige esperar a producción.
-- [ ] Publicar releases con artefactos ensayados, hashes, firmas y notas; excluir material privado.
-- [ ] Preparar corte con backup recuperable, credenciales nuevas, umbrales de parada/rollback, responsables y escalamiento.
-- [ ] Obtener aceptación del alcance, privacidad, retención y riesgos residuales; autorizar distribución productiva.
-- [ ] Desplegar gradualmente, confirmar alertas/soporte y ampliar según criterios.
-
-**Cierre:** versión aprobada con recuperación y responsables definidos. Publicar código, actualizar el piloto y desplegar producción son acciones distintas.
-
-## Decisiones externas
-
-Decisión del usuario (2026-11-07): credenciales y destino real se completarán al desplegar en producción. DevOps dispone de [RELEASE_DEVOPS.md](RELEASE_DEVOPS.md), con rutas y procedimiento. Esto no impide continuar código/validaciones aisladas ni acredita aceptación del destino real.
-
-| Recurso o decisión | Cuándo hace falta |
-|---|---|
-| Confirmación de revocación del token | Inmediato, bloque 1 |
-| Infraestructura, dominio, certificados y redes | Destino real, bloque 2 |
-| Receptor de alertas y responsables | Bloque 2 |
-| Política de privacidad/retención y RPO/RTO | Bloque 3 |
-| Versiones SO y acceso a equipos/VMs | Bloques 4–7 |
-| Certificado Windows y claves Linux | Bloque 5 |
-| Tamaño, duración y capacidad objetivo del piloto | Antes del bloque 7 |
-
-Solicitar cada dato cuando bloquee una acción concreta; avanzar con trabajo independiente y configuración parametrizada mientras tanto.
-
-## Regla de seguimiento
-
-Cerrar cada bloque con implementación, evidencia y lista de pendientes. Indicar si los cambios están locales, publicados o desplegados. No marcar una casilla compuesta por completar solo una parte. Actualizar documentación junto con cambios de comportamiento.
-
-Correspondencia: antiguos 1/2/3 → nuevos 1/2/6; antiguo 5 → nuevo 3; antiguo 6 → nuevo 4; antiguo 7 → nuevo 5; antiguos 4/8 → nuevo 6 y aceptación 7; antiguo 9 → nuevo 7; antiguo 10 → nuevo 8. El archivo histórico conserva el detalle previo.
-
-## Entrega 0.2.1 (2026-11-20)
-
-- Firma aplazada por decisión del responsable; mantener comprobación SHA256 y aceptación explícita sin firma.
-- Publicar código y empaquetar Windows/Debian/Ubuntu; ver RELEASE_0_2_1.md.
-- Aceptación en equipos reales, SMTP autorizado, configuración del destino y revisión final de imágenes siguen pendientes.
-
-## Actualización 0.2.2
-
-- Implementados: publicación automática de paquetes tras CI, actualizador silencioso Windows, estado de conexión autenticado para el icono.
-- Verificar la release efectiva y actualizar una vez el piloto antiguo para activar el nuevo actualizador.
-- Pendientes: aceptación de actualización real bajo SYSTEM, firma de Windows, actualización Linux mediante APT, distribución central para grandes despliegues.
-
-- 0.2.3: corregido el reintento de descargas y preparada la clasificación de todas las releases heredadas 3.x/4.x. Verificar publicación y actualización del piloto desde GitHub.
+No asignar un porcentaje único: implementación, distribución y aceptación productiva
+son estados diferentes. Kubernetes permanece como evolución posterior.
