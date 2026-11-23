@@ -4,69 +4,44 @@ use chrono::Utc;
 use super::TaskContext;
 
 pub fn spawn_reconnector(context: Arc<TaskContext>, rabbitmq_url: String) -> tokio::task::JoinHandle<()> {
-    let publisher_reconnect = context.publisher.clone();
-    let wifi_resend_flag_reconnect = context.wifi_resend_flag.clone();
     tokio::spawn(async move {
         use rand::Rng;
-        let mut retry_count = 0;
-        let base_delay = 2.0; // 2 segundos base
-        let max_delay = 300.0; // máximo 5 minutos (300 segundos)
-
+        let mut failures: u32 = 0;
         loop {
-            let needs_connect = {
-                let state = publisher_reconnect.read().await;
-                state.is_none()
-            };
-
-            if !needs_connect {
-                retry_count = 0; // Reset retry count if connected
-                tokio::time::sleep(Duration::from_secs(10)).await;
-                continue;
-            }
-
-            // Calcular el retraso exponencial
-            let exp_delay = (base_delay * 2f64.powi(retry_count)).min(max_delay);
-            
-            // Jitter: añadir fluctuación aleatoria de ±15% (factor entre 0.85 y 1.15)
-            let final_delay = {
-                let mut rng = rand::thread_rng();
-                let factor: f64 = rng.gen_range(0.85..=1.15);
-                (exp_delay * factor).max(1.0).min(max_delay)
-            };
-
-            tracing::debug!("Intento de reconexión a RabbitMQ #{} en {:.2} segundos...", retry_count + 1, final_delay);
-            tokio::time::sleep(Duration::from_secs_f64(final_delay)).await;
-
-            // Re-verificar si seguimos requiriendo la conexión justo antes del intento
-            let needs_connect = {
-                let state = publisher_reconnect.read().await;
-                state.is_none()
-            };
-
-            if !needs_connect {
-                continue;
-            }
-
-            let reconnect_result = crate::rabbitmq_publisher::RabbitMQPublisher::connect(&crate::network_identity::rabbit_url(&rabbitmq_url))
-                .await
-                .map(Arc::new)
-                .map_err(|e| e.to_string());
-
-            match reconnect_result {
-                Ok(conn) => {
-                    let mut state = publisher_reconnect.write().await;
-                    if state.is_none() {
-                        *state = Some(conn);
-                        tracing::info!("✅ RabbitMQ reconnected successfully");
-                        wifi_resend_flag_reconnect.store(true, std::sync::atomic::Ordering::Relaxed);
-                        retry_count = 0; // Reset retry count upon success
+            // Clone outside the shared lock: network waits must not block collectors.
+            let publisher = { context.publisher.read().await.clone() };
+            let result = match publisher {
+                Some(publisher) => publisher.ensure_connected().await.map_err(|e| e.to_string()),
+                None => match crate::rabbitmq_publisher::RabbitMQPublisher::connect(
+                    &crate::network_identity::rabbit_url(&rabbitmq_url),
+                ).await {
+                    Ok(publisher) => {
+                        let mut slot = context.publisher.write().await;
+                        if slot.is_none() { *slot = Some(Arc::new(publisher)); }
+                        Ok(true)
                     }
+                    Err(error) => Err(error.to_string()),
+                },
+            };
+            let delay = match result {
+                Ok(restored) => {
+                    if restored {
+                        tracing::info!("Connection watchdog restored RabbitMQ; pending events will resume");
+                        context.wifi_resend_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    failures = 0;
+                    Duration::from_secs(5)
                 }
-                Err(e) => {
-                    tracing::warn!("RabbitMQ still unavailable during reconnect attempt: {}", e);
-                    retry_count += 1;
+                Err(_) => {
+                    failures = failures.saturating_add(1);
+                    // Do not log broker credentials or authentication responses.
+                    tracing::warn!(failures, "Connection watchdog could not restore RabbitMQ; outbox retained");
+                    let base = (2u64.saturating_pow(failures.min(6))).min(60) as f64;
+                    let jitter = rand::thread_rng().gen_range(0.85..=1.15);
+                    Duration::from_secs_f64((base * jitter).clamp(1.0, 60.0))
                 }
-            }
+            };
+            tokio::time::sleep(delay).await;
         }
     })
 }

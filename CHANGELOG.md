@@ -1,3 +1,21 @@
+# 0.2.5 — Publicación del supervisor y piloto reducido
+
+Entrega pública del supervisor comprobado localmente en 0.2.4: reconexión
+serializada, inicialización acotada y reintentos sin ventanas. Incluye mediciones
+de rendimiento, TODO conciliado, limpieza y guía para DevOps. Se usa nueva versión
+para reconstruir los instaladores sin reemplazar los bytes del MSI local 0.2.4.
+Firma aplazada; no declara aprobación productiva ni cierre del pico de memoria.
+
+# 0.2.4 — Supervisor de conexión (piloto local)
+
+El agente comprueba conexión y canal cada 5 segundos, reconstruye el transporte
+cerrado aunque exista el publicador y serializa la recuperación con los envíos.
+Reintentos con espera variable hasta 60 segundos y límite de 20 segundos para
+inicializar conexión/canal; conserva la cola persistente. No reinicia Windows,
+Docker ni el servicio por cada desconexión. Instalado localmente: configuración
+conservada, reconexión automática observada al recuperar el puerto Docker y cola
+drenada. Pendientes publicación y observación prolongada.
+
 # 0.2.3 — Reintento de descargas
 
 Los fallos de consulta/descarga del actualizador se reintentan en la siguiente ejecución; los intentos de instalación fallidos/interrumpidos conservan el bloqueo de seguridad.

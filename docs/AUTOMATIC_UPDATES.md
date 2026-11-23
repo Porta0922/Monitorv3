@@ -72,3 +72,19 @@ Los DEB se publican para instalación administrativa; el mecanismo silencioso
 de esta entrega es para Windows. La distribución automática Linux mediante
 APT firmado sigue pendiente, al igual que la firma organizacional de Windows.
 Ver [firma interna](RELEASE_SIGNING.md), [DevOps](RELEASE_DEVOPS.md) y [TODO](TODO.md).
+
+## Supervisor de conexión — código 0.2.4
+
+El servicio revisa cada 5 segundos el estado real de conexión y canal RabbitMQ,
+aunque ya exista un objeto publicador. Si están cerrados, reconstruye ambos bajo
+el mismo bloqueo utilizado por los envíos. No reemplaza la identidad ni la caché.
+Cada inicialización completa tiene un límite de 20 segundos. Si falla, aplica
+esperas crecientes con variación aleatoria de hasta 60 segundos; al recuperar,
+reanuda la comprobación de 5 segundos y el drenaje existente procesa pendientes.
+
+No reinicia Docker/Windows ni evita fallos de red, permisos o credenciales: si el
+broker sigue inaccesible permanece rojo y conserva los eventos. El icono verde
+acredita transporte disponible, no toda la ingestión. Piloto actualizado localmente a 0.2.4: reconexión y drenaje comprobados sin reiniciar
+el agente después de recuperar RabbitMQ. La release pública sigue en 0.2.3.
+Conservar el MSI local y su hash: para publicar 0.2.4 se deben reutilizar esos bytes;
+si se reconstruye el paquete en CI, asignar una versión posterior.

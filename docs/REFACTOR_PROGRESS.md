@@ -445,3 +445,35 @@ Matriz aislada de sesiones/MFA/roles/CSRF aprobada, 7 pruebas unitarias de confi
 
 Avance publicado en PR #2, commit 59a3842, árbol idéntico al comprobado localmente. Recorrido completo de identidad/transporte aprobado con reqwest nuevo; lint y build dashboard aprobados. Publicación preflight y almacenamiento aprobados en CI. Ciclo de vida Windows detectó un fixture que perdía PSScriptRoot: se reemplazan scriptblocks por copias reales, estado simulado compartido y carpeta con ACL protegida. La prueba requiere administrador porque los permisos son reales; la sesión local no puede asignar propietario Administrators. Validación de esa corrección reservada al runner Windows, sin reducir controles productivos. PR sin fusionar hasta CI satisfactorio; producción y piloto sin actualizar.
 
+
+## 2026-11-21 — Conciliación y recuperación local
+
+TODO reestructurado separando implementación, evidencia aislada, aceptación instalada
+y configuración DevOps. Release 0.2.3 publicada tras CI; actualización automática
+Windows 0.2.2 → 0.2.3 comprobada conservando configuración y sesión. Conexión local
+recuperada y cola drenándose tras reinicio de broker y actualización; causa raíz
+no aislada. Firma aplazada; producción no aprobada. Ver PRODUCTION_EVIDENCE.md.
+
+## 2026-11-21 — Limpieza del workspace
+
+Retirados 25,96 GiB de compilaciones, cachés y paquetes antiguos sin procesos activos;
+conservadas configuración y evidencias útiles. Eliminados TODO históricos del árbol
+activo y settings vacío; historial Git intacto. Inventario y límites en
+REPOSITORY_LAYOUT.md. No se recompiló ni reinstaló el piloto por esta limpieza.
+
+## 2026-11-21 — Supervisor de conexión 0.2.4
+
+Revisión cada 5 s de conexión/canal, reconstrucción serializada con envíos,
+límite de inicialización 20 s y backoff con jitter hasta 60 s. Prueba real de
+canal/conexión cerrados y recuperación concurrente aprobada. MSI instalado
+localmente conservando configuración y sesión. Puerto Docker devolvía EOF AMQP;
+recreación exclusiva de RabbitMQ preservando volumen recuperó el puerto, luego
+el agente reconectó sin reinicio y drenó más de 1.100 eventos hasta 1. Release
+pública aún 0.2.3; publicación y observación prolongada pendientes.
+
+## 2026-11-22 — Medición de rendimiento instalada
+
+Añadidos medidor PowerShell y resumen Python. Captura válida con CPU fraccionaria
+corregida, memoria, E/S, AMQP y cola; informe AGENT_PERFORMANCE.md. CPU baja en
+Windows, pico combinado de memoria por revisar; corte/arranque recuperado y piloto
+conectado al cerrar. No se modificó ni versionó de nuevo el agente por instrumentación.
